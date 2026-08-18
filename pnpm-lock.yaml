@@ -8,6 +8,18 @@ importers:
 
   .: {}
 
+  packages/bundle-icomposer-workbench:
+    dependencies:
+      '@icomposer/plugin-workbench-test':
+        specifier: file:../plugin-workbench-test
+        version: link:../plugin-workbench-test
+
+  packages/plugin-workbench-test:
+    devDependencies:
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/workbench-contracts:
     dependencies:
       zod:

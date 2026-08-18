@@ -2,6 +2,7 @@ node_modules/
 dist/
 target/
 coverage/
+.dsh-home/
 *.log
 .DS_Store
 .env*

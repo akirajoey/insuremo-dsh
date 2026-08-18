@@ -39,7 +39,7 @@ pnpm test
 ```
 
 `pnpm check` validates the local Harness commit and the Node/pnpm versions
-against `compatibility.json`. `pnpm typecheck` checks all TypeScript contract
+against `compatibility.json`. `pnpm typecheck` checks all TypeScript package
 sources. `pnpm test` generates and checks the contract JSON Schema artifacts.
 
 To generate schemas directly:
@@ -53,12 +53,34 @@ The generated files are written to
 are intentionally ignored by Git; rerun the generation command after a clean
 install.
 
+## Phase 1 profile smoke
+
+The profile setup stays isolated from the real `~/.dsh`. By default it writes
+to `.dsh-home/`; set `DSH_HOME` to another isolated directory when needed.
+The setup script copies the source profile, rewrites its local bundle dependency
+for the selected repository, and runs `pnpm install` in the profile directory.
+
+```sh
+pnpm run setup-profile
+cd ../deepseek-harness
+DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dump-config
+```
+
+The composed dump should contain the `workbench-test` row from
+`@icomposer/bundle-workbench`. The setup script refuses to target the real
+`~/.dsh` path.
+
 ## Workspace layout
 
 ```text
 packages/
-└── workbench-contracts/   # Workbench API v0 types and runtime schemas
+├── workbench-contracts/       # Workbench API v0 types and runtime schemas
+├── plugin-workbench-test/     # Host-only Service Definition/provider smoke plugin
+└── bundle-icomposer-workbench/ # Profile patch layer for the smoke plugin
+profiles/
+└── icomposer-web/             # Source profile manifest and empty user patch
 scripts/
-└── check-compatibility.mjs
+├── check-compatibility.mjs
+└── setup-profile.mjs
 compatibility.json
 ```

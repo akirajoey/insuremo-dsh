@@ -1,0 +1,3 @@
+- insert:
+    - id: workbench-test
+      name: '@icomposer/plugin-workbench-test'
