@@ -1,0 +1,16 @@
+{
+  "name": "icomposer-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "install": "pnpm install --ignore-scripts",
+    "check": "node scripts/check-compatibility.mjs",
+    "typecheck": "pnpm --filter @icomposer/workbench-contracts run typecheck",
+    "test": "pnpm --filter @icomposer/workbench-contracts run test"
+  }
+}
