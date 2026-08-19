@@ -71,8 +71,8 @@ The composed dump should contain `workbench-test`, `workbench-operation-log`,
 `insuremo-service`, `ui-insuremo-settings`, `ui-insuremo-status`, and
 `ui-workbench-jobs` rows from `@icomposer/bundle-workbench`; the
 `workbench-operation-log` row requires the Harness `storageDomain` service and
-`insuremo-service` requires `subprocess`. The setup script refuses to target
-the real `~/.dsh` path.
+`insuremo-service` requires `subprocess` and the Workbench `operationLog`
+service. The setup script refuses to target the real `~/.dsh` path.
 
 ## Operation evidence layer
 
@@ -141,13 +141,31 @@ authentication, or UI ships in this phase.
 pnpm --filter @icomposer/insuremo-service run test
 ```
 
+## IMO upgrade loop
+
+`ImoUpgradeService` (`ctx.imoUpgrade`) turns the read-only probe into an
+approval-gated, single-instance upgrade closed loop. `requestUpgrade` appends
+an `imo-upgrade` operation record (params digest); the operator decides it
+with the existing operation-log API; `executeUpgrade` refuses to spawn without
+an `approved` record, records pre/post versions, runs
+`imo upgrade [--version X] --yes` plus the read-only smoke battery through
+`ctx.subprocess`, and writes a digest-only receipt back via
+`operationLog.recordResult`. Failures keep the exit code, stderr digest, and an
+explicit restore command; the service never downgrades automatically and never
+runs a real upgrade without explicit operator authorization (tests use fake
+`imo`).
+
+```sh
+pnpm --filter @icomposer/insuremo-service run test
+```
+
 ## Workspace layout
 
 ```text
 packages/
 ├── workbench-contracts/       # Workbench API v0 types and runtime schemas
 ├── plugin-workbench-test/       # Host-only Service Definition/provider smoke plugin
-├── insuremo-service/            # Read-only IMO CLI probe (probe/version/upgrade-check)
+├── insuremo-service/            # IMO CLI read probes + approved upgrade loop
 ├── workbench-operation-log/     # Digest-only operation evidence provider
 ├── ui-insuremo-settings/        # Client Settings > InsureMO placeholder
 ├── ui-insuremo-status/          # Client sidebar InsureMO status placeholder

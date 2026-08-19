@@ -19,6 +19,9 @@ export const OPERATION_RECORDED_EVENT = "operation-log/recorded" as const;
 /** Event emitted after one pending record is durably decided. */
 export const OPERATION_DECIDED_EVENT = "operation-log/decided" as const;
 
+/** Event emitted after an approved record durably gains its execution result. */
+export const OPERATION_RESULT_RECORDED_EVENT = "operation-log/result-recorded" as const;
+
 export const operationDecisionSchema = z.enum(["pending", "approved", "rejected"]);
 export type OperationDecision = z.infer<typeof operationDecisionSchema>;
 
@@ -85,6 +88,18 @@ export interface OperationLogService {
   append(input: OperationRecordInput): Promise<OperationRecord>;
   list(filter?: OperationListFilter): OperationRecord[];
   decide(id: string, approved: boolean, by: string, reason?: string): Promise<OperationRecord>;
+  /**
+   * Durably record an approved operation's execution result exactly once.
+   * The operation must already be `approved`; a pending or rejected record,
+   * a missing record, or a record that already has a result is rejected.
+   * @param id - operation id.
+   * @param input - result digest plus updated artifact references.
+   * @throws {OperationLogError} `missing-operation`, `not-approved`, or `already-has-result`.
+   */
+  recordResult(
+    id: string,
+    input: { resultDigest: string; artifactRefs: string[] },
+  ): Promise<OperationRecord>;
 }
 
 export interface OperationLogRecordedEvent {
@@ -92,6 +107,10 @@ export interface OperationLogRecordedEvent {
 }
 
 export interface OperationLogDecidedEvent {
+  record: OperationRecord;
+}
+
+export interface OperationLogResultRecordedEvent {
   record: OperationRecord;
 }
 
@@ -106,6 +125,10 @@ export interface OperationLogContext {
   emit(
     name: typeof OPERATION_DECIDED_EVENT,
     event: OperationLogDecidedEvent,
+  ): void;
+  emit(
+    name: typeof OPERATION_RESULT_RECORDED_EVENT,
+    event: OperationLogResultRecordedEvent,
   ): void;
   effect(
     setup: () => void | (() => void | Promise<void>),

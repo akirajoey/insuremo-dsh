@@ -3,7 +3,9 @@ export type OperationLogErrorCode =
   | "invalid-record"
   | "missing-operation"
   | "duplicate-operation"
-  | "already-decided";
+  | "already-decided"
+  | "not-approved"
+  | "already-has-result";
 
 export class OperationLogError extends Error {
   constructor(

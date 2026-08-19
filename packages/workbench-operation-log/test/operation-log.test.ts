@@ -10,6 +10,7 @@ import { JsonStorageBackend } from "@deepseek-ai/dsh-storage-json";
 import {
   OPERATION_DECIDED_EVENT,
   OPERATION_RECORDED_EVENT,
+  OPERATION_RESULT_RECORDED_EVENT,
   OperationLogError,
   applyOperationLog,
   type OperationLogService,
@@ -162,6 +163,80 @@ test("a decided operation cannot be decided again", async () => {
   await assert.rejects(
     fixture.service.decide("op-once", false, "bob"),
     (error: unknown) => error instanceof OperationLogError && error.code === "already-decided",
+  );
+});
+
+test("recordResult writes an approved result exactly once and emits result-recorded", async () => {
+  await fixture.service.append({
+    id: "op-result",
+    requestId: "req-result",
+    kind: "imo-upgrade",
+    paramsDigest: "sha256:upgrade",
+    artifactRefs: [],
+  });
+  await fixture.service.decide("op-result", true, "alice");
+
+  const record = await fixture.service.recordResult("op-result", {
+    resultDigest: "sha256:receipt",
+    artifactRefs: ["artifact://receipt/1"],
+  });
+  assert.equal(record.decision, "approved");
+  assert.equal(record.resultDigest, "sha256:receipt");
+  assert.deepEqual(record.artifactRefs, ["artifact://receipt/1"]);
+  assert.equal(fixture.events.at(-1)?.name, OPERATION_RESULT_RECORDED_EVENT);
+});
+
+test("recordResult rejects a duplicate write on an approved operation", async () => {
+  await fixture.service.append({
+    id: "op-result-once",
+    requestId: "req-result-once",
+    kind: "imo-upgrade",
+    paramsDigest: "sha256:upgrade",
+    artifactRefs: [],
+  });
+  await fixture.service.decide("op-result-once", true, "alice");
+  await fixture.service.recordResult("op-result-once", {
+    resultDigest: "sha256:first",
+    artifactRefs: [],
+  });
+
+  await assert.rejects(
+    fixture.service.recordResult("op-result-once", {
+      resultDigest: "sha256:second",
+      artifactRefs: [],
+    }),
+    (error: unknown) => error instanceof OperationLogError && error.code === "already-has-result",
+  );
+});
+
+test("recordResult rejects pending, rejected, and missing operations", async () => {
+  await fixture.service.append({
+    id: "op-pending",
+    requestId: "req-pending",
+    kind: "imo-upgrade",
+    paramsDigest: "sha256:p",
+    artifactRefs: [],
+  });
+  await fixture.service.append({
+    id: "op-rejected",
+    requestId: "req-rejected",
+    kind: "imo-upgrade",
+    paramsDigest: "sha256:r",
+    artifactRefs: [],
+  });
+  await fixture.service.decide("op-rejected", false, "bob", "denied");
+
+  await assert.rejects(
+    fixture.service.recordResult("op-pending", { resultDigest: "sha256:x", artifactRefs: [] }),
+    (error: unknown) => error instanceof OperationLogError && error.code === "not-approved",
+  );
+  await assert.rejects(
+    fixture.service.recordResult("op-rejected", { resultDigest: "sha256:x", artifactRefs: [] }),
+    (error: unknown) => error instanceof OperationLogError && error.code === "not-approved",
+  );
+  await assert.rejects(
+    fixture.service.recordResult("op-missing", { resultDigest: "sha256:x", artifactRefs: [] }),
+    (error: unknown) => error instanceof OperationLogError && error.code === "missing-operation",
   );
 });
 

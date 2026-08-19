@@ -6,6 +6,7 @@ import {
   OPERATION_DECIDED_EVENT,
   OPERATION_LOG_SERVICE,
   OPERATION_RECORDED_EVENT,
+  OPERATION_RESULT_RECORDED_EVENT,
   OPERATION_SCHEMA_VERSION,
   operationId,
   operationRecordInputSchema,
@@ -85,6 +86,37 @@ export class OperationLogProvider implements OperationLogService {
     await this.table.put(operationId(id), record);
     const detached = copyRecord(record);
     this.ctx.emit(OPERATION_DECIDED_EVENT, { record: detached });
+    return detached;
+  }
+
+  async recordResult(
+    id: string,
+    input: { resultDigest: string; artifactRefs: string[] },
+  ): Promise<OperationRecord> {
+    const current = this.table.get(operationId(id));
+    if (current === undefined) {
+      throw new OperationLogError("missing-operation", `operation '${id}' does not exist`);
+    }
+    if (current.decision !== "approved") {
+      throw new OperationLogError(
+        "not-approved",
+        `operation '${id}' is ${current.decision}, only approved operations may record a result`,
+      );
+    }
+    if (current.resultDigest !== undefined) {
+      throw new OperationLogError(
+        "already-has-result",
+        `operation '${id}' already has a recorded result`,
+      );
+    }
+    const record = operationRecordSchema.parse({
+      ...current,
+      resultDigest: input.resultDigest,
+      artifactRefs: input.artifactRefs,
+    });
+    await this.table.put(operationId(id), record);
+    const detached = copyRecord(record);
+    this.ctx.emit(OPERATION_RESULT_RECORDED_EVENT, { record: detached });
     return detached;
   }
 }

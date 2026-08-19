@@ -6,7 +6,13 @@ declare module "@deepseek-ai/cordis" {
 
   export class Context {
     subprocess: import("@deepseek-ai/dsh-subprocess").SubprocessRuntime;
+    operationLog: import("./operation-log-face.ts").OperationLogLike;
     get<T = unknown>(name: string): T | undefined;
+    emit(name: string, payload: unknown): void;
+    plugin(
+      plugin: unknown,
+      config?: unknown,
+    ): { await(): Promise<unknown>; dispose(): Promise<void> };
   }
 }
 
@@ -17,6 +23,7 @@ declare module "@deepseek-ai/schemastery" {
     static object<T extends object>(shape: Record<string, unknown>): z<T>;
     static string(): z<string>;
     static natural(): z<number>;
+    static array<T = unknown>(item: z<T>): z<readonly T[]>;
   }
 
   export default z;
