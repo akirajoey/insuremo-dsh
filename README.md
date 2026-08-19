@@ -134,8 +134,8 @@ pnpm --filter @icomposer/ui-workbench-jobs run test
 child operation routes through Harness `ctx.subprocess` with explicit argv,
 stdio limits, a grace period, and a deadline AbortSignal; failures are returned
 as structured `ImoResult` errors, and raw output is never returned (only
-SHA-256 digests and parsed fields). No upgrade execution, installation guide,
-authentication, or UI ships in this phase.
+SHA-256 digests and parsed fields). Authentication has its own Host-only seam
+below; this probe itself never prepares or stores credentials.
 
 ```sh
 pnpm --filter @icomposer/insuremo-service run test
@@ -176,6 +176,41 @@ are finalized.
 ```sh
 pnpm --filter @icomposer/insuremo-service run test
 ```
+
+## Auth profile and prepare lease
+
+`ctx.imoAuth` is the single Host-only authentication seam. `listProfiles()`
+allowlists and renames only known profile metadata; `defaultProfile()` returns
+only a profile name; and `validate()` returns sanitized status plus a digest.
+No auth command output is forwarded raw.
+
+`prepare({ profile, env })` stores the parsed credential only in a process-memory
+cache and returns an opaque lease. The lease exposes sanitized `view` and cache
+metadata; the access token exists only as the argument to `lease.use(callback)`.
+It is absent from enumerable properties, JSON, inspection, structured clones,
+events, logs, operation records, and error messages. Same profile/environment
+prepares coalesce and reuse until explicit `invalidate()`. A 401 invalidates
+that key for the next explicit prepare; a 403 reports forbidden without
+invalidation or retry. Fiber disposal clears the cache. The `lease.use`
+callback owns responsibility for its secret: returning, logging, or throwing
+it can intentionally leak the token, so callbacks should perform the remote
+call without returning the secret. Login, remote-profile creation, and real
+prepare execution are intentionally outside this card.
+
+```sh
+pnpm --filter @icomposer/insuremo-service run test
+```
+
+### Service module architecture
+
+`packages/insuremo-service/src/index.ts` is a small public barrel and Cordis
+composition boundary. Configuration, subprocess execution, CLI probing,
+upgrades, Skills inventory, and Auth leases live independently in
+`config.ts`, `run.ts`, `cli.ts`, `upgrade.ts`, and `skills.ts`; Auth is a
+controlled submodule under `auth/index.ts` with contracts in `auth/types.ts`,
+URL/allowlist parsing in `auth/sanitize.ts`, opaque leases in `auth/lease.ts`,
+and cache/coalescing in `auth/service.ts`. The operation log is referenced
+only through `operation-log-face.ts`.
 
 ## Workspace layout
 

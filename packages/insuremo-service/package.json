@@ -15,7 +15,7 @@
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json",
-    "test": "TSX_TSCONFIG_PATH=../../tsconfig.base.json node --import tsx --test test/service.test.ts"
+    "test": "TSX_TSCONFIG_PATH=../../tsconfig.base.json node --import tsx --test test/*.test.ts"
   },
   "license": "MIT",
   "peerDependencies": {

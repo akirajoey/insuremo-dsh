@@ -9,6 +9,7 @@ declare module "@deepseek-ai/cordis" {
     operationLog: import("./operation-log-face.ts").OperationLogLike;
     get<T = unknown>(name: string): T | undefined;
     emit(name: string, payload: unknown): void;
+    effect(execute: () => () => void, label?: string): () => Promise<void>;
     plugin(
       plugin: unknown,
       config?: unknown,

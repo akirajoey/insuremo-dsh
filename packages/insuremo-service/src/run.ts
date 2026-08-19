@@ -18,6 +18,8 @@ export type RunFailureCode =
   | "timeout"
   | "cancelled";
 
+export type RunHttpStatus = 401 | 403;
+
 export interface RunFailure {
   readonly code: RunFailureCode;
   readonly message: string;
@@ -25,6 +27,8 @@ export interface RunFailure {
   readonly signal?: string | null;
   readonly stdoutDigest?: string;
   readonly stderrDigest?: string;
+  /** Classification made while raw streams are still local to runCapture. */
+  readonly httpStatus?: RunHttpStatus;
 }
 
 export interface RunSuccess {
@@ -39,6 +43,37 @@ export interface RunSuccess {
 export type RunResult =
   | { readonly ok: true; readonly value: RunSuccess }
   | { readonly ok: false; readonly error: RunFailure };
+
+/** Structured failures exposed by read-only CLI/domain seams. */
+export type ImoCliErrorCode = RunFailureCode | "parse-error";
+
+export interface ImoCliError {
+  readonly code: ImoCliErrorCode;
+  readonly message: string;
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly exitCode?: number | null;
+  readonly signal?: string | null;
+  readonly stdoutDigest?: string;
+  readonly stderrDigest?: string;
+}
+
+export type ImoResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: ImoCliError };
+
+export function mapRunFailure(error: RunFailure, command: string, args: readonly string[]): ImoCliError {
+  return {
+    code: error.code,
+    message: error.message,
+    command,
+    args,
+    ...(error.exitCode === undefined ? {} : { exitCode: error.exitCode }),
+    ...(error.signal === undefined ? {} : { signal: error.signal }),
+    ...(error.stdoutDigest === undefined ? {} : { stdoutDigest: error.stdoutDigest }),
+    ...(error.stderrDigest === undefined ? {} : { stderrDigest: error.stderrDigest }),
+  };
+}
 
 export interface ResolveSuccess {
   readonly executablePath: string;
@@ -88,7 +123,7 @@ export async function resolveWithDeadline(
   try {
     const executablePath = await rt.resolveExecutable(command, undefined, deadlineSignal);
     return { ok: true, value: { executablePath } };
-  } catch (cause: unknown) {
+  } catch {
     return {
       ok: false,
       error: {
@@ -98,7 +133,6 @@ export async function resolveWithDeadline(
           : cancelled()
             ? "IMO CLI probe was cancelled"
             : `IMO CLI executable "${command}" was not found`,
-        ...(cause instanceof Error ? {} : {}),
       },
     };
   } finally {
@@ -146,11 +180,11 @@ export async function runCapture(rt: SubprocessRuntime, options: RunOptions): Pr
       graceMs: GRACE_MS,
       signal: deadlineSignal,
     });
-  } catch (cause: unknown) {
+  } catch {
     cleanup();
     return {
       ok: false,
-      error: { code: "spawn-failed", message: `IMO CLI process could not be started: ${describe(cause)}` },
+      error: { code: "spawn-failed", message: "IMO CLI process could not be started" },
     };
   }
 
@@ -159,30 +193,30 @@ export async function runCapture(rt: SubprocessRuntime, options: RunOptions): Pr
     const stdout = readCollected(handle, "stdout");
     const stderr = readCollected(handle, "stderr");
     if (timedOut() || cancelled()) {
-      return {
-        ok: false,
-        error: {
-          code: timedOut() ? "timeout" : "cancelled",
-          message: timedOut() ? "IMO CLI operation timed out" : "IMO CLI operation was cancelled",
-          exitCode: outcome.exitCode,
-          signal: outcome.signal,
-          stdoutDigest: digestOf(stdout),
-          stderrDigest: digestOf(stderr),
-        },
+      const httpStatus = classifyHttpStatus(stdout.text, stderr.text);
+      const error: RunFailure = {
+        code: timedOut() ? "timeout" : "cancelled",
+        message: timedOut() ? "IMO CLI operation timed out" : "IMO CLI operation was cancelled",
+        exitCode: outcome.exitCode,
+        signal: outcome.signal,
+        stdoutDigest: digestOf(stdout),
+        stderrDigest: digestOf(stderr),
+        ...(httpStatus === undefined ? {} : { httpStatus }),
       };
+      return { ok: false, error };
     }
     if (outcome.exitCode !== 0 || outcome.signal !== null) {
-      return {
-        ok: false,
-        error: {
-          code: "non-zero-exit",
-          message: `IMO CLI exited with code ${outcome.exitCode ?? "signal"}`,
-          exitCode: outcome.exitCode,
-          signal: outcome.signal,
-          stdoutDigest: digestOf(stdout),
-          stderrDigest: digestOf(stderr),
-        },
+      const httpStatus = classifyHttpStatus(stdout.text, stderr.text);
+      const error: RunFailure = {
+        code: "non-zero-exit",
+        message: `IMO CLI exited with code ${outcome.exitCode ?? "signal"}`,
+        exitCode: outcome.exitCode,
+        signal: outcome.signal,
+        stdoutDigest: digestOf(stdout),
+        stderrDigest: digestOf(stderr),
+        ...(httpStatus === undefined ? {} : { httpStatus }),
       };
+      return { ok: false, error };
     }
     return {
       ok: true,
@@ -195,18 +229,30 @@ export async function runCapture(rt: SubprocessRuntime, options: RunOptions): Pr
         exitCode: 0,
       },
     };
-  } catch (cause: unknown) {
+  } catch {
+    if (timedOut() || cancelled()) {
+      return {
+        ok: false,
+        error: {
+          code: timedOut() ? "timeout" : "cancelled",
+          message: timedOut() ? "IMO CLI operation timed out" : "IMO CLI operation was cancelled",
+        },
+      };
+    }
     return {
       ok: false,
-      error: { code: "spawn-failed", message: `IMO CLI process failed: ${describe(cause)}` },
+      error: { code: "spawn-failed", message: "IMO CLI process failed" },
     };
   } finally {
     cleanup();
   }
 }
 
-function describe(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
+function classifyHttpStatus(stdout: string, stderr: string): RunHttpStatus | undefined {
+  const text = `${stdout} ${stderr}`;
+  if (/\b401\b|unauthori[sz]ed|invalid(?:\s+|-)auth|token(?:\s+|-)expired/i.test(text)) return 401;
+  if (/\b403\b|forbidden|permission\s+denied/i.test(text)) return 403;
+  return undefined;
 }
 
 function deadline(timeoutMs: number, parent?: AbortSignal): {
