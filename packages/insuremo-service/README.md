@@ -1,6 +1,6 @@
 # `@icomposer/insuremo-service`
 
-Host-only, read-only IMO CLI capability for the Workbench. `ImoCliService`
+Host-only IMO CLI capability for the Workbench. `ImoCliService`
 provides `ctx.imoCli` with:
 
 - `probe()` — resolve the configured `imo` executable without starting it;
@@ -17,8 +17,9 @@ are returned as structured `ImoResult` errors; raw stdout/stderr is never
 stored or returned.
 
 The read-only `ImoCliService` does not install or upgrade IMO, authenticate,
-call remote APIs, or provide UI. The separate `ImoUpgradeService` below is the
-only side-effecting surface and requires an approved operation record.
+call remote APIs, or provide UI. `ImoUpgradeService` and the Auth actions seam
+below are the only side-effecting surfaces; both require an approved operation
+record.
 
 ## Approved upgrade loop
 
@@ -79,8 +80,10 @@ The Host package keeps domain seams independent of the barrel:
 - `src/cli.ts`, `src/upgrade.ts`, and `src/skills.ts` own their respective
   service contracts and implementations;
 - `src/auth/index.ts` is the controlled Auth domain barrel: `types.ts` holds
-  public contracts, `sanitize.ts` owns allowlists/URL parsing, `lease.ts` owns
-  opaque leases, and `service.ts` owns cache/coalescing/invalidation;
+  lease contracts, `sanitize.ts` owns allowlists/URL parsing, `lease.ts` owns
+  opaque leases, `service.ts` owns cache/coalescing/invalidation, and
+  `environment.ts`/`actions.ts`/`action-types.ts` own the approval-gated Auth
+  write seam;
 - `src/index.ts` is only the public export/context augmentation and plugin
   composition boundary. `operation-log-face.ts` remains the structural
   operation-log dependency and no domain module imports the bundle.
@@ -110,6 +113,22 @@ and in-memory cache metadata. Same-key calls coalesce and reuse until explicit
 `invalidate()`; fiber disposal clears the cache. The `lease.use` callback owns
 responsibility for its secret: returning, logging, or throwing the token can
 still intentionally leak it, which the service cannot prevent. Prefer a
-callback that performs the remote call and does not return the secret. Login
-and remote-profile creation are intentionally not implemented here, and tests
-never invoke real `auth prepare`.
+callback that performs the remote call and does not return the secret.
+
+## Auth actions approval loop
+
+`ImoAuthActionsService` provides `ctx.imoAuthActions` with separate request and
+execute methods for portal login, remote-profile creation, and default-profile
+switching. Each request appends a pending operation record; the existing
+operation-log decision is required before any write command can spawn.
+
+`listEnvironmentIds()` runs `imo complete --type env` and filters strict full
+IDs: segmented alphanumeric IDs contain `_insuremo_`, reject option-like and
+sensitive token/OAuth/cookie/state/secret-like segments, and are replaced per
+source-profile key. `resolveEnvironmentHint()` returns an exact candidate or a
+sanitized not-found/ambiguous result; remote requests accept only resolver-
+confirmed IDs from the same source key. Portal login always uses `--env portal`;
+manual and non-portal requests are rejected. Receipts and action events contain
+only digests, status, exit code, timestamps, and sanitized profile/environment
+metadata. Pending action arguments are process-memory only and are lost on
+restart. No action uses `--insecure`; tests and real smoke never run auth writes.

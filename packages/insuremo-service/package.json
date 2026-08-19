@@ -1,6 +1,6 @@
 {
   "name": "@icomposer/insuremo-service",
-  "description": "Read-only IMO CLI discovery and upgrade-check service",
+  "description": "Host-only IMO CLI probes with approved upgrade and Auth action workflows",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -7,12 +7,14 @@ import type {
 } from "@deepseek-ai/dsh-subprocess";
 import type { OperationLogLike } from "../../src/operation-log-face.ts";
 import {
+  ImoAuthActionsService,
   ImoAuthService,
   ImoCliService,
   ImoSkillsService,
   ImoUpgradeService,
   type Config,
   type ImoAuth,
+  type ImoAuthActions,
   type ImoAuthResult,
   type ImoCli,
   type ImoResult,
@@ -322,6 +324,42 @@ export async function authFixture(
   const auth = ctx.get("imoAuth");
   if (auth === undefined) throw new Error("imoAuth service was not provided");
   return { ctx, auth, io, fiber };
+}
+
+export async function authActionsFixture(
+  io: FakeIo,
+  config: Partial<Config> = {},
+): Promise<{
+  ctx: Context;
+  actions: ImoAuthActions;
+  auth: ImoAuth;
+  io: FakeIo;
+  opLog: ReturnType<typeof fakeOperationLog>;
+  dispose: () => Promise<void>;
+}> {
+  const ctx = new Context();
+  const fake = fakeSubprocess(io);
+  const opLog = fakeOperationLog();
+  ctx.provide("subprocess", fake as never);
+  ctx.provide("operationLog", opLog.api as never);
+  const authFiber = ctx.plugin(ImoAuthService, { command: "imo", timeoutMs: 5_000, ...config });
+  await authFiber.await();
+  const actionsFiber = ctx.plugin(ImoAuthActionsService, { command: "imo", timeoutMs: 5_000, ...config });
+  await actionsFiber.await();
+  const auth = ctx.get("imoAuth");
+  const actions = ctx.get("imoAuthActions");
+  if (auth === undefined || actions === undefined) throw new Error("auth action services were not provided");
+  return {
+    ctx,
+    actions,
+    auth,
+    io,
+    opLog,
+    dispose: async () => {
+      await actionsFiber.dispose();
+      await authFiber.dispose();
+    },
+  };
 }
 
 export async function expectOk<T>(result: ImoResult<T>): Promise<T> {

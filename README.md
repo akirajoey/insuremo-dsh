@@ -194,8 +194,29 @@ that key for the next explicit prepare; a 403 reports forbidden without
 invalidation or retry. Fiber disposal clears the cache. The `lease.use`
 callback owns responsibility for its secret: returning, logging, or throwing
 it can intentionally leak the token, so callbacks should perform the remote
-call without returning the secret. Login, remote-profile creation, and real
-prepare execution are intentionally outside this card.
+call without returning the secret. Login and remote-profile actions are kept on
+the separate approval-gated `ctx.imoAuthActions` seam below.
+
+## Auth actions approval loop
+
+`ctx.imoAuthActions` exposes `requestPortalLogin()`, `requestRemote()`, and
+`requestDefaultSwitch()`, each followed by an existing operation-log approval
+and the matching execute method. Unapproved operations never spawn. Receipts
+contain only action kind/status, exit code, digests, timestamps, and sanitized
+profile/environment identifiers; action events contain only operation ID, kind,
+status, and result digest.
+
+`listEnvironmentIds()` uses `imo complete --type env` and filters strict full
+IDs: segmented alphanumeric IDs must contain `_insuremo_`, cannot begin with
+an option marker, and reject token/OAuth/cookie/state/secret-like segments.
+`resolveEnvironmentHint()` returns an exact candidate or a sanitized
+not-found/ambiguous result; `requestRemote()` accepts only an ID confirmed by
+the same source-profile resolver set. Portal login always sends `--env portal`;
+non-portal and manual flows are rejected with structured errors. No action ever
+adds `--insecure`.
+Pending action arguments are intentionally in-memory only; a process restart
+loses them and requires a new request. Login/remote/default writes are never
+run by tests or real smoke.
 
 ```sh
 pnpm --filter @icomposer/insuremo-service run test
@@ -209,8 +230,9 @@ upgrades, Skills inventory, and Auth leases live independently in
 `config.ts`, `run.ts`, `cli.ts`, `upgrade.ts`, and `skills.ts`; Auth is a
 controlled submodule under `auth/index.ts` with contracts in `auth/types.ts`,
 URL/allowlist parsing in `auth/sanitize.ts`, opaque leases in `auth/lease.ts`,
-and cache/coalescing in `auth/service.ts`. The operation log is referenced
-only through `operation-log-face.ts`.
+cache/coalescing in `auth/service.ts`, and approval actions in
+`auth/environment.ts`/`auth/actions.ts`. The operation log is referenced only
+through `operation-log-face.ts`.
 
 ## Workspace layout
 
