@@ -18,6 +18,7 @@
   "dependencies": {
     "@icomposer/plugin-workbench-test": "file:../plugin-workbench-test",
     "@icomposer/ui-insuremo-settings": "file:../ui-insuremo-settings",
+    "@icomposer/ui-insuremo-status": "file:../ui-insuremo-status",
     "@icomposer/workbench-operation-log": "file:../workbench-operation-log"
   }
 }

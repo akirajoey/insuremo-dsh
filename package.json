@@ -11,8 +11,8 @@
     "install": "pnpm install --ignore-scripts",
     "check": "node scripts/check-compatibility.mjs",
     "setup-profile": "node scripts/setup-profile.mjs",
-    "bundle": "pnpm --filter @icomposer/ui-insuremo-settings run bundle",
-    "bundle:client": "pnpm --filter @icomposer/ui-insuremo-settings run bundle",
+    "bundle": "pnpm --filter @icomposer/ui-insuremo-settings --filter @icomposer/ui-insuremo-status run bundle",
+    "bundle:client": "pnpm --filter @icomposer/ui-insuremo-settings --filter @icomposer/ui-insuremo-status run bundle",
     "typecheck": "pnpm --recursive --if-present run typecheck",
     "test": "pnpm --recursive --if-present run test"
   }

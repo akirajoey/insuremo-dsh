@@ -68,7 +68,8 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 ```
 
 The composed dump should contain `workbench-test`, `workbench-operation-log`,
-and `ui-insuremo-settings` rows from `@icomposer/bundle-workbench`; the
+`ui-insuremo-settings`, and `ui-insuremo-status` rows from
+`@icomposer/bundle-workbench`; the
 `workbench-operation-log` row requires the Harness `storageDomain` service.
 The setup script refuses to target the real `~/.dsh` path.
 
@@ -105,6 +106,15 @@ The browser test uses the Harness production SlotRegistry and
 `@deepseek-ai/dsh-client-test-runtime`; it verifies localized navigation,
 placeholder rendering, and disposal.
 
+`@icomposer/ui-insuremo-status` contributes the static localized badge in the
+sidebar footer (`sidebar.footer.action`). It shows `InsureMO · 未配置` or
+`InsureMO · Not configured` with a warning dot; live environment health and
+interaction are intentionally deferred.
+
+```sh
+pnpm --filter @icomposer/ui-insuremo-status run test
+```
+
 ## Workspace layout
 
 ```text
@@ -113,6 +123,7 @@ packages/
 ├── plugin-workbench-test/       # Host-only Service Definition/provider smoke plugin
 ├── workbench-operation-log/     # Digest-only operation evidence provider
 ├── ui-insuremo-settings/        # Client Settings > InsureMO placeholder
+├── ui-insuremo-status/          # Client sidebar InsureMO status placeholder
 └── bundle-icomposer-workbench/  # Profile patch layer for Workbench plugins
 profiles/
 └── icomposer-web/             # Source profile manifest and empty user patch
