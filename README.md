@@ -159,6 +159,24 @@ runs a real upgrade without explicit operator authorization (tests use fake
 pnpm --filter @icomposer/insuremo-service run test
 ```
 
+## Skills inventory
+
+`ctx.imoSkills` is the read-only bridge for installed InsureMO Skills:
+`list(project|global)` parses `imo skills list --json [-g]`, `configPath()`
+reports the declarative config path plus file existence, and `validate()` checks
+that each reported directory contains `SKILL.md` without discarding healthy
+rows when one is damaged. Raw CLI output stays behind a digest boundary.
+
+This card only supplies the `InsuremoSkillProvider` interface, an internal
+bounded/contained frontmatter reader, and a registration-shaped snapshot
+factory. Wiring into Harness `@deepseek-ai/dsh-skill` is intentionally split into a
+follow-up card after its provider precedence and filesystem catalog contract
+are finalized.
+
+```sh
+pnpm --filter @icomposer/insuremo-service run test
+```
+
 ## Workspace layout
 
 ```text

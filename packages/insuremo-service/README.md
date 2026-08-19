@@ -16,9 +16,9 @@ ambient variables remain governed by the Harness subprocess scrubber. Failures
 are returned as structured `ImoResult` errors; raw stdout/stderr is never
 stored or returned.
 
-The package does not install or upgrade IMO, authenticate, call remote APIs, or
-provide UI. `upgradeCheck()` is the only upgrade-related read in the read-only
-seam.
+The read-only `ImoCliService` does not install or upgrade IMO, authenticate,
+call remote APIs, or provide UI. The separate `ImoUpgradeService` below is the
+only side-effecting surface and requires an approved operation record.
 
 ## Approved upgrade loop
 
@@ -47,3 +47,24 @@ against fake `imo` scripts.
 ```sh
 pnpm --filter @icomposer/insuremo-service run test
 ```
+
+## Read-only Skills inventory
+
+`ImoSkillsService` provides `ctx.imoSkills` with three read-only operations:
+
+- `list('project' | 'global')` runs `imo skills list --json [-g]`, preserving
+  the reported `{ name, description, path }` rows and returning only a
+  stdout digest alongside them;
+- `configPath()` runs `imo skills config path`; a missing config file is a
+  normal `{ exists: false }` result;
+- `validate(scope)` resolves each listed path under the current `homedir()`
+  only, rejects lexical and realpath/symlink escapes before candidate access,
+  and checks `SKILL.md` without aborting the whole inventory when one row is
+  damaged. The result exposes `inventoryComplete` and per-row reasons.
+
+The package also includes an `InsuremoSkillProvider` skeleton, a no-op
+`registerInsuremoSkillProvider()` placeholder, and an internal bounded,
+containment-checked frontmatter reader. Wiring that provider into the Harness
+`@deepseek-ai/dsh-skill` catalog is intentionally a separate follow-up card:
+the catalog's provider precedence and filesystem registration surface require
+more than this inventory-only phase.
