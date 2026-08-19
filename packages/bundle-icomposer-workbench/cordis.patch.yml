@@ -6,6 +6,10 @@
       name: '@icomposer/workbench-operation-log'
       inject: [storageDomain]
 
+    - id: insuremo-service
+      name: '@icomposer/insuremo-service'
+      inject: [subprocess]
+
     - id: ui-insuremo-settings
       name: '@icomposer/ui-insuremo-settings'
 

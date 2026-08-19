@@ -10,6 +10,7 @@
       "@deepseek-ai/cosmokit": ["../deepseek-harness/vendor/cosmokit/src/index.ts"],
       "@deepseek-ai/schemastery": ["../deepseek-harness/vendor/schemastery/src/index.ts"],
       "@deepseek-ai/dsh-invariants": ["../deepseek-harness/packages/runtime-diagnostics/invariants/src/index.ts"],
+      "@deepseek-ai/dsh-subprocess": ["../deepseek-harness/packages/subprocess/subprocess/src/index.ts"],
       "@deepseek-ai/dsh-storage": ["../deepseek-harness/packages/storage/storage/src/index.ts"],
       "@deepseek-ai/dsh-storage-domain": ["../deepseek-harness/packages/storage/storage-domain/src/index.ts"],
       "@deepseek-ai/dsh-storage-json": ["../deepseek-harness/packages/storage/storage-json/src/index.ts"],

@@ -10,6 +10,9 @@ importers:
 
   packages/bundle-icomposer-workbench:
     dependencies:
+      '@icomposer/insuremo-service':
+        specifier: file:../insuremo-service
+        version: link:../insuremo-service
       '@icomposer/plugin-workbench-test':
         specifier: file:../plugin-workbench-test
         version: link:../plugin-workbench-test
@@ -25,6 +28,18 @@ importers:
       '@icomposer/workbench-operation-log':
         specifier: file:../workbench-operation-log
         version: link:../workbench-operation-log
+
+  packages/insuremo-service:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.22.4
+        version: 4.23.12
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/plugin-workbench-test:
     devDependencies:

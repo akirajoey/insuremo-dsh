@@ -68,10 +68,11 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 ```
 
 The composed dump should contain `workbench-test`, `workbench-operation-log`,
-`ui-insuremo-settings`, `ui-insuremo-status`, and `ui-workbench-jobs` rows from
-`@icomposer/bundle-workbench`; the
-`workbench-operation-log` row requires the Harness `storageDomain` service.
-The setup script refuses to target the real `~/.dsh` path.
+`insuremo-service`, `ui-insuremo-settings`, `ui-insuremo-status`, and
+`ui-workbench-jobs` rows from `@icomposer/bundle-workbench`; the
+`workbench-operation-log` row requires the Harness `storageDomain` service and
+`insuremo-service` requires `subprocess`. The setup script refuses to target
+the real `~/.dsh` path.
 
 ## Operation evidence layer
 
@@ -125,12 +126,28 @@ node props and keeps the row read-only.
 pnpm --filter @icomposer/ui-workbench-jobs run test
 ```
 
+## IMO CLI probe
+
+`@icomposer/insuremo-service` is the Host-only, read-only seam for the IMO CLI.
+`ImoCliService` provides `ctx.imoCli` with `probe()`, `version()` (runs
+`imo --version`), and `upgradeCheck()` (runs `imo upgrade --check`). Every
+child operation routes through Harness `ctx.subprocess` with explicit argv,
+stdio limits, a grace period, and a deadline AbortSignal; failures are returned
+as structured `ImoResult` errors, and raw output is never returned (only
+SHA-256 digests and parsed fields). No upgrade execution, installation guide,
+authentication, or UI ships in this phase.
+
+```sh
+pnpm --filter @icomposer/insuremo-service run test
+```
+
 ## Workspace layout
 
 ```text
 packages/
 ├── workbench-contracts/       # Workbench API v0 types and runtime schemas
 ├── plugin-workbench-test/       # Host-only Service Definition/provider smoke plugin
+├── insuremo-service/            # Read-only IMO CLI probe (probe/version/upgrade-check)
 ├── workbench-operation-log/     # Digest-only operation evidence provider
 ├── ui-insuremo-settings/        # Client Settings > InsureMO placeholder
 ├── ui-insuremo-status/          # Client sidebar InsureMO status placeholder
