@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "noEmit": true,
+    "paths": {
+      "@deepseek-ai/dsh-client-ui-slots": ["src/harness-shims.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/client": ["src/harness-shims.d.ts"],
+      "@deepseek-ai/dsh-client-locale/client": ["src/harness-shims.d.ts"],
+      "@deepseek-ai/dsh-client-ui-conversation/client": ["src/harness-shims.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["src/harness-shims.d.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["lib"]
+}

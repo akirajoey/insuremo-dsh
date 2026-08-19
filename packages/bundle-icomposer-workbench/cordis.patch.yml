@@ -11,3 +11,6 @@
 
     - id: ui-insuremo-status
       name: '@icomposer/ui-insuremo-status'
+
+    - id: ui-workbench-jobs
+      name: '@icomposer/ui-workbench-jobs'

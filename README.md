@@ -68,7 +68,7 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 ```
 
 The composed dump should contain `workbench-test`, `workbench-operation-log`,
-`ui-insuremo-settings`, and `ui-insuremo-status` rows from
+`ui-insuremo-settings`, `ui-insuremo-status`, and `ui-workbench-jobs` rows from
 `@icomposer/bundle-workbench`; the
 `workbench-operation-log` row requires the Harness `storageDomain` service.
 The setup script refuses to target the real `~/.dsh` path.
@@ -115,6 +115,16 @@ interaction are intentionally deferred.
 pnpm --filter @icomposer/ui-insuremo-status run test
 ```
 
+`@icomposer/ui-workbench-jobs` registers the keyed `workbench-job` renderer in
+`conversation.chat.node`. It projects Harness `jobsBySession` `JobView` rows
+through `projectJobView()` without owning mutable job state. The durable
+conversation event/node producer is deferred, so this phase renders explicit
+node props and keeps the row read-only.
+
+```sh
+pnpm --filter @icomposer/ui-workbench-jobs run test
+```
+
 ## Workspace layout
 
 ```text
@@ -124,6 +134,7 @@ packages/
 ├── workbench-operation-log/     # Digest-only operation evidence provider
 ├── ui-insuremo-settings/        # Client Settings > InsureMO placeholder
 ├── ui-insuremo-status/          # Client sidebar InsureMO status placeholder
+├── ui-workbench-jobs/           # Client keyed job conversation node
 └── bundle-icomposer-workbench/  # Profile patch layer for Workbench plugins
 profiles/
 └── icomposer-web/             # Source profile manifest and empty user patch
