@@ -67,10 +67,10 @@ cd ../deepseek-harness
 DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dump-config
 ```
 
-The composed dump should contain both `workbench-test` and
-`workbench-operation-log` rows from `@icomposer/bundle-workbench`; the latter
-requires the Harness `storageDomain` service. The setup script refuses to target
-the real `~/.dsh` path.
+The composed dump should contain `workbench-test`, `workbench-operation-log`,
+and `ui-insuremo-settings` rows from `@icomposer/bundle-workbench`; the
+`workbench-operation-log` row requires the Harness `storageDomain` service.
+The setup script refuses to target the real `~/.dsh` path.
 
 ## Operation evidence layer
 
@@ -88,14 +88,32 @@ The package's focused tests use a temporary JSON backend:
 pnpm --filter @icomposer/workbench-operation-log run test
 ```
 
+## Client plugin development
+
+`@icomposer/ui-insuremo-settings` is the first client-side placeholder. It
+registers the localized `settings.section` slot and builds with Strategy A:
+the package reuses the Harness `clientBundle` tsdown preset. The preset emits
+the Host no-op half and a browser closure factory at `lib/client.js`; React and
+other platform modules remain module-table externals.
+
+```sh
+pnpm --filter @icomposer/ui-insuremo-settings run test
+pnpm bundle
+```
+
+The browser test uses the Harness production SlotRegistry and
+`@deepseek-ai/dsh-client-test-runtime`; it verifies localized navigation,
+placeholder rendering, and disposal.
+
 ## Workspace layout
 
 ```text
 packages/
 ├── workbench-contracts/       # Workbench API v0 types and runtime schemas
-├── plugin-workbench-test/      # Host-only Service Definition/provider smoke plugin
-├── workbench-operation-log/    # Digest-only operation evidence provider
-└── bundle-icomposer-workbench/  # Profile patch layer for Workbench host plugins
+├── plugin-workbench-test/       # Host-only Service Definition/provider smoke plugin
+├── workbench-operation-log/     # Digest-only operation evidence provider
+├── ui-insuremo-settings/        # Client Settings > InsureMO placeholder
+└── bundle-icomposer-workbench/  # Profile patch layer for Workbench plugins
 profiles/
 └── icomposer-web/             # Source profile manifest and empty user patch
 scripts/

@@ -5,3 +5,6 @@
     - id: workbench-operation-log
       name: '@icomposer/workbench-operation-log'
       inject: [storageDomain]
+
+    - id: ui-insuremo-settings
+      name: '@icomposer/ui-insuremo-settings'

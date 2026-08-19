@@ -12,7 +12,17 @@
       "@deepseek-ai/dsh-invariants": ["../deepseek-harness/packages/runtime-diagnostics/invariants/src/index.ts"],
       "@deepseek-ai/dsh-storage": ["../deepseek-harness/packages/storage/storage/src/index.ts"],
       "@deepseek-ai/dsh-storage-domain": ["../deepseek-harness/packages/storage/storage-domain/src/index.ts"],
-      "@deepseek-ai/dsh-storage-json": ["../deepseek-harness/packages/storage/storage-json/src/index.ts"]
+      "@deepseek-ai/dsh-storage-json": ["../deepseek-harness/packages/storage/storage-json/src/index.ts"],
+      "@deepseek-ai/dsh-client-ui-slots": ["../deepseek-harness/packages/client/ui-slots/src/index.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["../deepseek-harness/packages/client/ui-primitives/src/index.ts"],
+      "@deepseek-ai/dsh-client-web-react": ["../deepseek-harness/packages/client/web-react/src/index.ts"],
+      "@deepseek-ai/dsh-client-runtime": ["../deepseek-harness/packages/client/runtime/src/index.ts"],
+      "@deepseek-ai/dsh-client-runtime/client": ["../deepseek-harness/packages/client/runtime/src/client/index.ts"],
+      "@deepseek-ai/dsh-client-locale": ["../deepseek-harness/packages/client/locale/src/index.ts"],
+      "@deepseek-ai/dsh-client-locale/client": ["../deepseek-harness/packages/client/locale/src/client/index.ts"],
+      "@deepseek-ai/dsh-client-ui-settings": ["../deepseek-harness/packages/client/ui-settings/src/index.ts"],
+      "@deepseek-ai/dsh-client-ui-settings/client": ["../deepseek-harness/packages/client/ui-settings/src/client/index.ts"],
+      "@deepseek-ai/dsh-client-test-runtime": ["../deepseek-harness/packages/test-support/client-runtime/src/index.ts"]
     },
     "strict": true,
     "declaration": true,

@@ -1,15 +1,13 @@
-import type { ZodType } from "zod";
-
 declare module "@deepseek-ai/dsh-storage-domain" {
   /** Global singleton declaration: schema plus the value before first write. */
   interface DomainGlobalSpec<G> {
-    readonly schema: ZodType<G>;
+    readonly schema: import("zod").ZodType<G>;
     readonly initial: G;
   }
 
   /** Table declaration with a phantom key type, matching the Harness domain spec. */
   interface DomainTableSpec<K extends string = string, V = unknown> {
-    readonly valueSchema: ZodType<V>;
+    readonly valueSchema: import("zod").ZodType<V>;
     readonly __key?: K;
   }
 
@@ -31,7 +29,7 @@ declare module "@deepseek-ai/dsh-storage-domain" {
     S["global"] extends DomainGlobalSpec<infer G> ? G : never;
 
   function defineDomain<S extends DomainSpec>(spec: S): S;
-  function domainTable<K extends string, V>(schema: ZodType<V>): DomainTableSpec<K, V>;
+  function domainTable<K extends string, V>(schema: import("zod").ZodType<V>): DomainTableSpec<K, V>;
 
   interface DomainGlobal<G> {
     get(): G;
