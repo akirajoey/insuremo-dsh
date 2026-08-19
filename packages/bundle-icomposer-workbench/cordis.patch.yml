@@ -1,3 +1,7 @@
 - insert:
     - id: workbench-test
       name: '@icomposer/plugin-workbench-test'
+
+    - id: workbench-operation-log
+      name: '@icomposer/workbench-operation-log'
+      inject: [storageDomain]

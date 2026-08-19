@@ -40,7 +40,8 @@ pnpm test
 
 `pnpm check` validates the local Harness commit and the Node/pnpm versions
 against `compatibility.json`. `pnpm typecheck` checks all TypeScript package
-sources. `pnpm test` generates and checks the contract JSON Schema artifacts.
+sources. `pnpm test` runs the operation-log storage tests and generates/checks
+the contract JSON Schema artifacts.
 
 To generate schemas directly:
 
@@ -66,17 +67,35 @@ cd ../deepseek-harness
 DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dump-config
 ```
 
-The composed dump should contain the `workbench-test` row from
-`@icomposer/bundle-workbench`. The setup script refuses to target the real
-`~/.dsh` path.
+The composed dump should contain both `workbench-test` and
+`workbench-operation-log` rows from `@icomposer/bundle-workbench`; the latter
+requires the Harness `storageDomain` service. The setup script refuses to target
+the real `~/.dsh` path.
+
+## Operation evidence layer
+
+`@icomposer/workbench-operation-log` is a Host-only storage provider for
+side-effect evidence. It records pending operations and supports the one-way
+`pending → approved|rejected` decision flow. Records contain only digests,
+artifact references, identifiers, and decision metadata — never request
+payloads or credentials. The package owns the `operation/record`,
+`operation/list`, and `operation/decide` v0 contracts and emits recorded/decided
+events after durable JSON-domain writes.
+
+The package's focused tests use a temporary JSON backend:
+
+```sh
+pnpm --filter @icomposer/workbench-operation-log run test
+```
 
 ## Workspace layout
 
 ```text
 packages/
 ├── workbench-contracts/       # Workbench API v0 types and runtime schemas
-├── plugin-workbench-test/     # Host-only Service Definition/provider smoke plugin
-└── bundle-icomposer-workbench/ # Profile patch layer for the smoke plugin
+├── plugin-workbench-test/      # Host-only Service Definition/provider smoke plugin
+├── workbench-operation-log/    # Digest-only operation evidence provider
+└── bundle-icomposer-workbench/  # Profile patch layer for Workbench host plugins
 profiles/
 └── icomposer-web/             # Source profile manifest and empty user patch
 scripts/

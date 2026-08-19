@@ -12,6 +12,6 @@
     "check": "node scripts/check-compatibility.mjs",
     "setup-profile": "node scripts/setup-profile.mjs",
     "typecheck": "pnpm --recursive --if-present run typecheck",
-    "test": "pnpm --filter @icomposer/workbench-contracts run test"
+    "test": "pnpm --recursive --if-present run test"
   }
 }

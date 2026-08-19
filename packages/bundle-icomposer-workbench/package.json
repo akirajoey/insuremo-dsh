@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
-    "@icomposer/plugin-workbench-test": "file:../plugin-workbench-test"
+    "@icomposer/plugin-workbench-test": "file:../plugin-workbench-test",
+    "@icomposer/workbench-operation-log": "file:../workbench-operation-log"
   }
 }

@@ -21,6 +21,9 @@ export const SchemaVersionSchema = schemaVersionSchema;
 export const COMMANDS = {
   systemCapabilities: "system/capabilities",
   workspaceList: "workspace/list",
+  operationRecord: "operation/record",
+  operationList: "operation/list",
+  operationDecide: "operation/decide",
 } as const;
 
 export type WorkbenchCommand = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -78,3 +81,136 @@ export const workspaceListResponseSchema = z
   .strict();
 export type WorkspaceListResponse = z.infer<typeof workspaceListResponseSchema>;
 export const WorkspaceListResponseSchema = workspaceListResponseSchema;
+
+export const OPERATION_DECISIONS = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
+export type OperationDecision = (typeof OPERATION_DECISIONS)[keyof typeof OPERATION_DECISIONS];
+
+export const operationDecisionSchema = z.enum([
+  OPERATION_DECISIONS.pending,
+  OPERATION_DECISIONS.approved,
+  OPERATION_DECISIONS.rejected,
+]);
+export const OperationDecisionSchema = operationDecisionSchema;
+
+/** Operation kinds are intentionally open-ended so new remote actions do not require a protocol bump. */
+export const operationKindSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
+export type OperationKind = z.infer<typeof operationKindSchema>;
+export const OperationKindSchema = operationKindSchema;
+
+const operationTimestampSchema = z.string().datetime({ offset: true });
+const operationDigestSchema = z.string().min(1);
+const operationArtifactRefsSchema = z.array(z.string().min(1));
+
+/** Durable, digest-only evidence record shared by Host and future clients. */
+export const operationRecordSchema = z
+  .object({
+    id: z.string().min(1),
+    requestId: requestIdSchema,
+    kind: operationKindSchema,
+    paramsDigest: operationDigestSchema,
+    artifactRefs: operationArtifactRefsSchema,
+    decision: operationDecisionSchema,
+    decidedBy: z.string().min(1).optional(),
+    decidedAt: operationTimestampSchema.optional(),
+    reason: z.string().min(1).optional(),
+    resultDigest: operationDigestSchema.optional(),
+    schemaVersion: schemaVersionSchema,
+    createdAt: operationTimestampSchema,
+  })
+  .strict()
+  .superRefine((record, refinement) => {
+    const final = record.decision !== OPERATION_DECISIONS.pending;
+    if (final && record.decidedBy === undefined) {
+      refinement.addIssue({ code: z.ZodIssueCode.custom, path: ["decidedBy"], message: "required after decision" });
+    }
+    if (final && record.decidedAt === undefined) {
+      refinement.addIssue({ code: z.ZodIssueCode.custom, path: ["decidedAt"], message: "required after decision" });
+    }
+    if (!final && (record.decidedBy !== undefined || record.decidedAt !== undefined || record.reason !== undefined)) {
+      refinement.addIssue({ code: z.ZodIssueCode.custom, path: ["decision"], message: "pending records cannot carry a decision" });
+    }
+  });
+export type OperationRecord = z.infer<typeof operationRecordSchema>;
+export const OperationRecordSchema = operationRecordSchema;
+
+const operationRecordInputShape = {
+  id: z.string().min(1).optional(),
+  kind: operationKindSchema,
+  paramsDigest: operationDigestSchema,
+  artifactRefs: operationArtifactRefsSchema,
+  resultDigest: operationDigestSchema.optional(),
+  createdAt: operationTimestampSchema.optional(),
+};
+
+/** Request for `operation/record`; the request id is also the operation correlation id. */
+export const operationRecordRequestSchema = z
+  .object({
+    ...requestShape,
+    ...operationRecordInputShape,
+  })
+  .strict();
+export type OperationRecordRequest = z.infer<typeof operationRecordRequestSchema>;
+export const OperationRecordRequestSchema = operationRecordRequestSchema;
+
+export const operationRecordResponseSchema = z
+  .object({
+    ...requestShape,
+    operation: operationRecordSchema,
+  })
+  .strict();
+export type OperationRecordResponse = z.infer<typeof operationRecordResponseSchema>;
+export const OperationRecordResponseSchema = operationRecordResponseSchema;
+
+export const operationListFilterSchema = z
+  .object({
+    requestId: requestIdSchema.optional(),
+    kind: operationKindSchema.optional(),
+    decision: operationDecisionSchema.optional(),
+  })
+  .strict();
+export type OperationListFilter = z.infer<typeof operationListFilterSchema>;
+export const OperationListFilterSchema = operationListFilterSchema;
+
+export const operationListRequestSchema = z
+  .object({
+    ...requestShape,
+    filter: operationListFilterSchema.optional(),
+  })
+  .strict();
+export type OperationListRequest = z.infer<typeof operationListRequestSchema>;
+export const OperationListRequestSchema = operationListRequestSchema;
+
+export const operationListResponseSchema = z
+  .object({
+    ...requestShape,
+    operations: z.array(operationRecordSchema),
+  })
+  .strict();
+export type OperationListResponse = z.infer<typeof operationListResponseSchema>;
+export const OperationListResponseSchema = operationListResponseSchema;
+
+export const operationDecideRequestSchema = z
+  .object({
+    ...requestShape,
+    id: z.string().min(1),
+    approved: z.boolean(),
+    by: z.string().min(1),
+    reason: z.string().min(1).optional(),
+  })
+  .strict();
+export type OperationDecideRequest = z.infer<typeof operationDecideRequestSchema>;
+export const OperationDecideRequestSchema = operationDecideRequestSchema;
+
+export const operationDecideResponseSchema = z
+  .object({
+    ...requestShape,
+    operation: operationRecordSchema,
+  })
+  .strict();
+export type OperationDecideResponse = z.infer<typeof operationDecideResponseSchema>;
+export const OperationDecideResponseSchema = operationDecideResponseSchema;
