@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -277,6 +277,79 @@ const schemas = {
     $id: "https://icomposer.workbench/schemas/workspace-unbind-response.json",
     title: "workspace/unbind response",
     ...objectSchema({ ...requestProperties, workspaceId: { type: "string", minLength: 1 }, deleted: { type: "boolean" } }, ["requestId", "schemaVersion", "workspaceId", "deleted"]),
+  },
+  "icomposer-list-assets-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-list-assets-request.json",
+    title: "icomposer/list-assets request",
+    ...objectSchema({ ...requestProperties, workspaceId: { type: "string", minLength: 1 }, type: { enum: ["api", "function", "batch", "model"] } }, ["requestId", "schemaVersion", "workspaceId"]),
+  },
+  "icomposer-list-assets-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-list-assets-response.json",
+    title: "icomposer/list-assets response",
+    ...objectSchema(
+      {
+        ...requestProperties,
+        catalog: objectSchema(
+          {
+            workspaceId: { type: "string", minLength: 1 },
+            canonicalPath: { type: "string", minLength: 1 },
+            entries: {
+              type: "array",
+              maxItems: 5000,
+              items: objectSchema(
+                {
+                  name: { type: "string", minLength: 1 },
+                  type: { enum: ["api", "function", "batch", "model"] },
+                  metadata: objectSchema(
+                    {
+                      id: { type: "number" },
+                      groupId: { type: "number" },
+                      moduleId: { type: "number" },
+                      version: { type: "number" },
+                      status: { type: "number" },
+                      requestMethod: { type: "number" },
+                      requestType: { type: "number" },
+                      appName: { type: "string" },
+                      md5Value: { type: "string" },
+                      latestUpdateTime: { type: "string", format: "date-time" },
+                      jobName: { type: "string" },
+                      recordUsage: { type: "string" },
+                      sourceEnvironment: { type: "string" },
+                    },
+                    [],
+                  ),
+                  sourcePath: { type: "string", minLength: 1 },
+                  sourceFingerprint: { type: "string", minLength: 1 },
+                  joinStatus: { enum: ["clean", "local-modified", "no-server-md5", "source-missing", "metadata-missing"] },
+                  tenant: { type: "string", minLength: 1 },
+                  group: { type: "string", minLength: 1 },
+                },
+                ["name", "type", "metadata", "joinStatus"],
+              ),
+            },
+            counts: objectSchema(
+              {
+                api: { type: "integer", minimum: 0 },
+                function: { type: "integer", minimum: 0 },
+                batch: { type: "integer", minimum: 0 },
+                model: { type: "integer", minimum: 0 },
+                total: { type: "integer", minimum: 0 },
+              },
+              ["api", "function", "batch", "model", "total"],
+            ),
+            truncated: { type: "boolean" },
+            sections: {
+              type: "object",
+              additionalProperties: objectSchema({ status: { enum: ["ok", "missing", "error"] }, skipped: { type: "integer", minimum: 0 } }, ["status"]),
+            },
+          },
+          ["requestId", "schemaVersion", "workspaceId", "canonicalPath", "entries", "counts", "truncated", "sections"],
+        ),
+      },
+      ["requestId", "schemaVersion", "catalog"],
+    ),
   },
   "operation-record.schema.json": commandSchema(
     "operation-record",

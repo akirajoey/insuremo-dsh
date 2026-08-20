@@ -22,6 +22,7 @@
     "@icomposer/ui-insuremo-status": "file:../ui-insuremo-status",
     "@icomposer/ui-workbench-jobs": "file:../ui-workbench-jobs",
     "@icomposer/workbench-operation-log": "file:../workbench-operation-log",
-    "@icomposer/workspace-binding": "file:../workspace-binding"
+    "@icomposer/workspace-binding": "file:../workspace-binding",
+    "@icomposer/icomposer-catalog": "file:../icomposer-catalog"
   }
 }

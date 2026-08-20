@@ -13,6 +13,8 @@ const baseSchemaFiles = [
   "workspace-bind-response.schema.json",
   "workspace-unbind-request.schema.json",
   "workspace-unbind-response.schema.json",
+  "icomposer-list-assets-request.schema.json",
+  "icomposer-list-assets-response.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -28,7 +30,7 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 13);
+  assert.equal(files.length, 15);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles].sort(),

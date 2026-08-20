@@ -10,6 +10,9 @@ importers:
 
   packages/bundle-icomposer-workbench:
     dependencies:
+      '@icomposer/icomposer-catalog':
+        specifier: file:../icomposer-catalog
+        version: file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)
       '@icomposer/insuremo-service':
         specifier: file:../insuremo-service
         version: file:packages/insuremo-service(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)
@@ -31,6 +34,22 @@ importers:
       '@icomposer/workspace-binding':
         specifier: file:../workspace-binding
         version: link:../workspace-binding
+
+  packages/icomposer-catalog:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.22.4
+        version: 4.23.12
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/insuremo-service:
     dependencies:
@@ -519,6 +538,13 @@ packages:
       '@noble/hashes':
         optional: true
 
+  '@icomposer/icomposer-catalog@file:packages/icomposer-catalog':
+    resolution: {directory: packages/icomposer-catalog, type: directory}
+    peerDependencies:
+      '@deepseek-ai/cordis': '*'
+      '@deepseek-ai/dsh-workspace': '*'
+      '@icomposer/workspace-binding': '*'
+
   '@icomposer/insuremo-service@file:packages/insuremo-service':
     resolution: {directory: packages/insuremo-service, type: directory}
     peerDependencies:
@@ -558,6 +584,14 @@ packages:
       '@deepseek-ai/cordis': '*'
       '@deepseek-ai/dsh-storage': '*'
       '@deepseek-ai/dsh-storage-domain': '*'
+
+  '@icomposer/workspace-binding@file:packages/workspace-binding':
+    resolution: {directory: packages/workspace-binding, type: directory}
+    peerDependencies:
+      '@deepseek-ai/cordis': '*'
+      '@deepseek-ai/dsh-storage-domain': '*'
+      '@deepseek-ai/dsh-workspace': '*'
+      '@icomposer/workbench-contracts': '*'
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
@@ -1900,6 +1934,11 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
+  '@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)':
+    dependencies:
+      '@icomposer/workspace-binding': file:packages/workspace-binding
+      zod: 4.4.3
+
   '@icomposer/insuremo-service@file:packages/insuremo-service(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)':
     dependencies:
       '@icomposer/workbench-operation-log': file:packages/workbench-operation-log
@@ -1918,6 +1957,10 @@ snapshots:
       react: 18.2.0
 
   '@icomposer/workbench-operation-log@file:packages/workbench-operation-log':
+    dependencies:
+      zod: 4.4.3
+
+  '@icomposer/workspace-binding@file:packages/workspace-binding':
     dependencies:
       zod: 4.4.3
 
