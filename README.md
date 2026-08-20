@@ -167,11 +167,21 @@ reports the declarative config path plus file existence, and `validate()` checks
 that each reported directory contains `SKILL.md` without discarding healthy
 rows when one is damaged. Raw CLI output stays behind a digest boundary.
 
-This card only supplies the `InsuremoSkillProvider` interface, an internal
-bounded/contained frontmatter reader, and a registration-shaped snapshot
-factory. Wiring into Harness `@deepseek-ai/dsh-skill` is intentionally split into a
-follow-up card after its provider precedence and filesystem catalog contract
-are finalized.
+The service now registers a real `insuremo` provider into Harness
+`@deepseek-ai/dsh-skill` at plugin apply time. It validates the global IMO
+inventory, emits only healthy kebab-case candidates at rank 450 (project/local
+ranks 100–300 win; IMO wins over generic user-agent/bundled ranks 500/600), and
+loads the canonical `SKILL.md` body only through `get()`. Candidate locators are
+opaque provider-issued identities; every `get()` repeats home-root realpath and
+regular-file checks, rejects forged/escaped/symlinked paths, and never copies
+body content into inventory events, operation records, or list results.
+Frontmatter is bounded to a 64 KiB closing delimiter and complete files to 1 MiB;
+only allowlisted scalar metadata is exposed. Inventory fingerprints establish a
+baseline and invalidate the Harness catalog only when the matching global
+inventory changes. Same-name/path body edits deliberately require the safe
+host-internal `invalidateInsuremoSkillCatalog(ctx)` signal after a successful
+future write action; they are not inferred from the structural fingerprint.
+Provider disposal unregisters it and disables later reads.
 
 ```sh
 pnpm --filter @icomposer/insuremo-service run test

@@ -63,12 +63,23 @@ pnpm --filter @icomposer/insuremo-service run test
   and checks `SKILL.md` without aborting the whole inventory when one row is
   damaged. The result exposes `inventoryComplete` and per-row reasons.
 
-The package also includes an `InsuremoSkillProvider` skeleton, a no-op
-`registerInsuremoSkillProvider()` placeholder, and an internal bounded,
-containment-checked frontmatter reader. Wiring that provider into the Harness
-`@deepseek-ai/dsh-skill` catalog is intentionally a separate follow-up card:
-the catalog's provider precedence and filesystem registration surface require
-more than this inventory-only phase.
+The package also mounts a real `insuremo` provider into Harness
+`@deepseek-ai/dsh-skill` during plugin apply. It uses the global inventory,
+assigns rank 450 (between user-dsh and user-agents), and emits only healthy
+kebab-case candidates with canonical `SKILL.md` paths and directory resource
+bases. The provider accepts only its opaque issued locators, repeats home-root
+realpath/regular-file checks in `get()`, and reads the body on demand only.
+Frontmatter closes within 64 KiB and complete files are capped at 1 MiB;
+invalid YAML, unclosed/oversize files, missing files, and escaped symlinks are
+unloadable without taking healthy candidates out of the catalog. Metadata is a
+small allowlist of scalar fields; names/descriptions remain inventory-owned.
+Inventory fingerprint changes call the real registry invalidator once, while a
+first observation establishes a baseline and avoids list→event→invalidate
+loops. Inventory fingerprints intentionally cover structure (name,
+description, path), not same-path body edits; later approved write actions must
+call the safe host-internal `invalidateInsuremoSkillCatalog(ctx)` signal after a
+successful mutation. Disposal unregisters the provider and stops
+invalidation/loads.
 
 ## Architecture
 
@@ -78,7 +89,9 @@ The Host package keeps domain seams independent of the barrel:
 - `src/run.ts` owns the `ctx.subprocess` runner, deadlines, digests, and
   allowlisted status classification;
 - `src/cli.ts`, `src/upgrade.ts`, and `src/skills.ts` own their respective
-  service contracts and implementations;
+  service contracts and implementations; `src/skill-path.ts` shares the
+  containment resolver and `src/skill-provider.ts` owns real Harness catalog
+  registration and bounded on-demand loading;
 - `src/auth/index.ts` is the controlled Auth domain barrel: `types.ts` holds
   lease contracts, `sanitize.ts` owns allowlists/URL parsing, `lease.ts` owns
   opaque leases, `service.ts` owns cache/coalescing/invalidation, and

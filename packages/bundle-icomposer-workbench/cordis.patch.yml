@@ -8,7 +8,7 @@
 
     - id: insuremo-service
       name: '@icomposer/insuremo-service'
-      inject: [subprocess, operationLog]
+      inject: [subprocess, operationLog, skills]
 
     - id: ui-insuremo-settings
       name: '@icomposer/ui-insuremo-settings'

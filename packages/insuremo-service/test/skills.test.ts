@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createInsuremoSkillProvider } from "../src/index.ts";
+import { InsuremoSkillProvider } from "../src/skill-provider.ts";
 import { expectOk, makeFakeIo, skillsFixture } from "./support/fake-subprocess.ts";
 
 test("skills list defaults to project scope and returns a digest-only inventory", async () => {
@@ -137,20 +137,26 @@ test("skills list emits inventory-updated after completion", async () => {
   }
 });
 
-test("provider skeleton reads SKILL.md frontmatter without catalog registration", async () => {
+test("provider list issues a candidate and get loads bounded frontmatter/body", async () => {
   const root = await mkdtemp(join(tmpdir(), "imo-skills-provider-"));
   const skill = join(root, "alpha");
   await mkdir(skill);
-  await writeFile(join(skill, "SKILL.md"), "---\ntitle: Alpha title\ndescription: Front matter\n---\n# Alpha\n");
+  await writeFile(join(skill, "SKILL.md"), "---\ntitle: Alpha title\ndescription: ignored\n---\n# Alpha\n");
   const io = makeFakeIo({ skillsListJson: JSON.stringify([{ name: "alpha", description: "Alpha", path: skill }]) });
   const fx = await skillsFixture(io, {}, root);
+  const controller = new AbortController();
   try {
-    const provider = createInsuremoSkillProvider(fx.skills);
-    const snapshot = await provider.snapshot("project");
-    assert.equal(provider.id, "insuremo");
-    assert.equal(snapshot.inventoryComplete, true);
-    assert.deepEqual(snapshot.skills[0]?.frontmatter, { title: "Alpha title", description: "Front matter" });
+    const provider = new InsuremoSkillProvider(fx.ctx, { signal: controller.signal, invalidate() {} }, fx.skills, "global");
+    const listed = await provider.list({});
+    assert.equal(Array.isArray(listed), true);
+    if (!Array.isArray(listed)) return;
+    assert.equal(listed[0]?.provider, "insuremo");
+    assert.equal(listed[0]?.path, await realpath(join(skill, "SKILL.md")));
+    const loaded = await provider.get(listed[0]!, {});
+    assert.equal(loaded?.content, "# Alpha\n");
+    assert.deepEqual(loaded?.metadata, { title: "Alpha title" });
   } finally {
+    controller.abort();
     await fx.dispose();
     await rm(root, { recursive: true, force: true });
   }
@@ -205,8 +211,12 @@ test("skills validate rejects a home-contained symlink whose target escapes", as
     const value = await expectOk(await fx.skills.validate("global"));
     assert.equal(value.inventoryComplete, false);
     assert.deepEqual(value.items[0]?.reasons, ["outside-allowed-root"]);
-    const snapshot = await createInsuremoSkillProvider(fx.skills).snapshot("global");
-    assert.deepEqual(snapshot.skills, []);
+    const controller = new AbortController();
+    const provider = new InsuremoSkillProvider(fx.ctx, { signal: controller.signal, invalidate() {} }, fx.skills, "global");
+    const listed = await provider.list({});
+    assert.equal(Array.isArray(listed), false);
+    if (!Array.isArray(listed)) assert.deepEqual(listed.candidates, []);
+    controller.abort();
   } finally {
     await fx.dispose();
     await rm(root, { recursive: true, force: true });
@@ -222,10 +232,16 @@ test("provider omits frontmatter when the closing delimiter is absent", async ()
   const io = makeFakeIo({ skillsListJson: JSON.stringify([{ name: "alpha", description: "Alpha", path: skill }]) });
   const fx = await skillsFixture(io, {}, root);
   try {
-    const snapshot = await createInsuremoSkillProvider(fx.skills).snapshot("project");
-    assert.equal(snapshot.inventoryComplete, true);
-    assert.equal("frontmatter" in (snapshot.skills[0] ?? {}), false);
-    assert.equal(JSON.stringify(snapshot).includes("should-not-appear"), false);
+    const controller = new AbortController();
+    const provider = new InsuremoSkillProvider(fx.ctx, { signal: controller.signal, invalidate() {} }, fx.skills, "project");
+    const listed = await provider.list({});
+    assert.equal(Array.isArray(listed), false);
+    if (!Array.isArray(listed)) {
+      assert.equal(listed.complete, false);
+      const loaded = await provider.get(listed.candidates[0]!, {});
+      assert.equal(loaded, undefined);
+    }
+    controller.abort();
   } finally {
     await fx.dispose();
     await rm(root, { recursive: true, force: true });
@@ -243,11 +259,16 @@ test("provider skips invalid inventory entries and reads only valid entries", as
   ]) });
   const fx = await skillsFixture(io, {}, root);
   try {
-    const snapshot = await createInsuremoSkillProvider(fx.skills).snapshot("global");
-    assert.equal(snapshot.inventoryComplete, false);
-    assert.deepEqual(snapshot.skills.map((item) => item.name), ["valid"]);
-    assert.equal(snapshot.skills[0]?.valid, true);
-    assert.deepEqual(snapshot.skills[0]?.frontmatter, { title: "Valid" });
+    const controller = new AbortController();
+    const provider = new InsuremoSkillProvider(fx.ctx, { signal: controller.signal, invalidate() {} }, fx.skills, "global");
+    const listed = await provider.list({});
+    assert.equal(Array.isArray(listed), false);
+    if (!Array.isArray(listed)) {
+      assert.deepEqual(listed.candidates.map((item) => item.name), ["valid"]);
+      const loaded = await provider.get(listed.candidates[0]!, {});
+      assert.equal(loaded?.content, "");
+    }
+    controller.abort();
   } finally {
     await fx.dispose();
     await rm(root, { recursive: true, force: true });

@@ -8,6 +8,7 @@ declare module "@deepseek-ai/cordis" {
     subprocess: import("@deepseek-ai/dsh-subprocess").SubprocessRuntime;
     operationLog: import("./operation-log-face.ts").OperationLogLike;
     get<T = unknown>(name: string): T | undefined;
+    on(name: string, listener: (payload: unknown) => void): () => void;
     emit(name: string, payload: unknown): void;
     effect(execute: () => () => void, label?: string): () => Promise<void>;
     plugin(
@@ -28,6 +29,10 @@ declare module "@deepseek-ai/schemastery" {
   }
 
   export default z;
+}
+
+declare module "@deepseek-ai/dsh-skill" {
+  export function isSkillName(name: string): boolean;
 }
 
 declare module "@deepseek-ai/dsh-subprocess" {

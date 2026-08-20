@@ -18,9 +18,13 @@
     "test": "TSX_TSCONFIG_PATH=../../tsconfig.base.json node --import tsx --test test/*.test.ts"
   },
   "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.4.2"
+  },
   "peerDependencies": {
     "@icomposer/workbench-operation-log": "*",
     "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-skill": "*",
     "@deepseek-ai/dsh-subprocess": "*",
     "@deepseek-ai/schemastery": "*"
   },
