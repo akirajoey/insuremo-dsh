@@ -10,6 +10,8 @@ export interface Config {
   upgradeTimeoutMs: number;
   /** Read-only smoke commands (argv after the executable) run after an upgrade. */
   smokeCommands: readonly (readonly string[])[];
+  /** Exact HTTPS Git hosts permitted for Skill installs. */
+  allowedGitHosts: readonly string[];
 }
 
 /** Default read-only post-upgrade smoke battery (02 doc 3.2; none writes remote). */
@@ -29,6 +31,7 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.natural().min(1).default(15_000),
   upgradeTimeoutMs: z.natural().min(1).default(180_000),
   smokeCommands: z.array(z.array(z.string())).default(DEFAULT_SMOKE_COMMANDS),
+  allowedGitHosts: z.array(z.string()).default(["github.com"]),
 });
 
 /** Apply schema-mirrored defaults for a partial (loader-supplied) config. */
@@ -38,5 +41,6 @@ export function resolveConfig(config: Partial<Config> = {}): Config {
     timeoutMs: config.timeoutMs ?? 15_000,
     upgradeTimeoutMs: config.upgradeTimeoutMs ?? 180_000,
     smokeCommands: config.smokeCommands ?? DEFAULT_SMOKE_COMMANDS,
+    allowedGitHosts: config.allowedGitHosts ?? ["github.com"],
   };
 }

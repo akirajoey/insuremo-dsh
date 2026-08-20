@@ -126,12 +126,58 @@ The Host package keeps domain seams independent of the barrel:
   opaque leases, `service.ts` owns cache/coalescing/invalidation, and
   `environment.ts`/`actions.ts`/`action-types.ts` own the approval-gated Auth
   write seam;
+- `src/skill-actions/` is the Skills write-action seam: `types.ts` defines the
+  four kinds, `validation.ts` normalizes strict source/agent/argv inputs,
+  `preview.ts` performs read-only previews, `diff.ts` snapshots bounded
+  inventory digests, `finalize.ts` emits the single approved receipt, and
+  `service.ts` owns the approved `ctx.imoSkillActions` closed loop;
 - `src/index.ts` is only the public export/context augmentation and plugin
   composition boundary. `operation-log-face.ts` remains the structural
   operation-log dependency and no domain module imports the bundle.
 
 Auth cache state and lease secrets remain module-owned/private to the Auth
 submodule; `run.ts` never returns raw stdout/stderr on failure.
+
+## Skills write actions
+
+`ctx.imoSkillActions` is the approved write seam for `skill-install`,
+`skill-update`, `skill-remove`, and `skill-activation`. It is mounted by the
+root composition closure once the internal activation controller is live, and
+it never enters the Context object graph. Requests run read-only previews
+first (install `--list`, remove/update inventory snapshots, activation
+revision capture) and only append an operation-log record afterwards; pending
+arguments live only in process memory, so a restart returns
+`missing-pending-input`. Execution is gated by `exists / approved /
+digest-bound / not executed / busy` before any spawn, then a successful run
+diffs the bounded global inventory (name + manifest digest), reconciles or
+preserves activation, and performs one safe catalog invalidation. Only
+global scope is accepted today; project returns `workspace-not-bound` until
+Phase 3. Install never auto-enables a new skill; remove clears stale names;
+update leaves the enabled set untouched; activation uses the captured expected
+revision as a CAS so a concurrent change finalizes a failed receipt. Sources
+are typed (`alias`, HTTPS git with an allowlisted host and stripped
+userinfo/query/hash, strict npm grammar, the five built-in scenarios), agents
+come from the CLI allowlist, `--yes` is appended by the service, and root
+`install --all` / `remove --all` are rejected.
+
+Each approval runs against an in-memory one-shot journal
+(`prepared -> executing -> executed`), published once per external attempt and
+revoked on disposal. After an attempt the immutable receipt is built with its
+digest first, then evidence is recorded; if `recordResult` is temporarily
+unavailable the same receipt is returned with `evidencePending`, and the next
+`execute` retries only the evidence write — zero spawn, zero controller, zero
+invalidation — emitting the event at most once. An indeterminate failure
+returns `execution-outcome-unknown` and is never re-run; once the external
+attempt has started, best-effort recovery (after inventory snapshot, stale
+reconcile for install/remove, safe catalog invalidation) always runs in a
+contained `finally`, so a partial write cannot leave the catalog stale and the
+failed run still records one receipt. The journal is memory-only: a crash
+loses pending arguments and the journal, so an approved-but-unrecorded action
+returns `missing-pending-input` and requires manual reconciliation — this
+seam does not claim cross-process exactly-once. Install receipts carry
+`sourceKind` / `sourceHost?` / `sourceDigest` (a digest over the canonical
+sanitized descriptor, never the raw URL) and non-install receipts carry an
+`actionTargetDigest`; the completion/failure event mirrors the same allowlist.
 
 ## Auth profile and prepare lease
 

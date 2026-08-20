@@ -14,6 +14,7 @@ export const SKILL_ACTIVATION_CHANGED_EVENT = "skills/activation-changed" as con
 const GLOBAL_KEY = "global" as const;
 const MAX_SAFE_REVISION = Number.MAX_SAFE_INTEGER;
 const SERVICE_DISPOSED_MESSAGE = "IMO skill activation service is disposed" as const;
+const activationControllers = new WeakMap<object, SkillActivationController>();
 
 const activationStateSchema = z.object({
   scope: z.literal("global"),
@@ -86,6 +87,12 @@ interface ActivationChangedPayload {
 }
 
 /** Internal lifecycle owner. Its context value is replaced with a frozen read facade in the constructor. */
+export function skillActivationControllerFor(face: ImoSkillActivation | undefined): SkillActivationController | undefined {
+  return face === undefined || (typeof face !== "object" && typeof face !== "function")
+    ? undefined
+    : activationControllers.get(face);
+}
+
 export class ImoSkillActivationService extends Service {
   static inject = ["storageDomain"];
   #runtime: ActivationRuntime;
@@ -94,10 +101,12 @@ export class ImoSkillActivationService extends Service {
     super(ctx, "imoSkillActivation");
     const runtime = new ActivationRuntime(ctx, options.onController);
     this.#runtime = runtime;
-    ctx.set("imoSkillActivation", Object.freeze({
+    const face = Object.freeze({
       ensureInitialized: (installedNames: readonly string[]) => runtime.ensureInitialized(installedNames),
       snapshot: (installedNames: readonly string[]) => runtime.snapshot(installedNames),
-    } satisfies ImoSkillActivation));
+    } satisfies ImoSkillActivation);
+    runtime.setFace(face);
+    ctx.set("imoSkillActivation", face);
     ctx.effect(() => () => runtime.dispose(), "imoSkillActivation.runtime");
     const ownerFiber = (ctx as unknown as { readonly fiber: unknown }).fiber;
     ctx.on("internal/plugin", (fiber) => {
@@ -122,6 +131,7 @@ class ActivationRuntime {
   #readySettled = false;
   #disposed = false;
   #disposePromise: Promise<void> | undefined;
+  #face: ImoSkillActivation | undefined;
 
   constructor(
     private readonly ctx: Context,
@@ -132,6 +142,10 @@ class ActivationRuntime {
       this.#rejectReady = reject;
     });
     this.#ready.catch(() => undefined);
+  }
+
+  setFace(face: ImoSkillActivation): void {
+    this.#face = face;
   }
 
   async init(): Promise<void> {
@@ -160,6 +174,7 @@ class ActivationRuntime {
       const store = new ActivationStore(this.ctx, domain.table("states"), () => this.assertOpen());
       this.#domain = domain;
       this.#store = store;
+      if (this.#face !== undefined) activationControllers.set(this.#face, store);
       this.onController?.(store);
       this.assertOpen();
       this.resolveReady();
@@ -194,6 +209,7 @@ class ActivationRuntime {
   dispose(): Promise<void> {
     if (this.#disposePromise !== undefined) return this.#disposePromise;
     this.#disposed = true;
+    if (this.#face !== undefined) activationControllers.delete(this.#face);
     this.resolveReady();
     this.#disposePromise = this.finishDispose();
     return this.#disposePromise;

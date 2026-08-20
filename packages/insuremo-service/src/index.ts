@@ -6,10 +6,12 @@ import { ImoSkillsService } from "./skills.ts";
 import { ImoSkillActivationService } from "./skill-activation.ts";
 import { mountInsuremoSkillProvider } from "./skill-provider.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
+import { ImoSkillActionsService } from "./skill-actions/service.ts";
 import type { ImoCli } from "./cli.ts";
 import type { ImoUpgrade } from "./upgrade.ts";
 import type { ImoSkills } from "./skills.ts";
 import type { ImoSkillActivation, SkillActivationController } from "./skill-activation.ts";
+import type { ImoSkillActions } from "./skill-actions/types.ts";
 import type { ImoAuth, ImoAuthActions } from "./auth/index.ts";
 import type { OperationLogLike } from "./operation-log-face.ts";
 
@@ -18,6 +20,27 @@ export * from "./cli.ts";
 export * from "./upgrade.ts";
 export * from "./skills.ts";
 export type { ImoSkillActivation, ImoSkillActivationSnapshot } from "./skill-activation.ts";
+export type {
+  ImoSkillActions,
+  SkillActionError,
+  SkillActionEvent,
+  SkillActionExecution,
+  SkillActionInput,
+  SkillActionKind,
+  SkillActionPreview,
+  SkillActionReceipt,
+  SkillActionRequest,
+  SkillActionResult,
+  SkillActionStatus,
+} from "./skill-actions/types.ts";
+export {
+  SKILL_ACTION_COMPLETED_EVENT,
+  SKILL_ACTION_FAILED_EVENT,
+  SKILL_ACTIVATION_KIND,
+  SKILL_INSTALL_KIND,
+  SKILL_REMOVE_KIND,
+  SKILL_UPDATE_KIND,
+} from "./skill-actions/types.ts";
 export { SKILL_ACTIVATION_CHANGED_EVENT, SKILL_ACTIVATION_DOMAIN_NAME } from "./skill-activation.ts";
 export {
   INSUREMO_SKILL_CATALOG_INVALIDATE_EVENT,
@@ -49,6 +72,7 @@ declare module "@deepseek-ai/cordis" {
     imoUpgrade: ImoUpgrade;
     imoSkills: ImoSkills;
     imoSkillActivation: ImoSkillActivation;
+    imoSkillActions: ImoSkillActions;
     imoAuth: ImoAuth;
     imoAuthActions: ImoAuthActions;
     operationLog: OperationLogLike;
@@ -61,12 +85,14 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   ctx.plugin(ImoCliService, merged);
   ctx.plugin(ImoUpgradeService, merged as never);
   ctx.plugin(ImoSkillsService, merged);
-  let activationController: SkillActivationController | undefined;
+  let actionsMounted = false;
   ctx.plugin(ImoSkillActivationService, {
-    onController: (controller: SkillActivationController) => { activationController = controller; },
+    onController: (_controller: SkillActivationController) => {
+      if (actionsMounted) return;
+      actionsMounted = true;
+      ctx.plugin(ImoSkillActionsService, merged as never);
+    },
   });
-  // Future approved action mounts close over this capability; it never enters ctx.
-  void activationController;
   ctx.plugin(ImoAuthService, merged);
   ctx.plugin(ImoAuthActionsService, merged);
   ctx.effect(() => mountInsuremoSkillProvider(ctx), "insuremo-skill-provider");
