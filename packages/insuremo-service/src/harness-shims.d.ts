@@ -9,6 +9,15 @@ declare module "@deepseek-ai/cordis" {
     subprocess: import("@deepseek-ai/dsh-subprocess").SubprocessRuntime;
     storageDomain: import("@deepseek-ai/dsh-storage-domain").DomainFacility;
     operationLog: import("./operation-log-face.ts").OperationLogLike;
+    webServer: {
+      readonly host: string;
+      readonly port: number;
+      register(route: {
+        readonly kind: "exact" | "prefix";
+        readonly path: string;
+        handler(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): void | Promise<void>;
+      }): () => void;
+    };
     get<T = unknown>(name: string): T | undefined;
     set(name: string, value: unknown): void;
     provide(name: string, value: unknown): () => void;

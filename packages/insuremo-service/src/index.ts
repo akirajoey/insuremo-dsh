@@ -4,6 +4,8 @@ import { ImoCliService } from "./cli.ts";
 import { ImoUpgradeService } from "./upgrade.ts";
 import { ImoSkillsService } from "./skills.ts";
 import { ImoSkillActivationService } from "./skill-activation.ts";
+import { ImoOverviewService } from "./overview/service.ts";
+import { mountOverviewRoute } from "./overview/route.ts";
 import { mountInsuremoSkillProvider } from "./skill-provider.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
 import { ImoSkillActionsService } from "./skill-actions/service.ts";
@@ -11,6 +13,7 @@ import type { ImoCli } from "./cli.ts";
 import type { ImoUpgrade } from "./upgrade.ts";
 import type { ImoSkills } from "./skills.ts";
 import type { ImoSkillActivation, SkillActivationController } from "./skill-activation.ts";
+import type { ImoOverview } from "./overview/service.ts";
 import type { ImoSkillActions } from "./skill-actions/types.ts";
 import type { ImoAuth, ImoAuthActions } from "./auth/index.ts";
 import type { OperationLogLike } from "./operation-log-face.ts";
@@ -42,6 +45,9 @@ export {
   SKILL_UPDATE_KIND,
 } from "./skill-actions/types.ts";
 export { SKILL_ACTIVATION_CHANGED_EVENT, SKILL_ACTIVATION_DOMAIN_NAME } from "./skill-activation.ts";
+export type { ImoOverview } from "./overview/service.ts";
+export { OVERVIEW_PATH } from "./overview/service.ts";
+export * from "./overview/types.ts";
 export {
   INSUREMO_SKILL_CATALOG_INVALIDATE_EVENT,
   INSUREMO_SKILL_PROVIDER,
@@ -57,12 +63,12 @@ export type {
 } from "./run.ts";
 
 /** Services required by this Host-only package. */
-export const inject = ["subprocess", "operationLog", "skills", "storageDomain"];
+export const inject = ["subprocess", "operationLog", "skills", "storageDomain", "webServer"];
 
 /** Loader-facing plugin name. */
 export const name = "@icomposer/insuremo-service";
 
-export { ImoCliService, ImoUpgradeService, ImoSkillsService, ImoAuthService, ImoAuthActionsService };
+export { ImoCliService, ImoUpgradeService, ImoSkillsService, ImoAuthService, ImoAuthActionsService, ImoOverviewService };
 
 // Cordis context faces stay declared at the composition boundary so each
 // domain module remains independent of the barrel and there are no cycles.
@@ -73,6 +79,7 @@ declare module "@deepseek-ai/cordis" {
     imoSkills: ImoSkills;
     imoSkillActivation: ImoSkillActivation;
     imoSkillActions: ImoSkillActions;
+    imoOverview: ImoOverview;
     imoAuth: ImoAuth;
     imoAuthActions: ImoAuthActions;
     operationLog: OperationLogLike;
@@ -95,6 +102,8 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   });
   ctx.plugin(ImoAuthService, merged);
   ctx.plugin(ImoAuthActionsService, merged);
+  ctx.plugin(ImoOverviewService, merged as never);
+  ctx.effect(() => mountOverviewRoute(ctx), "insuremo-overview-route");
   ctx.effect(() => mountInsuremoSkillProvider(ctx), "insuremo-skill-provider");
 }
 

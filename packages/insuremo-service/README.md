@@ -131,12 +131,31 @@ The Host package keeps domain seams independent of the barrel:
   `preview.ts` performs read-only previews, `diff.ts` snapshots bounded
   inventory digests, `finalize.ts` emits the single approved receipt, and
   `service.ts` owns the approved `ctx.imoSkillActions` closed loop;
+- `src/overview/` is the read-only Overview/Diagnostics bridge: `types.ts`
+  owns the strict allowlist view, `snapshot.ts` aggregates IMO/auth/skills/
+  activation/operations into per-section statuses, `service.ts` exposes
+  `ctx.imoOverview.snapshot` with coalescing and an optional short TTL, and
+  `route.ts` mounts the web-only same-origin GET bridge;
 - `src/index.ts` is only the public export/context augmentation and plugin
   composition boundary. `operation-log-face.ts` remains the structural
   operation-log dependency and no domain module imports the bundle.
 
 Auth cache state and lease secrets remain module-owned/private to the Auth
 submodule; `run.ts` never returns raw stdout/stderr on failure.
+
+## Read-only overview bridge
+
+`ctx.imoOverview.snapshot(signal?)` aggregates the read-only probes into a
+single strict-allowlist view (`imo`, `auth`, `skills`, `operations`, and
+`diagnostics` sections). Each section is best-effort with a fixed
+`status`/`code`; partial failure never fails the whole snapshot. Concurrent
+calls coalesce onto one in-flight build, and an optional TTL (≤5000 ms, `0`
+disables) caches completed views only for signal-free requests. The web-only
+`GET /api/icomposer-workbench/insuremo/overview` route serves it same-origin
+with `no-store`, `nosniff`, and no CORS; non-GET answers 405 with `Allow:
+GET`, and the route 404s once disposed. It is a read bridge only — the write
+transport (POST/approve/execute) with its CSRF/Origin design is a documented
+Phase 2 risk, not this package.
 
 ## Skills write actions
 

@@ -12,6 +12,8 @@ export interface Config {
   smokeCommands: readonly (readonly string[])[];
   /** Exact HTTPS Git hosts permitted for Skill installs. */
   allowedGitHosts: readonly string[];
+  /** Optional read-only overview snapshot TTL in milliseconds (0 disables; capped at 5000). */
+  overviewTtlMs: number;
 }
 
 /** Default read-only post-upgrade smoke battery (02 doc 3.2; none writes remote). */
@@ -32,6 +34,7 @@ export const Config: z<Config> = z.object({
   upgradeTimeoutMs: z.natural().min(1).default(180_000),
   smokeCommands: z.array(z.array(z.string())).default(DEFAULT_SMOKE_COMMANDS),
   allowedGitHosts: z.array(z.string()).default(["github.com"]),
+  overviewTtlMs: z.natural().min(0).default(0),
 });
 
 /** Apply schema-mirrored defaults for a partial (loader-supplied) config. */
@@ -42,5 +45,6 @@ export function resolveConfig(config: Partial<Config> = {}): Config {
     upgradeTimeoutMs: config.upgradeTimeoutMs ?? 180_000,
     smokeCommands: config.smokeCommands ?? DEFAULT_SMOKE_COMMANDS,
     allowedGitHosts: config.allowedGitHosts ?? ["github.com"],
+    overviewTtlMs: Math.max(0, Math.min(5000, config.overviewTtlMs ?? 0)),
   };
 }
