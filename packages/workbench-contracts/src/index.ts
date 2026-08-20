@@ -21,6 +21,9 @@ export const SchemaVersionSchema = schemaVersionSchema;
 export const COMMANDS = {
   systemCapabilities: "system/capabilities",
   workspaceList: "workspace/list",
+  workspaceInspect: "workspace/inspect",
+  workspaceBind: "workspace/bind",
+  workspaceUnbind: "workspace/unbind",
   operationRecord: "operation/record",
   operationList: "operation/list",
   operationDecide: "operation/decide",
@@ -55,32 +58,8 @@ export const systemCapabilitiesResponseSchema = z
 export type SystemCapabilitiesResponse = z.infer<typeof systemCapabilitiesResponseSchema>;
 export const SystemCapabilitiesResponseSchema = systemCapabilitiesResponseSchema;
 
-export const workspaceListRequestSchema = z.object(requestShape).strict();
-export type WorkspaceListRequest = z.infer<typeof workspaceListRequestSchema>;
-export const WorkspaceListRequestSchema = workspaceListRequestSchema;
-
-export const workspaceSummarySchema = z
-  .object({
-    workspaceId: z.string().min(1),
-    displayName: z.string().min(1),
-    canonicalPath: z.string().min(1),
-    environmentId: z.string().min(1).optional(),
-    tenantCode: z.string().min(1).optional(),
-    authProfile: z.string().min(1).optional(),
-    writeMode: z.enum(["read-only", "read-write"]),
-  })
-  .strict();
-export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
-export const WorkspaceSummarySchema = workspaceSummarySchema;
-
-export const workspaceListResponseSchema = z
-  .object({
-    ...requestShape,
-    workspaces: z.array(workspaceSummarySchema),
-  })
-  .strict();
-export type WorkspaceListResponse = z.infer<typeof workspaceListResponseSchema>;
-export const WorkspaceListResponseSchema = workspaceListResponseSchema;
+// Workspace schemas live in ./workspace.ts; re-export to preserve existing import paths.
+export * from "./workspace.ts";
 
 export const OPERATION_DECISIONS = {
   pending: "pending",

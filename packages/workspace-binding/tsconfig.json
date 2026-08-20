@@ -1,0 +1,31 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@deepseek-ai/cordis": [
+        "src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-workspace": [
+        "src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-storage-domain": [
+        "src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-storage": [
+        "src/harness-shims.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

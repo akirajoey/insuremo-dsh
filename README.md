@@ -244,6 +244,14 @@ cache/coalescing in `auth/service.ts`, and approval actions in
 `auth/environment.ts`/`auth/actions.ts`. The operation log is referenced only
 through `operation-log-face.ts`.
 
+## Phase 3 — Workspace binding (core, local-write)
+
+`@icomposer/workspace-binding` reuses Harness `ctx.workspaceRegistry` (hard inject `[storageDomain, workspaceRegistry]`) and adds a durable overlay `workbench_workspace_binding` v1 (`bindings` table, strict record, `revision>=1`). It never accepts caller paths and never creates/deletes workspaces or source files; `canonicalPath`/`displayName`/`status` are read only from the registry entity.
+
+Frozen `ctx.workspaceBinding` face: `list(signal?)` / `get(workspaceId)` / `bind({workspaceId,environmentId,tenantCode?,authProfile?,writeMode,expectedRevision})` / `unbind({workspaceId,expectedRevision})` — all `Result<T>` with fixed codes (`binding-conflict`, `path-already-bound`, `revision-conflict`, `service-disposed`, …). `bind` validates full InsureMO `environmentId` (`_insuremo_` + sensitive-segment rejection), narrow `tenantCode`/`authProfile`/`writeMode`, and enforces `expectedRevision` CAS, identity immutability, no-op (no bump), and orphan `path-already-bound` fail-safe. `list` follows registry order, includes unbound (`binding:null`) and orphan bindings. Single-host/single-writer; `env`/`tenant` are immutable after first bind; auth truth is verified only when a later remote action prepares a lease.
+
+No browser transport exists yet — binding is local-write only.
+
 ## Workspace layout
 
 ```text

@@ -6,6 +6,10 @@
       name: '@icomposer/workbench-operation-log'
       inject: [storageDomain]
 
+    - id: workspace-binding
+      name: '@icomposer/workspace-binding'
+      inject: [storageDomain, workspaceRegistry]
+
     - id: insuremo-service
       name: '@icomposer/insuremo-service'
       inject: [subprocess, operationLog, skills, storageDomain, webServer]
