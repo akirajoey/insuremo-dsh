@@ -9,7 +9,8 @@
       "@deepseek-ai/cordis": ["src/harness-shims.d.ts"],
       "@deepseek-ai/schemastery": ["src/harness-shims.d.ts"],
       "@deepseek-ai/dsh-subprocess": ["src/harness-shims.d.ts"],
-      "@deepseek-ai/dsh-skill": ["src/harness-shims.d.ts"]
+      "@deepseek-ai/dsh-skill": ["src/harness-shims.d.ts"],
+      "@deepseek-ai/dsh-storage-domain": ["src/harness-shims.d.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"],

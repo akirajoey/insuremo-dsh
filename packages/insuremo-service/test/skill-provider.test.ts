@@ -8,7 +8,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { SkillRegistry } from "@deepseek-ai/dsh-skill";
 import { ImoSkillsService, invalidateInsuremoSkillCatalog, type ImoSkills } from "../src/index.ts";
 import { InsuremoSkillProvider } from "../src/skill-provider.ts";
-import { fakeHandle, fakeSubprocess, makeFakeIo, skillsFixture } from "./support/fake-subprocess.ts";
+import { allowAllSkillActivation, fakeHandle, fakeSubprocess, makeFakeIo, skillsFixture } from "./support/fake-subprocess.ts";
 
 interface CatalogFixture {
   readonly ctx: Context;
@@ -47,6 +47,7 @@ async function catalogFixture(
   process.env.HOME = root;
   const ctx = new Context();
   ctx.provide("subprocess", fakeSubprocess(io) as never);
+  ctx.provide("imoSkillActivation", allowAllSkillActivation());
   const skillsFiber = ctx.plugin(ImoSkillsService, { command: "imo", timeoutMs: 5_000 });
   await skillsFiber.await();
   const registryFiber = ctx.plugin(SkillRegistry, {});

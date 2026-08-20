@@ -81,6 +81,35 @@ call the safe host-internal `invalidateInsuremoSkillCatalog(ctx)` signal after a
 successful mutation. Disposal unregisters the provider and stops
 invalidation/loads.
 
+### Durable activation gate
+
+Installed and enabled are deliberately separate. The first successful global
+inventory adopts the currently valid Harness skill names as enabled, preserving
+the existing 16-skill experience. The durable
+`workbench_imo_skill_activation` v1 domain stores only the global activation
+record (`initialized`, sorted `enabledNames`, monotonic `revision`, and
+`updatedAt`). A later installed name is reported as `disabled` until an
+approval action explicitly enables it; removed enabled names are reported as
+`stale` and can be cleared by reconcile. Activation storage failures are
+fail-closed: the provider exposes no new candidates and reports an incomplete
+observation. Activation changes increment the revision once and emit only
+bounded counts/revision metadata, which drives one catalog invalidation. The
+public `ctx.imoSkillActivation` value is a frozen two-method read facade;
+enable/disable/reconcile stay in an internal composition closure for the
+approval action seam. Both provider `list()` and `get()` take a final
+revision/enabled snapshot after scanning or body loading, so a completed
+disable cannot publish an old candidate. Owner disposal synchronously revokes
+both the read facade and internal controller; late calls return the fixed
+`service-disposed` error, queued work is skipped, in-flight writes drain, and
+the domain opened by the runtime is closed exactly once.
+
+The JSON storage backend is a single-host, single-writer medium for this
+state. Two independent `JsonStorageBackend` instances pointed at the same
+root are unsupported by Harness: there is no cross-process CAS and concurrent
+writers can produce last-writer-wins behavior. The Workbench serializes one
+service instance and uses expected revisions for its approval boundary; it
+does not claim multi-context atomicity or add a second lock layer.
+
 ## Architecture
 
 The Host package keeps domain seams independent of the barrel:

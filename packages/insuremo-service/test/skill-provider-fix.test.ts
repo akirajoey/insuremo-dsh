@@ -11,7 +11,7 @@ import {
   type ImoSkills,
 } from "../src/index.ts";
 import { InsuremoSkillProvider } from "../src/skill-provider.ts";
-import { fakeHandle, fakeSubprocess, makeFakeIo, skillsFixture } from "./support/fake-subprocess.ts";
+import { allowAllSkillActivation, fakeHandle, fakeSubprocess, makeFakeIo, skillsFixture } from "./support/fake-subprocess.ts";
 
 interface Summary {
   readonly name: string;
@@ -53,11 +53,54 @@ function inventory(...rows: readonly unknown[]): string {
   return JSON.stringify(rows);
 }
 
+function activationView(revision: number, enabled: readonly string[]): {
+  initialized: true;
+  installed: readonly string[];
+  enabled: readonly string[];
+  disabled: readonly string[];
+  stale: readonly string[];
+  revision: number;
+} {
+  return {
+    initialized: true,
+    installed: ["alpha"],
+    enabled,
+    disabled: enabled.length === 0 ? ["alpha"] : [],
+    stale: [],
+    revision,
+  };
+}
+
+async function directProvider(root: string, activation: unknown): Promise<{
+  readonly provider: InsuremoSkillProvider;
+  readonly lifecycle: AbortController;
+}> {
+  const directory = await skillRoot(root, "alpha", "# Alpha\n");
+  const ctx = new Context();
+  const lifecycle = new AbortController();
+  const inventoryService = {
+    skillsAllowedRoot: root,
+    validate: async () => ({ ok: true, value: {
+      scope: "global", inventoryComplete: true, checkedAt: "now",
+      items: [{ name: "alpha", description: "Alpha", path: directory, valid: true, reasons: [] }],
+    } }),
+  } as unknown as ImoSkills;
+  const provider = new InsuremoSkillProvider(
+    ctx,
+    { signal: lifecycle.signal, invalidate() {} },
+    inventoryService,
+    "global",
+    activation as never,
+  );
+  return { provider, lifecycle };
+}
+
 async function catalogFixture(io: ReturnType<typeof makeFakeIo>, root: string): Promise<CatalogFixture> {
   const previousHome = process.env.HOME;
   process.env.HOME = root;
   const ctx = new Context();
   ctx.provide("subprocess", fakeSubprocess(io) as never);
+  ctx.provide("imoSkillActivation", allowAllSkillActivation());
   const skillsFiber = ctx.plugin(ImoSkillsService, { command: "imo", timeoutMs: 5_000 });
   await skillsFiber.await();
   const registryFiber = ctx.plugin(SkillRegistry, {});
@@ -107,7 +150,7 @@ test("provider complete stays false for invalid rows even when validation claims
         { name: "broken", description: "Broken", path: join(root, "missing"), valid: false, reasons: ["missing-directory"] },
       ],
     } }),
-  } as unknown as ImoSkills, "global");
+  } as unknown as ImoSkills, "global", allowAllSkillActivation());
   try {
     const listed = await provider.list({});
     assert.equal(Array.isArray(listed), false);
@@ -130,7 +173,7 @@ test("provider option abort races an uncooperative validate and ignores its late
   let invalidations = 0;
   const provider = new InsuremoSkillProvider(ctx, { signal: new AbortController().signal, invalidate: () => { invalidations += 1; } }, {
     skillsAllowedRoot: root, validate: () => validation,
-  } as unknown as ImoSkills, "global");
+  } as unknown as ImoSkills, "global", allowAllSkillActivation());
   try {
     const started = Date.now();
     const pending = provider.list({ signal: caller.signal });
@@ -155,7 +198,7 @@ test("provider control abort also races validate and leaves no late invalidation
   let invalidations = 0;
   const provider = new InsuremoSkillProvider(ctx, { signal: lifecycle.signal, invalidate: () => { invalidations += 1; } }, {
     skillsAllowedRoot: root, validate: () => validation,
-  } as unknown as ImoSkills, "global");
+  } as unknown as ImoSkills, "global", allowAllSkillActivation());
   try {
     const started = Date.now();
     const pending = provider.list({});
@@ -263,6 +306,107 @@ test("missing invocation fields default true and explicit booleans combine", asy
     assert.equal(definition?.invocation.userInvocable, false);
   } finally {
     await fx.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("provider list refilters when activation changes after the first scan", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-catalog-list-race-"));
+  let snapshots = 0;
+  const activation = {
+    ensureInitialized: async () => activationView(0, ["alpha"]),
+    snapshot: async () => { snapshots += 1; return activationView(1, []); },
+  };
+  const fx = await directProvider(root, activation);
+  try {
+    const result = await fx.provider.list({});
+    assert.equal(Array.isArray(result), true);
+    if (Array.isArray(result)) assert.deepEqual(result, []);
+    assert.ok(snapshots >= 2);
+  } finally {
+    fx.lifecycle.abort();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("provider list fails closed after two activation revisions keep changing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-catalog-list-churn-"));
+  let revision = 0;
+  const activation = {
+    ensureInitialized: async () => activationView(0, ["alpha"]),
+    snapshot: async () => { revision += 1; return activationView(revision, ["alpha"]); },
+  };
+  const fx = await directProvider(root, activation);
+  try {
+    const result = await fx.provider.list({});
+    assert.equal(Array.isArray(result), false);
+    if (!Array.isArray(result)) assert.deepEqual(result, { candidates: [], complete: false });
+    assert.equal(revision, 2);
+  } finally {
+    fx.lifecycle.abort();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("provider get rechecks activation after body read and revokes a disabled candidate", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-catalog-get-race-"));
+  let snapshots = 0;
+  const activation = {
+    ensureInitialized: async () => activationView(0, ["alpha"]),
+    snapshot: async () => {
+      snapshots += 1;
+      return snapshots < 3 ? activationView(0, ["alpha"]) : activationView(1, []);
+    },
+  };
+  const fx = await directProvider(root, activation);
+  try {
+    const listed = await fx.provider.list({});
+    assert.equal(Array.isArray(listed), true);
+    if (!Array.isArray(listed)) return;
+    assert.equal(await fx.provider.get(listed[0]!, {}), undefined);
+    assert.equal(snapshots, 3);
+  } finally {
+    fx.lifecycle.abort();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("provider get fails closed when the final activation snapshot fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-catalog-get-final-failure-"));
+  let snapshots = 0;
+  const activation = {
+    ensureInitialized: async () => activationView(0, ["alpha"]),
+    snapshot: async () => {
+      snapshots += 1;
+      if (snapshots >= 3) throw new Error("activation storage failure");
+      return activationView(0, ["alpha"]);
+    },
+  };
+  const fx = await directProvider(root, activation);
+  try {
+    const listed = await fx.provider.list({});
+    assert.equal(Array.isArray(listed), true);
+    if (!Array.isArray(listed)) return;
+    assert.equal(await fx.provider.get(listed[0]!, {}), undefined);
+  } finally {
+    fx.lifecycle.abort();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("provider list fails closed when its final activation snapshot fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-catalog-list-final-failure-"));
+  const activation = {
+    ensureInitialized: async () => activationView(0, ["alpha"]),
+    snapshot: async () => { throw new Error("activation storage failure"); },
+  };
+  const fx = await directProvider(root, activation);
+  try {
+    const result = await fx.provider.list({});
+    assert.equal(Array.isArray(result), false);
+    if (!Array.isArray(result)) assert.deepEqual(result, { candidates: [], complete: false });
+  } finally {
+    fx.lifecycle.abort();
     await rm(root, { recursive: true, force: true });
   }
 });

@@ -11,11 +11,9 @@ import {
   raceSkillAbort,
   throwIfSkillAborted,
 } from "./skill-cancellation.ts";
-import {
-  SKILLS_INVENTORY_UPDATED_EVENT,
-  type ImoSkillScope,
-  type ImoSkills,
-} from "./skills.ts";
+import { SKILL_ACTIVATION_CHANGED_EVENT, type ImoSkillActivation } from "./skill-activation.ts";
+import { SkillActivationGate, sameActivation, type SkillActivationInput } from "./skill-activation-adapter.ts";
+import { SKILLS_INVENTORY_UPDATED_EVENT, type ImoSkillScope, type ImoSkills } from "./skills.ts";
 import { resolveAllowedSkillRoot, resolveSkillPath } from "./skill-path.ts";
 import { readFrontmatterPrefix, readSkillDocument } from "./skill-document.ts";
 
@@ -106,6 +104,7 @@ export class InsuremoSkillProvider implements SkillProvider {
   #control: SkillProviderControl;
   #disposed = false;
   #fingerprint: string | undefined;
+  #activation: SkillActivationGate;
   #listenerDispose: (() => void) | undefined;
   readonly #issued = new WeakSet<object>();
 
@@ -116,8 +115,10 @@ export class InsuremoSkillProvider implements SkillProvider {
     control: SkillProviderControl,
     inventory: ImoSkills | (() => ImoSkills | undefined),
     private readonly scope: ImoSkillScope = "global",
+    activation?: SkillActivationInput,
   ) {
     this.#control = control;
+    this.#activation = new SkillActivationGate(ctx, control, activation);
     this.inventoryResolver = typeof inventory === "function" ? inventory : () => inventory;
     const disposeInventoryListener = this.ctx.on(
       SKILLS_INVENTORY_UPDATED_EVENT,
@@ -127,9 +128,14 @@ export class InsuremoSkillProvider implements SkillProvider {
       INSUREMO_SKILL_CATALOG_INVALIDATE_EVENT,
       (payload: unknown) => this.onCatalogInvalidated(payload),
     );
+    const disposeActivationListener = this.ctx.on(
+      SKILL_ACTIVATION_CHANGED_EVENT,
+      (payload: unknown) => this.#activation.onChanged(payload),
+    );
     this.#listenerDispose = () => {
       disposeInventoryListener();
       disposeMutationListener();
+      disposeActivationListener();
     };
     control.signal.addEventListener("abort", () => {
       this.#disposed = true;
@@ -162,54 +168,64 @@ export class InsuremoSkillProvider implements SkillProvider {
       const allowedRootPath = skillRootOf(inventory);
       const allowedRoot = await resolveAllowedSkillRoot(allowedRootPath);
       this.throwIfCancelled(cancellation.signal);
-      const candidates: SkillCandidate[] = [];
-      let complete = validation.value.inventoryComplete;
-      for (const item of validation.value.items) {
-        this.throwIfCancelled(cancellation.signal);
-        if (!item.valid || !isSkillName(item.name)) {
-          complete = false;
-          continue;
-        }
-        const manifest = await resolveManifest(item.path, allowedRootPath, allowedRoot);
-        this.throwIfCancelled(cancellation.signal);
-        if (manifest === undefined) {
-          complete = false;
-          continue;
-        }
-        const frontmatter = await readFrontmatterPrefix(manifest, cancellation.signal);
-        this.throwIfCancelled(cancellation.signal);
-        if (this.#disposed || this.#control.signal.aborted) return { candidates, complete: false };
-        if (frontmatter.invalid) complete = false;
-        const description = item.description.trim().length > 0
-          ? item.description
-          : `InsureMO skill ${item.name}`;
-        const invocation = Object.freeze(frontmatter.invocation ?? defaultInvocation());
-        const resourceBase = Object.freeze({ kind: "directory" as const, path: item.path });
-        const locator: IssuedLocator = Object.freeze({
-          directory: item.path,
-          manifestPath: manifest,
-          name: item.name,
-          description,
-          ...(frontmatter.whenToUse === undefined ? {} : { whenToUse: frontmatter.whenToUse }),
-          invocation,
-          ...(frontmatter.metadata === undefined ? {} : { metadata: frontmatter.metadata }),
-        });
-        this.#issued.add(locator);
-        candidates.push(Object.freeze({
-          name: item.name,
-          description,
-          ...(frontmatter.whenToUse === undefined ? {} : { whenToUse: frontmatter.whenToUse }),
-          invocation,
-          source: INSUREMO_SKILL_SOURCE,
-          provider: INSUREMO_SKILL_PROVIDER,
-          resourceBase,
-          rank: INSUREMO_SKILL_RANK,
-          locator,
-          path: manifest,
-          ...(frontmatter.metadata === undefined ? {} : { metadata: frontmatter.metadata }),
-        }));
-      }
-      return complete ? candidates : { candidates, complete: false };
+      return await this.#activation.stableList(
+        validation.value.items,
+        cancellation.signal,
+        async (enabledNames) => {
+          const candidates: SkillCandidate[] = [];
+          let complete = validation.value.inventoryComplete;
+          for (const item of validation.value.items) {
+            this.throwIfCancelled(cancellation.signal);
+            if (!item.valid || !isSkillName(item.name)) {
+              complete = false;
+              continue;
+            }
+            // A deliberate disabled state is healthy: do not inspect its file
+            // and do not turn an otherwise complete inventory incomplete.
+            if (!enabledNames.has(item.name)) continue;
+            const manifest = await resolveManifest(item.path, allowedRootPath, allowedRoot);
+            this.throwIfCancelled(cancellation.signal);
+            if (manifest === undefined) {
+              complete = false;
+              continue;
+            }
+            const frontmatter = await readFrontmatterPrefix(manifest, cancellation.signal);
+            this.throwIfCancelled(cancellation.signal);
+            if (this.#disposed || this.#control.signal.aborted) return { candidates, complete: false };
+            if (frontmatter.invalid) complete = false;
+            const description = item.description.trim().length > 0
+              ? item.description
+              : `InsureMO skill ${item.name}`;
+            const invocation = Object.freeze(frontmatter.invocation ?? defaultInvocation());
+            const resourceBase = Object.freeze({ kind: "directory" as const, path: item.path });
+            const locator: IssuedLocator = Object.freeze({
+              directory: item.path,
+              manifestPath: manifest,
+              name: item.name,
+              description,
+              ...(frontmatter.whenToUse === undefined ? {} : { whenToUse: frontmatter.whenToUse }),
+              invocation,
+              ...(frontmatter.metadata === undefined ? {} : { metadata: frontmatter.metadata }),
+            });
+            this.#issued.add(locator);
+            candidates.push(Object.freeze({
+              name: item.name,
+              description,
+              ...(frontmatter.whenToUse === undefined ? {} : { whenToUse: frontmatter.whenToUse }),
+              invocation,
+              source: INSUREMO_SKILL_SOURCE,
+              provider: INSUREMO_SKILL_PROVIDER,
+              resourceBase,
+              rank: INSUREMO_SKILL_RANK,
+              locator,
+              path: manifest,
+              ...(frontmatter.metadata === undefined ? {} : { metadata: frontmatter.metadata }),
+            }));
+          }
+          return complete ? candidates : { candidates, complete: false };
+        },
+        () => ({ candidates: [], complete: false }),
+      );
     } catch (error) {
       if (isSkillAbortError(error)) throw new SkillAbortError();
       return { candidates: [], complete: false };
@@ -237,6 +253,10 @@ export class InsuremoSkillProvider implements SkillProvider {
     if (!candidateMatchesLocator(candidate, locator)) return undefined;
     const inventory = this.inventoryResolver();
     if (inventory === undefined) return undefined;
+    const validation = await raceSkillAbort(inventory.validate(this.scope, signal), signal);
+    if (!validation.ok) return undefined;
+    const activationSnapshot = await this.#activation.snapshot(validation.value.items, signal);
+    if (activationSnapshot === undefined || !activationSnapshot.initialized || !activationSnapshot.enabled.includes(candidate.name)) return undefined;
     const allowedRootPath = skillRootOf(inventory);
     const allowedRoot = await resolveAllowedSkillRoot(allowedRootPath);
     throwIfSkillAborted(signal);
@@ -253,6 +273,12 @@ export class InsuremoSkillProvider implements SkillProvider {
     const parsed = await readSkillDocument(resolved.canonical, signal);
     if (parsed === undefined) return undefined;
     throwIfSkillAborted(signal);
+    const finalActivation = await this.#activation.snapshot(validation.value.items, signal);
+    throwIfSkillAborted(signal);
+    if (finalActivation === undefined
+      || !finalActivation.initialized
+      || !sameActivation(activationSnapshot, finalActivation)
+      || !finalActivation.enabled.includes(candidate.name)) return undefined;
     if (this.#disposed || this.#control.signal.aborted) return undefined;
     return {
       name: candidate.name,
@@ -317,6 +343,7 @@ export function mountInsuremoSkillProvider(
     control,
     () => ctx.get<ImoSkills>("imoSkills"),
     scope,
+    () => ctx.get<ImoSkillActivation>("imoSkillActivation"),
   ));
 }
 

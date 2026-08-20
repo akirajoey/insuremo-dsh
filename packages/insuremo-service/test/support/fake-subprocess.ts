@@ -13,6 +13,8 @@ import {
   ImoSkillsService,
   ImoUpgradeService,
   type Config,
+  type ImoSkillActivation,
+  type ImoSkillActivationSnapshot,
   type ImoAuth,
   type ImoAuthActions,
   type ImoAuthResult,
@@ -275,6 +277,17 @@ export async function upgradeFixture(
   };
 }
 
+export function allowAllSkillActivation(): ImoSkillActivation {
+  const snapshot = (installedNames: readonly string[]): ImoSkillActivationSnapshot => {
+    const installed = [...new Set(installedNames)].sort((left, right) => left.localeCompare(right));
+    return { initialized: true, installed, enabled: installed, disabled: [], stale: [], revision: 0 };
+  };
+  return {
+    ensureInitialized: async (installedNames) => snapshot(installedNames),
+    snapshot: async (installedNames) => snapshot(installedNames),
+  };
+}
+
 export async function skillsFixture(
   io: FakeIo,
   config: Partial<Config> = {},
@@ -291,6 +304,7 @@ export async function skillsFixture(
   const ctx = new Context();
   const fake = runtime ?? fakeSubprocess(io);
   ctx.provide("subprocess", fake as never);
+  ctx.provide("imoSkillActivation", allowAllSkillActivation());
   const fiber = ctx.plugin(ImoSkillsService, { command: "imo", timeoutMs: 5_000, ...config });
   await fiber.await();
   const skills = ctx.get("imoSkills");
