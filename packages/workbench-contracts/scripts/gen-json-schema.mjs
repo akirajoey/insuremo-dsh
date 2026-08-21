@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -491,6 +491,103 @@ const schemas = {
       truncated: { type: "boolean" },
     },
     ["workspaceId", "methods", "counts", "limit", "truncated"],
+    ),
+  },
+  "icomposer-init-preview-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-init-preview-request.json",
+    title: "icomposer/init-preview request",
+    ...objectSchema(
+    {
+      ...requestProperties,
+      workspaceId: { type: "string", minLength: 1 },
+      groupId: { type: "string" },
+      listGroups: { type: "boolean" },
+    },
+    ["requestId", "schemaVersion", "workspaceId"],
+    ),
+  },
+  "icomposer-init-preview-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-init-preview-response.json",
+    title: "icomposer/init-preview response",
+    type: "object",
+    additionalProperties: false,
+    anyOf: [
+      objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          mode: { const: "groups" },
+          groups: {
+            type: "array",
+            maxItems: 1000,
+            items: objectSchema(
+              {
+                id: { type: "string", minLength: 1 },
+                name: { type: "string", minLength: 1, maxLength: 128 },
+                path: { type: "string", minLength: 1, maxLength: 128 },
+                code: { type: "string", minLength: 1, maxLength: 128 },
+              },
+              ["id", "name"],
+            ),
+          },
+          count: { type: "integer", minimum: 0 },
+          truncated: { type: "boolean" },
+          durationMs: { type: "integer", minimum: 0 },
+          stdoutDigest: { type: "string", minLength: 1 },
+        },
+        ["workspaceId", "mode", "groups", "count", "truncated", "durationMs", "stdoutDigest"],
+      ),
+      objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          mode: { const: "plan" },
+          groupId: { type: ["string", "null"] },
+          steps: { type: "array", maxItems: 1000, items: { type: "string", minLength: 1, maxLength: 200 } },
+          count: { type: "integer", minimum: 0 },
+          truncated: { type: "boolean" },
+          durationMs: { type: "integer", minimum: 0 },
+          stdoutDigest: { type: "string", minLength: 1 },
+        },
+        ["workspaceId", "mode", "groupId", "steps", "count", "truncated", "durationMs", "stdoutDigest"],
+      ),
+    ],
+  },
+  "icomposer-reload-preview-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-reload-preview-request.json",
+    title: "icomposer/reload-preview request",
+    ...objectSchema(
+    { ...requestProperties, workspaceId: { type: "string", minLength: 1 } },
+    ["requestId", "schemaVersion", "workspaceId"],
+    ),
+  },
+  "icomposer-reload-preview-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-reload-preview-response.json",
+    title: "icomposer/reload-preview response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      distribution: objectSchema(
+        {
+          clean: { type: "integer", minimum: 0 },
+          localModified: { type: "integer", minimum: 0 },
+          noServerMd5: { type: "integer", minimum: 0 },
+          sourceMissing: { type: "integer", minimum: 0 },
+          metadataMissing: { type: "integer", minimum: 0 },
+        },
+        ["clean", "localModified", "noServerMd5", "sourceMissing", "metadataMissing"],
+      ),
+      total: { type: "integer", minimum: 0 },
+      top: {
+        type: "array",
+        maxItems: 50,
+        items: objectSchema({ name: { type: "string", minLength: 1 }, type: { enum: ["api", "function", "batch", "model"] } }, ["name", "type"]),
+      },
+      scannedAt: { type: "string", minLength: 1 },
+    },
+    ["workspaceId", "distribution", "total", "top", "scannedAt"],
     ),
   },
   "operation-record.schema.json": commandSchema(

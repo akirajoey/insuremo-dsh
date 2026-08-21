@@ -13,6 +13,9 @@ importers:
       '@icomposer/icomposer-catalog':
         specifier: file:../icomposer-catalog
         version: file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)
+      '@icomposer/icomposer-lifecycle':
+        specifier: file:../icomposer-lifecycle
+        version: file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding)
       '@icomposer/icomposer-reference':
         specifier: file:../icomposer-reference
         version: file:packages/icomposer-reference(@icomposer/workspace-binding@file:packages/workspace-binding)
@@ -39,6 +42,22 @@ importers:
         version: link:../workspace-binding
 
   packages/icomposer-catalog:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.22.4
+        version: 4.23.12
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/icomposer-lifecycle:
     dependencies:
       zod:
         specifier: ^4.4.3
@@ -559,6 +578,13 @@ packages:
 
   '@icomposer/icomposer-catalog@file:packages/icomposer-catalog':
     resolution: {directory: packages/icomposer-catalog, type: directory}
+    peerDependencies:
+      '@deepseek-ai/cordis': '*'
+      '@deepseek-ai/dsh-workspace': '*'
+      '@icomposer/workspace-binding': '*'
+
+  '@icomposer/icomposer-lifecycle@file:packages/icomposer-lifecycle':
+    resolution: {directory: packages/icomposer-lifecycle, type: directory}
     peerDependencies:
       '@deepseek-ai/cordis': '*'
       '@deepseek-ai/dsh-workspace': '*'
@@ -1961,6 +1987,11 @@ snapshots:
   '@exodus/bytes@1.15.1': {}
 
   '@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)':
+    dependencies:
+      '@icomposer/workspace-binding': file:packages/workspace-binding
+      zod: 4.4.3
+
+  '@icomposer/icomposer-lifecycle@file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding)':
     dependencies:
       '@icomposer/workspace-binding': file:packages/workspace-binding
       zod: 4.4.3

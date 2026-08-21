@@ -23,6 +23,10 @@ const baseSchemaFiles = [
   "icomposer-util-list-response.schema.json",
   "icomposer-util-query-request.schema.json",
   "icomposer-util-query-response.schema.json",
+  "icomposer-init-preview-request.schema.json",
+  "icomposer-init-preview-response.schema.json",
+  "icomposer-reload-preview-request.schema.json",
+  "icomposer-reload-preview-response.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -38,7 +42,7 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 23);
+  assert.equal(files.length, 27);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles].sort(),
@@ -50,6 +54,8 @@ const serviceViewResponses = [
   "icomposer-sdk-query-response.schema.json",
   "icomposer-util-list-response.schema.json",
   "icomposer-util-query-response.schema.json",
+  "icomposer-init-preview-response.schema.json",
+  "icomposer-reload-preview-response.schema.json",
 ];
 
 test("base contract schemas are valid JSON Schema documents", async () => {
@@ -58,6 +64,18 @@ test("base contract schemas are valid JSON Schema documents", async () => {
     assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
     assert.equal(schema.type, "object");
     assert.equal(schema.additionalProperties, false);
+    if (file === "icomposer-init-preview-response.schema.json") {
+      // response is a discriminated union of service views
+      assert.ok(Array.isArray(schema.anyOf));
+      assert.equal(schema.anyOf.length, 2);
+      for (const alt of schema.anyOf) {
+        assert.equal(alt.additionalProperties, false);
+        assert.equal(alt.type, "object");
+        assert.ok(alt.required.includes("workspaceId"));
+        assert.equal(alt.required.includes("requestId"), false);
+      }
+      continue;
+    }
     assert.ok(Array.isArray(schema.required));
     if (serviceViewResponses.includes(file)) {
       // response schemas mirror the service view (no transport envelope fields)

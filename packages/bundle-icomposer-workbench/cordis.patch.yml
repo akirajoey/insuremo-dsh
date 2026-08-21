@@ -18,6 +18,10 @@
       name: '@icomposer/icomposer-reference'
       inject: [workspaceBinding]
 
+    - id: icomposer-lifecycle
+      name: '@icomposer/icomposer-lifecycle'
+      inject: [subprocess, workspaceBinding, imoAuth]
+
     - id: insuremo-service
       name: '@icomposer/insuremo-service'
       inject: [subprocess, operationLog, skills, storageDomain, webServer]

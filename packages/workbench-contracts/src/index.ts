@@ -29,6 +29,8 @@ export const COMMANDS = {
   sdkQuery: "icomposer/sdk-query",
   utilList: "icomposer/util-list",
   utilQuery: "icomposer/util-query",
+  initPreview: "icomposer/init-preview",
+  reloadPreview: "icomposer/reload-preview",
   operationRecord: "operation/record",
   operationList: "operation/list",
   operationDecide: "operation/decide",
@@ -67,6 +69,7 @@ export const SystemCapabilitiesResponseSchema = systemCapabilitiesResponseSchema
 export * from "./workspace.ts";
 export * from "./icomposer-catalog.ts";
 export * from "./icomposer-reference.ts";
+export * from "./icomposer-lifecycle.ts";
 
 export const OPERATION_DECISIONS = {
   pending: "pending",
