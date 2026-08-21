@@ -416,6 +416,31 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   ctx.provide("subprocess", fakeSubprocess() as never);
   ctx.provide("workspaceBinding", fakeBinding("bound", await mkdtemp(join(tmpdir(), "verify-tools-"))) as never);
   ctx.provide("imoAuth" as never, stubAuth("ok") as never);
+  ctx.provide("iciEngine", {
+    queryApi: async (input: { workspaceId: string; query: string }) => ({
+      ok: true,
+      value: {
+        workspaceId: input.workspaceId,
+        matched: ["api:ApiA"],
+        truncated: false,
+        truncatedAt: [],
+        roots: [{
+          id: "api:ApiA", kind: "api", name: "ApiA", path: "src/x.groovy",
+          children: [{ id: "method:ApiA.execute", kind: "method", name: "execute", path: "src/x.groovy", edge: { kind: "CONTAINS", source: "static", confidence: "medium", evidence: "", ownerFile: "src/x.groovy" } }],
+        }],
+      },
+    }),
+    queryImpact: async (input: { workspaceId: string; query: string }) => ({
+      ok: true,
+      value: {
+        workspaceId: input.workspaceId,
+        matched: ["function:FuncA"],
+        paths: [{ apiId: "api:ApiA", hops: [{ nodeId: "function:FuncA" }, { nodeId: "api:ApiA" }] }],
+        confidenceCounts: { static: 2, platform: 0, inferred: 0 },
+        truncated: false,
+      },
+    }),
+  } as never);
   ctx.provide("tools", {
     register(definition: { name: string; execute: (args: Record<string, unknown>, exec: { signal: AbortSignal }) => Promise<unknown> }) {
       registered.set(definition.name, definition);
@@ -450,9 +475,9 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   const { registerIcomposerToolsWith } = await import("../src/tool-defs.ts");
   const disposers = registerIcomposerToolsWith(ctx, (options) => options);
   try {
-    assert.deepEqual([...registered.keys()].sort(), ["icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
-    assert.deepEqual(sections.map(x => x.order), [150, 150, 150]);
-    assert.equal(sections.every(x => x.name.startsWith("tool:icomposer_")), true);
+    assert.deepEqual([...registered.keys()].sort(), ["ici_query", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150]);
+    assert.equal(sections.every(x => x.name.startsWith("tool:")), true);
     const exec = { signal: new AbortController().signal };
 
     const catalogOut: any = await registered.get("icomposer_catalog_list")!.execute({ workspace_id: "ws1" }, exec);
@@ -471,9 +496,20 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     const verifySearchOut: any = await registered.get("icomposer_verify_utils")!.execute({ workspace_id: "ws1", keyword: "json" }, exec);
     assert.equal(verifySearchOut.mode, "search");
     assert.deepEqual(verifySearchOut.matches, [{ className: "IComposerJsonUtils", method: "fromJSON" }]);
+    const iciChain: any = await registered.get("ici_query")!.execute({ workspace_id: "ws1", mode: "api-chain", query: "ApiA" }, exec);
+    assert.equal(iciChain.mode, "api-chain");
+    assert.deepEqual(iciChain.matched, ["api:ApiA"]);
+    assert.equal(iciChain.truncated, false);
+    assert.ok(iciChain.lines.length >= 2);
+    assert.equal(iciChain.lines[0].label.includes("api:ApiA"), true);
+    const iciImpact: any = await registered.get("ici_query")!.execute({ workspace_id: "ws1", mode: "impact", query: "FuncA" }, exec);
+    assert.equal(iciImpact.mode, "impact");
+    assert.equal(iciImpact.paths.length, 1);
+    assert.equal(iciImpact.paths[0].apiId, "api:ApiA");
+    assert.deepEqual(iciImpact.confidenceCounts, { static: 2, platform: 0, inferred: 0 });
   } finally {
     for (const dispose of disposers) dispose();
   }
-  assert.deepEqual(removed.sort(), ["icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+  assert.deepEqual(removed.sort(), ["ici_query", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
   assert.equal(registered.size, 0);
 });

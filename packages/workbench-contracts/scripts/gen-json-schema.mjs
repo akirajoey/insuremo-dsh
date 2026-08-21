@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -752,6 +752,121 @@ const schemas = {
       },
       ["workspaceId", "manifest", "nodeCount", "edgeCount"],
     ),
+  },
+  "ici-query-api.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-query-api.json",
+    title: "ici/query-api request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      node: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          id: { type: "string", minLength: 1 },
+          kind: { enum: ["api", "function", "method", "model", "batch"] },
+          name: { type: "string", minLength: 1 },
+          path: { type: "string" },
+          ref: { enum: ["seen", "cycle"] },
+          edge: objectSchema(
+            {
+              kind: { enum: ["CONTAINS", "CALLS"] },
+              source: { enum: ["static", "platform", "inferred"] },
+              confidence: { enum: ["high", "medium", "inferred"] },
+              evidence: { type: "string", maxLength: 160 },
+              ownerFile: { type: "string" },
+            },
+            ["kind", "source", "confidence", "evidence", "ownerFile"],
+          ),
+          children: { type: "array", items: { $ref: "#/$defs/node" } },
+        },
+        required: ["id", "kind", "name", "path"],
+      },
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          query: { type: "string", minLength: 1 },
+          depth: { type: "integer", minimum: 1, maximum: 50 },
+          focus: { type: "string", minLength: 1 },
+          maxNodes: { type: "integer", minimum: 1, maximum: 2000 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "query"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          matched: { type: "array", items: { type: "string", minLength: 1 } },
+          roots: { type: "array", items: { $ref: "#/$defs/node" } },
+          truncated: { type: "boolean" },
+          truncatedAt: { type: "array", items: { type: "string", minLength: 1 } },
+          stale: { const: true },
+        },
+        ["workspaceId", "matched", "roots", "truncated", "truncatedAt"],
+      ),
+    },
+  },
+  "ici-query-impact.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-query-impact.json",
+    title: "ici/query-impact request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      hop: objectSchema(
+        {
+          nodeId: { type: "string", minLength: 1 },
+          edge: objectSchema(
+            {
+              kind: { enum: ["CONTAINS", "CALLS"] },
+              source: { enum: ["static", "platform", "inferred"] },
+              confidence: { enum: ["high", "medium", "inferred"] },
+              evidence: { type: "string", maxLength: 160 },
+              ownerFile: { type: "string" },
+            },
+            ["kind", "source", "confidence", "evidence", "ownerFile"],
+          ),
+        },
+        ["nodeId"],
+      ),
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          query: { type: "string", minLength: 1 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "query"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          matched: { type: "array", items: { type: "string", minLength: 1 } },
+          paths: {
+            type: "array",
+            maxItems: 200,
+            items: objectSchema(
+              {
+                apiId: { type: "string", minLength: 1 },
+                hops: { type: "array", items: { $ref: "#/$defs/hop" } },
+              },
+              ["apiId", "hops"],
+            ),
+          },
+          confidenceCounts: objectSchema(
+            {
+              static: { type: "integer", minimum: 0 },
+              platform: { type: "integer", minimum: 0 },
+              inferred: { type: "integer", minimum: 0 },
+            },
+            ["static", "platform", "inferred"],
+          ),
+          truncated: { type: "boolean" },
+          stale: { const: true },
+        },
+        ["workspaceId", "matched", "paths", "confidenceCounts", "truncated"],
+      ),
+    },
   },
   "operation-record.schema.json": commandSchema(
     "operation-record",

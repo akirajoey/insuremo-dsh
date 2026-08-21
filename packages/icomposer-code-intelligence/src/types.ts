@@ -47,7 +47,9 @@ export type IciErrorCode =
   | "invalid-workspace-id"
   | "service-disposed"
   | "cancelled"
-  | "storage-error";
+  | "storage-error"
+  | "no-match"
+  | "no-snapshot";
 
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
@@ -62,4 +64,70 @@ export interface BuildOptions {
 
 export interface IciEngineFace {
   build(input: { readonly workspaceId: string }, options?: BuildOptions | AbortSignal): Promise<Result<IciBuildResult>>;
+  queryApi(input: QueryApiInput, options?: BuildOptions | AbortSignal): Promise<Result<QueryApiResult>>;
+  queryImpact(input: QueryImpactInput, options?: BuildOptions | AbortSignal): Promise<Result<QueryImpactResult>>;
+}
+
+// ---- query surface (TASK-024; Rust query/mod.rs semantics) ----
+
+export interface QueryApiInput {
+  readonly workspaceId: string;
+  readonly query: string;
+  readonly depth?: number;
+  readonly focus?: string;
+  readonly maxNodes?: number;
+}
+
+export interface QueryImpactInput {
+  readonly workspaceId: string;
+  readonly query: string;
+}
+
+/** Projected edge metadata attached to each tree child / impact hop. */
+export interface IciEdgeMeta {
+  readonly kind: EdgeKind;
+  readonly source: EdgeSource;
+  readonly confidence: Confidence;
+  readonly evidence: string;
+  readonly ownerFile: string;
+}
+
+export interface QueryApiTreeNode {
+  readonly id: string;
+  readonly kind: NodeKind;
+  readonly name: string;
+  readonly path: string;
+  /** present when the node was already expanded ("seen") or closes a cycle. */
+  readonly ref?: "seen" | "cycle";
+  /** edge metadata for the hop from the parent to this node (absent at root). */
+  readonly edge?: IciEdgeMeta;
+  readonly children?: readonly QueryApiTreeNode[];
+}
+
+export interface QueryApiResult {
+  readonly workspaceId: string;
+  readonly matched: readonly string[];
+  readonly roots: readonly QueryApiTreeNode[];
+  readonly truncated: boolean;
+  readonly truncatedAt: readonly string[];
+  readonly stale?: true;
+}
+
+export interface ImpactHop {
+  readonly nodeId: string;
+  readonly edge?: IciEdgeMeta;
+}
+
+export interface ImpactPath {
+  readonly apiId: string;
+  readonly hops: readonly ImpactHop[];
+}
+
+export interface QueryImpactResult {
+  readonly workspaceId: string;
+  readonly matched: readonly string[];
+  readonly paths: readonly ImpactPath[];
+  readonly confidenceCounts: { readonly static: number; readonly platform: number; readonly inferred: number };
+  readonly truncated: boolean;
+  readonly stale?: true;
 }

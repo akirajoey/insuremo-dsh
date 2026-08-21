@@ -84,7 +84,48 @@ export async function buildGraph(
     }
     progress(`scanning metadata ${kind} ${entry.name}`);
   }
+  return finishBuild(ctx, progress, signal);
+}
 
+/**
+ * Collect workspace groovy sources referenced by catalog entries (STD_DISCARD
+ * and out-of-root paths skipped). Shared by build and query staleness checks.
+ */
+export async function collectSources(
+  canonicalRootInput: string,
+  catalogEntries: Array<{ name: string; type: string; sourcePath?: string }>,
+  signal?: AbortSignal,
+): Promise<Map<string, { kind: string; source: string; sourceFile: string }>> {
+  const canonicalRoot = (await safeRealpath(canonicalRootInput)) ?? canonicalRootInput;
+  const sourceByName = new Map<string, { kind: string; source: string; sourceFile: string }>();
+  for (const entry of catalogEntries) {
+    if (signal?.aborted) break;
+    if (isStdDiscard(entry.sourcePath) || isStdDiscard(entry.name)) continue;
+    if (!entry.sourcePath) continue;
+    try {
+      const real = await safeRealpath(entry.sourcePath);
+      if (real && isContained(real, canonicalRoot)) {
+        const content = await readFile(real, "utf8");
+        sourceByName.set(entry.name, { kind: entry.type, source: content, sourceFile: entry.sourcePath.replace(canonicalRoot + "/", "") });
+      }
+    } catch { /* ignore */ }
+  }
+  return sourceByName;
+}
+
+/** Aggregated sha256 over per-file hashes (order-independent). */
+export function fingerprintSources(sources: Iterable<{ source: string }>): string {
+  const hashes: string[] = [];
+  for (const info of sources) hashes.push(stableHashText(info.source));
+  hashes.sort();
+  return createHash("sha256").update(hashes.join(""), "utf8").digest("hex");
+}
+
+function finishBuild(
+  ctx: BuildContext,
+  progress: (label: string) => void,
+  signal?: AbortSignal,
+): { nodes: IciNode[]; edges: IciEdge[]; sourceFingerprint: string } {
   // Direct scan of src/dev for groovy files not in catalog (e.g., methods sources)
   // Reuse containment and 5000 bound implicitly via catalog limit; for method extraction we scan files we already have
   // Progress for relationship extraction
@@ -129,12 +170,7 @@ export async function buildGraph(
   }
 
   // Source fingerprint: aggregate sha256 of all source files sorted
-  const hashes: string[] = [];
-  for (const [, info] of sources) {
-    hashes.push(stableHashText(info.source));
-  }
-  hashes.sort();
-  const sourceFingerprint = createHash("sha256").update(hashes.join(""), "utf8").digest("hex");
+  const sourceFingerprint = fingerprintSources(ctx.sourceByName.values());
 
   const nodes = [...ctx.nodes.values()].sort((a, b) => a.id.localeCompare(b.id));
   const edges = [...ctx.edges.values()].sort((a, b) => a.id.localeCompare(b.id));

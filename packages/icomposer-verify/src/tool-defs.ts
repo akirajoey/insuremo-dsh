@@ -45,10 +45,42 @@ interface VerifyFace {
   }>>;
 }
 
+interface IciQueryApiResult {
+  matched: readonly string[];
+  truncated: boolean;
+  truncatedAt?: readonly string[];
+  stale?: true;
+  roots: readonly unknown[];
+}
+
+interface IciQueryImpactResult {
+  matched: readonly string[];
+  paths: readonly { readonly apiId: string; readonly hops: readonly { readonly nodeId: string }[] }[];
+  confidenceCounts: { static: number; platform: number; inferred: number };
+  truncated: boolean;
+  stale?: true;
+}
+
+interface IciEngineFace {
+  queryApi(input: { workspaceId: string; query: string; depth?: number; focus?: string; maxNodes?: number }, signal?: AbortSignal): Promise<ResultLike<IciQueryApiResult>>;
+  queryImpact(input: { workspaceId: string; query: string }, signal?: AbortSignal): Promise<ResultLike<IciQueryImpactResult>>;
+}
+
+/** Flattened tree line for canonical output/render. */
+interface IciTreeLine {
+  readonly depth: number;
+  readonly label: string;
+}
+
 const TOOL_ENTRY_LIMIT = 50;
 
 function clipEntries<T>(items: readonly T[]): T[] {
   return items.slice(0, TOOL_ENTRY_LIMIT);
+}
+
+
+function objectSchema2(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
+  return { type: "object", additionalProperties: false, properties, required };
 }
 
 function errorText(code: string): string {
@@ -79,6 +111,11 @@ export function registerIcomposerToolsWith(ctx: Context, defineTool: DefineToolF
     name: "tool:icomposer_verify_utils",
     order: 150,
     text: "icomposer_verify_utils lists utility classes or searches utility methods of a bound workspace. Read-only: it never writes files.",
+  });
+  ctx.systemPrompt.section({
+    name: "tool:ici_query",
+    order: 150,
+    text: "ici_query runs iComposer Code Intelligence read-only graph queries over a bound workspace: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Read-only: it never writes files.",
   });
 
   disposers.push(ctx.tools.register(defineTool({
@@ -332,6 +369,123 @@ export function registerIcomposerToolsWith(ctx: Context, defineTool: DefineToolF
           ...(m.method === undefined ? {} : { method: m.method }),
           ...(m.description === undefined ? {} : { description: m.description }),
         }))]),
+      };
+    },
+  })));
+
+  disposers.push(ctx.tools.register(defineTool({
+    name: "ici_query",
+    description: "Run iComposer Code Intelligence read-only graph queries on a bound workspace: mode api-chain walks an API's downstream call tree; mode impact traces upstream callers of a function/method to APIs. Effect: none.",
+    parameters: {
+      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      mode: { type: "string", enum: ["api-chain", "impact"], required: true, description: "Query direction." },
+      query: { type: "string", required: true, description: "Node name or id substring (comma-separated for multiple)." },
+      depth: { type: "number", description: "api-chain only: maximum tree depth (default 10, cap 50)." },
+      max_nodes: { type: "number", description: "api-chain only: maximum nodes (default 120, cap 2000)." },
+    },
+    output: {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          workspace_id: { type: "string", required: true },
+          mode: { type: "string", enum: ["api-chain", "impact"], required: true },
+          matched: { type: "array", items: { type: "string" } },
+          truncated: { type: "boolean" },
+          stale: { type: "boolean" },
+          lines: {
+            type: "array",
+            items: objectSchema2({ depth: { type: "integer", required: true }, label: { type: "string", required: true } }, ["depth", "label"]),
+          },
+          paths: {
+            type: "array",
+            items: objectSchema2(
+              {
+                apiId: { type: "string", required: true },
+                hops: { type: "array", items: { type: "string" } },
+              },
+              ["apiId", "hops"],
+            ),
+          },
+          confidenceCounts: objectSchema2(
+            {
+              static: { type: "integer" },
+              platform: { type: "integer" },
+              inferred: { type: "integer" },
+            },
+            [],
+          ),
+          error: {
+            type: "object",
+            additionalProperties: false,
+            properties: { code: { type: "string", required: true } },
+          },
+        },
+      },
+      render: (_args: unknown, value: unknown) => {
+        const v = value as {
+          workspace_id: string;
+          mode: "api-chain" | "impact";
+          truncated?: boolean;
+          stale?: boolean;
+          lines?: readonly IciTreeLine[];
+          paths?: readonly { apiId: string; hops: readonly string[] }[];
+          error?: { code: string };
+        };
+        if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+        const header = `workspace ${v.workspace_id}: ici ${v.mode} truncated=${v.truncated ?? false}${v.stale === true ? " STALE (sources changed since last build)" : ""}`;
+        const body = v.mode === "api-chain"
+          ? (v.lines ?? []).map(l => `${"  ".repeat(l.depth)}${l.label}`)
+          : (v.paths ?? []).map(p => `${p.apiId}\n${p.hops.map(h => `  ${h}`).join("\n")}`);
+        return [{ type: "text", text: [header, ...body].join("\n") }];
+      },
+    },
+    isConcurrencySafe: () => true,
+    async execute(rawArgs: Record<string, unknown>, exec: ToolExecContext) {
+      const args = rawArgs as { workspace_id: string; mode: "api-chain" | "impact"; query: string; depth?: number; max_nodes?: number };
+      const ici = ctx.get("iciEngine") as unknown as IciEngineFace | undefined;
+      if (!ici) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: "cli-error" } };
+      if (args.mode === "impact") {
+        const res = await ici.queryImpact({ workspaceId: args.workspace_id, query: args.query }, exec.signal);
+        if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: res.error.code } };
+        return {
+          workspace_id: args.workspace_id,
+          mode: args.mode,
+          matched: [...res.value.matched],
+          truncated: res.value.truncated,
+          ...(res.value.stale === true ? { stale: true } : {}),
+          paths: clipEntries([...res.value.paths]).map(p => ({
+            apiId: p.apiId,
+            hops: p.hops.map(h => h.nodeId),
+          })),
+          confidenceCounts: { ...res.value.confidenceCounts },
+        };
+      }
+      const res = await ici.queryApi({
+        workspaceId: args.workspace_id,
+        query: args.query,
+        ...(args.depth === undefined ? {} : { depth: args.depth }),
+        ...(args.max_nodes === undefined ? {} : { max_nodes: args.max_nodes }),
+      }, exec.signal);
+      if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: res.error.code } };
+      // Flatten the tree into bounded depth/label lines for canonical output.
+      const lines: IciTreeLine[] = [];
+      const visit = (node: unknown, depth: number): void => {
+        if (lines.length >= TOOL_ENTRY_LIMIT * 8) return;
+        const n = node as { id: string; kind: string; ref?: string; edge?: { kind: string }; children?: readonly unknown[] };
+        const edgeKind = n.edge?.kind ?? "ROOT";
+        const ref = n.ref !== undefined ? ` (${n.ref})` : "";
+        lines.push({ depth, label: `[${edgeKind}] ${n.id}${ref}` });
+        for (const child of n.children ?? []) visit(child, depth + 1);
+      };
+      for (const root of res.value.roots) visit(root, 0);
+      return {
+        workspace_id: args.workspace_id,
+        mode: args.mode,
+        matched: [...res.value.matched],
+        truncated: res.value.truncated,
+        ...(res.value.stale === true ? { stale: true } : {}),
+        lines,
       };
     },
   })));

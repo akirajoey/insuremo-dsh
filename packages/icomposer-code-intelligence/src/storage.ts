@@ -36,6 +36,51 @@ export async function readManifest(base: string): Promise<IciManifest | null> {
   }
 }
 
+export interface GraphSnapshot {
+  readonly manifest: IciManifest;
+  readonly nodes: IciNodeLike[];
+  readonly edges: IciEdgeLike[];
+}
+
+export interface IciNodeLike {
+  readonly id: string;
+  readonly kind: string;
+  readonly name: string;
+  readonly path: string;
+  readonly evidence: string;
+  readonly sourceFile?: string;
+  readonly owner?: string;
+}
+
+export interface IciEdgeLike {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly kind: string;
+  readonly ownerFile: string;
+  readonly source: string;
+  readonly confidence: string;
+  readonly evidence: string;
+}
+
+/** Load the promoted `current` snapshot; null when no snapshot exists. */
+export async function loadSnapshot(base: string): Promise<GraphSnapshot | null> {
+  try {
+    const [manifestText, nodesText, edgesText] = await Promise.all([
+      readFile(join(currentDir(base), "manifest.json"), "utf8"),
+      readFile(join(currentDir(base), "nodes.json"), "utf8"),
+      readFile(join(currentDir(base), "edges.json"), "utf8"),
+    ]);
+    const manifest = JSON.parse(manifestText) as IciManifest;
+    const nodes = JSON.parse(nodesText) as IciNodeLike[];
+    const edges = JSON.parse(edgesText) as IciEdgeLike[];
+    if (!Array.isArray(nodes) || !Array.isArray(edges)) return null;
+    return { manifest, nodes, edges };
+  } catch {
+    return null;
+  }
+}
+
 export interface WriteAtomicOptions {
   readonly signal?: AbortSignal;
   /** Test seam: override rename to inject promote failures. */

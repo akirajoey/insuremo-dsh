@@ -36,6 +36,11 @@ const baseSchemaFiles = [
   "ici-build-request.schema.json",
   "ici-build-response.schema.json",
 ];
+
+const iciQuerySchemaFiles = [
+  "ici-query-api.schema.json",
+  "ici-query-impact.schema.json",
+];
 const operationSchemaFiles = [
   "operation-record.schema.json",
   "operation-list.schema.json",
@@ -50,10 +55,10 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 35);
+  assert.equal(files.length, 37);
   assert.deepEqual(
     files,
-    [...baseSchemaFiles, ...operationSchemaFiles].sort(),
+    [...baseSchemaFiles, ...operationSchemaFiles, ...iciQuerySchemaFiles].sort(),
   );
 });
 
@@ -111,6 +116,19 @@ test("operation schemas expose request and response alternatives", async () => {
     assert.ok(schema.$defs.request);
     assert.ok(schema.$defs.response);
   }
+});
+
+test("ici query schemas expose request and response alternatives with recursive nodes", async () => {
+  for (const file of iciQuerySchemaFiles) {
+    const schema = await readSchema(file);
+    assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
+    assert.equal(schema.type, "object");
+    assert.equal(schema.oneOf.length, 2);
+    assert.ok(schema.$defs.request);
+    assert.ok(schema.$defs.response);
+  }
+  const apiSchema = await readSchema("ici-query-api.schema.json");
+  assert.ok(apiSchema.$defs.node.properties.children.items.$ref === "#/$defs/node");
 });
 
 test("generated schemas use the v0 schema version", async () => {
