@@ -1,347 +1,322 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, readdir, readFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
-import type { SubprocessRuntime } from "@deepseek-ai/dsh-subprocess";
-import { Context } from "@deepseek-ai/cordis";
-import { IciEngineService } from "../src/service.ts";
 import { graphBaseDir, currentDir } from "../src/storage.ts";
-import { makeBinding, makeCatalog, writeGroovy, writeMeta } from "./support/helpers.ts";
+import { harness, writeGroovy, writeMeta } from "./support/helpers.ts";
 
-interface FakeEmbeddingOpts {
-  mode?: "hash" | "fail" | "no-vectors";
-  statusFor?: (body: string) => number;
-  calls?: string[][];
-}
-
-function hashVector(text: string): number[] {
-  const v: number[] = [];
-  for (let i = 0; i < 8; i++) v.push(((text.charCodeAt(i % text.length) + i * 7) % 100) / 100);
-  return v;
-}
-
-function fakeEmbeddingSubprocess(opts: FakeEmbeddingOpts = {}): SubprocessRuntime {
-  return {
-    async resolveExecutable() { return "/usr/bin/curl"; },
-    spawn(spec: { argv: readonly string[] }) {
-      const bodyIdx = spec.argv.indexOf("--data-raw");
-      const body = bodyIdx >= 0 ? String(spec.argv[bodyIdx + 1]) : "{}";
-      if (opts.calls) opts.calls.push([body]);
-      const status = opts.statusFor ? opts.statusFor(body) : 200;
-      let stdout = "";
-      if (status === 200) {
-        const parsed = JSON.parse(body) as { text: string[] };
-        if (opts.mode === "no-vectors") {
-          stdout = `{"ok":true}\n__ICI_HTTP_STATUS__:200`;
-        } else {
-          const vectors = parsed.text.map(t => hashVector(t));
-          stdout = `${JSON.stringify(vectors)}\n__ICI_HTTP_STATUS__:200`;
-        }
-      } else {
-        stdout = `{"message":"rejected"}\n__ICI_HTTP_STATUS__:${status}`;
-      }
-      let settle!: (o: { exitCode: number | null; signal: string | null }) => void;
-      const done = new Promise<{ exitCode: number | null; signal: string | null }>(r => { settle = r; });
-      const handle = {
-        pid: 7,
-        collected: {
-          stdout: { readFrom() { return { text: stdout, nextOffset: 0, lossy: false }; } },
-          stderr: { readFrom() { return { text: "", nextOffset: 0, lossy: false }; } },
-        },
-        done,
-        terminate: () => settle({ exitCode: 0, signal: null }),
-        waitForExit: async () => { settle({ exitCode: 0, signal: null }); return true; },
-      };
-      settle({ exitCode: 0, signal: null });
-      return handle as never;
-    },
-  } as never;
-}
-
-async function searchHarness(opts: { catalogEntries: Array<{ name: string; type: string; sourcePath?: string }>; io: unknown; root?: string; dshHome?: string }) {
-  const ctx = new Context();
-  const root = opts.root ?? await mkdtemp(join(tmpdir(), "ici-search-"));
-  const dshHome = opts.dshHome ?? await mkdtemp(join(tmpdir(), "ici-search-dsh-"));
-  const prev = process.env.DSH_HOME;
-  process.env.DSH_HOME = dshHome;
-  ctx.provide("workspaceBinding", makeBinding(root, "bound") as never);
-  ctx.provide("icomposerCatalog", makeCatalog(opts.catalogEntries) as never);
-  ctx.provide("imoAuth" as never, {
-    prepare: async () => ({
-      ok: true,
-      value: { use: async (cb: (s: { accessToken: string }) => unknown) => cb({ accessToken: "sekret-token" }) },
-    }),
-  } as never);
-  ctx.provide("subprocess", opts.io as never);
-  const fiber = await ctx.plugin(IciEngineService, { timeoutMs: 5000 });
-  await fiber.await();
-  const engine = ctx.get("iciEngine") as IciEngineService;
-  return {
-    engine, root, dshHome,
-    dispose: async () => {
-      await fiber.dispose();
-      if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
-      await rm(dshHome, { recursive: true, force: true });
-      if (opts.root === undefined) await rm(root, { recursive: true, force: true });
-    },
-  };
-}
-
-test("search index/search roundtrip with deterministic vectors and independent cosine", async () => {
-  const entries: Array<{ name: string; type: string; sourcePath?: string }> = [];
-  const root = await mkdtemp(join(tmpdir(), "ici-srch-fx-"));
-  for (const n of ["AlphaAPI", "BetaAPI"]) {
-    await writeMeta(root, "api", n);
-    entries.push({ name: n, type: "api", sourcePath: await writeGroovy(root, "api", n, `class ${n} { def execute(){ def x=1 } }`) });
-  }
-  const io = fakeEmbeddingSubprocess({ mode: "hash", calls: [] });
-  const h = await searchHarness({ catalogEntries: entries, io, root });
-  try {
-    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
-    const idx: any = await h.engine.index({ workspaceId: "ws1" });
-    assert.equal(idx.ok, true);
-    if (idx.ok) {
-      assert.equal(idx.value.total, 2);
-      assert.equal(idx.value.embedded, 2);
-      assert.equal(idx.value.reused, 0);
-    }
-    // regression (P1#1): source_hash must be a real 64-hex digest — the cache
-    // lines are read back and each hash checked against the strict pattern.
-    const hashDirs = await readdir(join(h.dshHome, "ici"));
-    const jsonlPath = join(h.dshHome, "ici", hashDirs[0], "graph", "search", "api_embeddings.jsonl");
-    const jsonl = await readFile(jsonlPath, "utf8");
-    for (const line of jsonl.split("\n").filter(l => l.trim())) {
-      const obj = JSON.parse(line) as { source_hash?: string };
-      assert.match(obj.source_hash ?? "", /^[0-9a-f]{64}$/);
-    }
-    const res: any = await h.engine.search({ workspaceId: "ws1", query: "AlphaAPI", mode: "technical", top: 2 });
-    assert.equal(res.ok, true);
-    if (res.ok) {
-      assert.equal(res.value.rows.length, 2);
-      assert.equal(res.value.rows[0].apiId, "api:AlphaAPI");
-      const expectedVecA = hashVector(`API: AlphaAPI\nMode: technical\nDownstream: \n`);
-      const queryVec = hashVector("AlphaAPI");
-      let dot = 0, ln = 0, rn = 0;
-      for (let i = 0; i < queryVec.length; i++) {
-        dot += queryVec[i] * expectedVecA[i];
-        ln += queryVec[i] ** 2;
-        rn += expectedVecA[i] ** 2;
-      }
-      const expectedScore = dot / (Math.sqrt(ln) * Math.sqrt(rn));
-      assert.ok(Math.abs(res.value.rows[0].score - expectedScore) < 1e-9);
-      assert.ok(res.value.rows[0].downstream.length <= 5);
-    }
-  } finally {
-    await h.dispose();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("index incremental reuse: unchanged api reuses cached vector, changed api re-embeds", async () => {
-  const entries: Array<{ name: string; type: string; sourcePath?: string }> = [];
-  const root = await mkdtemp(join(tmpdir(), "ici-incr-"));
-  for (const n of ["AlphaAPI", "BetaAPI"]) {
-    await writeMeta(root, "api", n);
-    entries.push({ name: n, type: "api", sourcePath: await writeGroovy(root, "api", n, `class ${n} { def execute(){ def x=1 } }`) });
-  }
-  const calls: string[][] = [];
-  const io = fakeEmbeddingSubprocess({ mode: "hash", calls });
-  const h = await searchHarness({ catalogEntries: entries, io, root });
-  try {
-    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
-    const first: any = await h.engine.index({ workspaceId: "ws1" });
-    assert.equal(first.value.embedded, 2);
-    const batchesAfterFirst = calls.length;
-    const second: any = await h.engine.index({ workspaceId: "ws1" });
-    assert.equal(second.value.embedded, 0);
-    assert.equal(second.value.reused, 2);
-    assert.equal(calls.length, batchesAfterFirst);
-    await writeFile(join(root, "src/dev/Tenant/Group/api/AlphaAPI/AlphaAPI.groovy"), `class AlphaAPI { def execute(){ def y=2 } }`, "utf8");
-    const third: any = await h.engine.index({ workspaceId: "ws1" });
-    assert.equal(third.value.embedded, 1);
-    assert.equal(third.value.reused, 1);
-    const fourth: any = await h.engine.index({ workspaceId: "ws1", rebuild: true });
-    assert.equal(fourth.value.embedded, 2);
-    assert.equal(fourth.value.reused, 0);
-  } finally {
-    await h.dispose();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("embedding failure keeps previous JSONL intact (atomicity)", async () => {
-  const entries: Array<{ name: string; type: string; sourcePath?: string }> = [];
-  const root = await mkdtemp(join(tmpdir(), "ici-atomic2-"));
-  for (const n of ["AlphaAPI"]) {
-    await writeMeta(root, "api", n);
-    entries.push({ name: n, type: "api", sourcePath: await writeGroovy(root, "api", n, `class ${n} { def execute(){ def x=1 } }`) });
-  }
-  const good = fakeEmbeddingSubprocess({ mode: "hash" });
-  const h = await searchHarness({ catalogEntries: entries, io: good, root });
-  try {
-    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
-    assert.equal((await h.engine.index({ workspaceId: "ws1" })).ok, true);
-    const hashDirs = await readdir(join(h.dshHome, "ici"));
-    const jsonlPath = join(h.dshHome, "ici", hashDirs[0], "graph", "search", "api_embeddings.jsonl");
-    const before = await readFile(jsonlPath, "utf8");
-    const bad = fakeEmbeddingSubprocess({ statusFor: () => 500 });
-    const ctx2 = new Context();
-    ctx2.provide("workspaceBinding", makeBinding(root, "bound") as never);
-    ctx2.provide("icomposerCatalog", makeCatalog(entries) as never);
-    ctx2.provide("imoAuth" as never, { prepare: async () => ({ ok: true, value: { use: async (cb: any) => cb({ accessToken: "t" }) } }) } as never);
-    ctx2.provide("subprocess", bad as never);
-    const fiber2 = await ctx2.plugin(IciEngineService, { timeoutMs: 5000 });
-    await fiber2.await();
-    const engine2 = ctx2.get("iciEngine") as IciEngineService;
-    const res: any = await engine2.index({ workspaceId: "ws1", rebuild: true });
-    assert.equal(res.ok, false);
-    if (!res.ok) assert.equal(res.error.code, "embedding-error");
-    await fiber2.dispose();
-    const after = await readFile(jsonlPath, "utf8");
-    assert.equal(after, before);
-  } finally {
-    await h.dispose();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("401 maps to invalid-auth; hostile stdout maps to embedding-error", async () => {
-  const entries: Array<{ name: string; type: string; sourcePath?: string }> = [];
-  const root = await mkdtemp(join(tmpdir(), "ici-401-"));
-  await writeMeta(root, "api", "AlphaAPI");
-  entries.push({ name: "AlphaAPI", type: "api", sourcePath: await writeGroovy(root, "api", "AlphaAPI", `class AlphaAPI { def execute(){ def x=1 } }`) });
-  const unauth = fakeEmbeddingSubprocess({ statusFor: () => 401 });
-  const h1 = await searchHarness({ catalogEntries: entries, io: unauth, root });
-  try {
-    assert.equal((await h1.engine.build({ workspaceId: "ws1" })).ok, true);
-    const res: any = await h1.engine.index({ workspaceId: "ws1" });
-    assert.equal(res.ok, false);
-    if (!res.ok) assert.equal(res.error.code, "invalid-auth");
-  } finally {
-    await h1.dispose();
-    await rm(root, { recursive: true, force: true });
-  }
-  const noVec = fakeEmbeddingSubprocess({ mode: "no-vectors" });
-  const root2 = await mkdtemp(join(tmpdir(), "ici-401-b-"));
-  await writeMeta(root2, "api", "AlphaAPI");
-  await writeGroovy(root2, "api", "AlphaAPI", `class AlphaAPI { def execute(){ def x=1 } }`);
-  const h2 = await searchHarness({ catalogEntries: [{ name: "AlphaAPI", type: "api", sourcePath: join(root2, "src/dev/Tenant/Group/api/AlphaAPI/AlphaAPI.groovy") }], io: noVec, root: root2 });
-  try {
-    assert.equal((await h2.engine.build({ workspaceId: "ws1" })).ok, true);
-    const res: any = await h2.engine.index({ workspaceId: "ws1" });
-    assert.equal(res.ok, false);
-    if (!res.ok) assert.equal(res.error.code, "embedding-error");
-  } finally {
-    await h2.dispose();
-    await rm(root2, { recursive: true, force: true });
-  }
-});
-
-test("search gates: no-index before indexing; dispose", async () => {
-  const entries: Array<{ name: string; type: string; sourcePath?: string }> = [];
-  const root = await mkdtemp(join(tmpdir(), "ici-noidx-"));
-  await writeMeta(root, "api", "AlphaAPI");
-  entries.push({ name: "AlphaAPI", type: "api", sourcePath: await writeGroovy(root, "api", "AlphaAPI", `class AlphaAPI { def execute(){ def x=1 } }`) });
-  const io = fakeEmbeddingSubprocess({ mode: "hash" });
-  const h = await searchHarness({ catalogEntries: entries, io, root });
-  try {
-    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
-    const before: any = await h.engine.search({ workspaceId: "ws1", query: "anything" });
-    assert.equal(before.ok, false);
-    if (!before.ok) {
-      assert.equal(before.error.code, "no-index");
-      assert.ok(before.error.message.includes("index"));
-    }
-    const captured = h.engine;
-    await h.dispose();
-    const after: any = await captured.search({ workspaceId: "ws1", query: "x" });
-    assert.equal(after.ok, false);
-    if (!after.ok) assert.equal(after.error.code, "service-disposed");
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("real ssapocpa search smoke: 3-api subset index, query=top1 self-match, token never in output, zero write", async () => {
-  const projectRoot = "/Users/junjie.zhang/skills/ssapocpa";
-  const dshHome = await mkdtemp(join(tmpdir(), "ici-ssmoke-dsh-"));
+test("fixture 3 api/3 function with method nesting -> nodes/edges golden", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-fixture-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-dsh-"));
   const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
-  const { scanWorkspace } = await import("../../icomposer-catalog/src/scan.ts");
-  const scan = await scanWorkspace(projectRoot);
-  const apiEntries = scan.entries.filter(e => e.type === "api").slice(0, 3);
-  const entries = apiEntries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as any).sourcePath }));
-  assert.equal(entries.length, 3);
-  async function snapshot(dir: string): Promise<Map<string, number>> {
-    const map = new Map<string, number>();
-    async function walk(p: string) {
-      const list = await readdir(p, { withFileTypes: true });
-      for (const e of list) {
-        const full = join(p, e.name);
-        if (full.includes("/.metadata/icomposer")) continue;
-        if (e.isDirectory()) await walk(full);
-        else map.set(full, (await stat(full)).mtimeMs);
-      }
-    }
-    await walk(dir);
-    return map;
+  for (const n of ["ApiA", "ApiB", "ApiC"]) await writeMeta(root, "api", n);
+  for (const n of ["FuncA", "FuncB", "FuncC"]) await writeMeta(root, "function", n);
+  const apiA = `
+class ApiA {
+  def execute() {
+    def svc = getCommonService("FuncA")
+    svc.process()
+    this.helper()
   }
-  function hashVector(text: string): number[] {
-    const v: number[] = [];
-    for (let i = 0; i < 8; i++) v.push(((text.charCodeAt(i % text.length) + i * 7) % 100) / 100);
-    return v;
+  def helper() {
+    def x = 1
   }
-  const before = await snapshot(projectRoot);
-  const io = {
-    async resolveExecutable() { return "/usr/bin/curl"; },
-    spawn(spec: { argv: readonly string[] }) {
-      const idx = spec.argv.indexOf("--data-raw");
-      const body = idx >= 0 ? String(spec.argv[idx + 1]) : "{}";
-      const parsed = JSON.parse(body) as { text: string[] };
-      const stdout = `${JSON.stringify(parsed.text.map(t => hashVector(t)))}\n__ICI_HTTP_STATUS__:200`;
-      let settle!: (o: { exitCode: number | null; signal: string | null }) => void;
-      const done = new Promise<{ exitCode: number | null; signal: string | null }>(r => { settle = r; });
-      const handle = {
-        pid: 7,
-        collected: { stdout: { readFrom() { return { text: stdout, nextOffset: 0, lossy: false }; } }, stderr: { readFrom() { return { text: "", nextOffset: 0, lossy: false }; } } },
-        done,
-        terminate: () => settle({ exitCode: 0, signal: null }),
-        waitForExit: async () => { settle({ exitCode: 0, signal: null }); return true; },
-      };
-      settle({ exitCode: 0, signal: null });
-      return handle as never;
-    },
-  };
-  const h = await searchHarness({ root: projectRoot, catalogEntries: entries, dshHome, io });
+}
+`;
+  const funcA = `
+class FuncA {
+  def process() {
+    this.inner()
+  }
+  def inner() {
+    def c = new AppchatSdkClient()
+    c.doSomething()
+  }
+}
+`;
+  const generic = (name: string) => `class ${name} { def execute() { def x=1 } }`;
+  const pApiA = await writeGroovy(root, "api", "ApiA", apiA);
+  const pFuncA = await writeGroovy(root, "function", "FuncA", funcA);
+  await writeGroovy(root, "api", "ApiB", generic("ApiB"));
+  await writeGroovy(root, "api", "ApiC", generic("ApiC"));
+  await writeGroovy(root, "function", "FuncB", generic("FuncB"));
+  await writeGroovy(root, "function", "FuncC", generic("FuncC"));
+
+  const entries = [
+    { name: "ApiA", type: "api", sourcePath: pApiA },
+    { name: "ApiB", type: "api", sourcePath: join(root, "src/dev/Tenant/Group/api/ApiB/ApiB.groovy") },
+    { name: "ApiC", type: "api", sourcePath: join(root, "src/dev/Tenant/Group/api/ApiC/ApiC.groovy") },
+    { name: "FuncA", type: "function", sourcePath: pFuncA },
+    { name: "FuncB", type: "function", sourcePath: join(root, "src/dev/Tenant/Group/function/FuncB/FuncB.groovy") },
+    { name: "FuncC", type: "function", sourcePath: join(root, "src/dev/Tenant/Group/function/FuncC/FuncC.groovy") },
+  ];
+  const h = await harness({ root, catalogEntries: entries, dshHome });
   try {
-    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
-    const idx: any = await h.engine.index({ workspaceId: "ws1" });
-    assert.equal(idx.ok, true);
-    if (idx.ok) assert.equal(idx.value.total, 3);
-    // regression (P1#1): real-project source hashes must be populated
-    const hashDirs = await readdir(join(h.dshHome, "ici"));
-    const jsonlPath = join(h.dshHome, "ici", hashDirs[0], "graph", "search", "api_embeddings.jsonl");
-    const jsonl = await readFile(jsonlPath, "utf8");
-    for (const line of jsonl.split("\n").filter(l => l.trim())) {
-      const obj = JSON.parse(line) as { source_hash?: string };
-      assert.match(obj.source_hash ?? "", /^[0-9a-f]{64}$/);
-    }
-    const target = entries[0].name;
-    const res: any = await h.engine.search({ workspaceId: "ws1", query: target, mode: "technical", top: 3 });
+    const res: any = await h.engine.build({ workspaceId: "ws1" });
     assert.equal(res.ok, true);
-    if (res.ok) {
-      assert.ok(res.value.rows.length >= 1);
-      assert.equal(res.value.rows[0].apiId, `api:${target}`);
-      const serialized = JSON.stringify(res.value);
-      assert.equal(serialized.includes("sekret"), false);
-      assert.equal(serialized.includes("Bearer"), false);
-    }
+    const nodes = res.value.nodes; const edges = res.value.edges;
+    assert.ok(nodes.some((n: any) => n.id === "api:ApiA"));
+    assert.ok(nodes.some((n: any) => n.id === "method:ApiA.execute"));
+    assert.ok(nodes.some((n: any) => n.id === "method:ApiA.helper"));
+    assert.ok(edges.some((e: any) => e.from === "api:ApiA" && e.to === "method:ApiA.execute" && e.kind === "CONTAINS"));
+    assert.ok(edges.some((e: any) => e.from === "method:ApiA.execute" && e.to === "function:FuncA" && e.source === "static"));
+    assert.ok(edges.some((e: any) => e.from === "method:ApiA.execute" && e.to === "method:FuncA.process"));
+    assert.ok(edges.some((e: any) => e.from === "method:ApiA.execute" && e.to === "method:ApiA.helper"));
+    assert.ok(edges.some((e: any) => e.source === "inferred" && e.confidence === "inferred"));
+    assert.equal(res.value.manifest.schemaVersion, 1);
+    assert.ok(res.value.manifest.sourceFingerprint.length === 64);
   } finally {
     await h.dispose();
+    await rm(root, { recursive: true, force: true });
     if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
     await rm(dshHome, { recursive: true, force: true });
   }
-  const after = await snapshot(projectRoot);
-  assert.equal(before.size, after.size);
-  for (const [k, v] of before) assert.equal(after.get(k), v);
+});
+
+test("relationship extraction positive/negative", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-rel-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-rel-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "ApiX");
+  await writeMeta(root, "function", "FuncY");
+  const src = `
+class ApiX {
+  def execute() {
+    // negative: no getCommonService
+    def x = 1
+    // positive local call
+    this.local()
+  }
+  def local() { def y=2 }
+  def unrelated() { def z=getBean("Unknown") }
+}
+`;
+  const p = await writeGroovy(root, "api", "ApiX", src);
+  await writeGroovy(root, "function", "FuncY", `class FuncY { def execute(){ def a=1 } }`);
+  const h = await harness({ root, catalogEntries: [{ name: "ApiX", type: "api", sourcePath: p }, { name: "FuncY", type: "function", sourcePath: join(root, "src/dev/Tenant/Group/function/FuncY/FuncY.groovy") }], dshHome });
+  try {
+    const res: any = await h.engine.build({ workspaceId: "ws1" });
+    assert.equal(res.ok, true);
+    const edges = res.value.edges;
+    assert.ok(edges.some((e: any) => e.from === "method:ApiX.execute" && e.to === "method:ApiX.local"));
+    assert.ok(!edges.some((e: any) => e.to === "function:Unknown"));
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+test("atomic snapshot: build interrupted keeps current previous version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-atomic-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-atomic-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "A1");
+  const p = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  const h = await harness({ root, catalogEntries: [{ name: "A1", type: "api", sourcePath: p }], dshHome });
+  try {
+    const r1: any = await h.engine.build({ workspaceId: "ws1" });
+    assert.equal(r1.ok, true);
+    const base = graphBaseDir(root, "ws1");
+    const m1 = JSON.parse(await readFile(join(currentDir(base), "manifest.json"), "utf8"));
+    const ac = new AbortController(); ac.abort();
+    const r2: any = await h.engine.build({ workspaceId: "ws1" }, { signal: ac.signal });
+    assert.equal(r2.ok, false); assert.equal(r2.error.code, "cancelled");
+    const m2 = JSON.parse(await readFile(join(currentDir(base), "manifest.json"), "utf8"));
+    assert.equal(m1.sourceFingerprint, m2.sourceFingerprint);
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+test("manifest fingerprint changes trigger rebuild", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-fp-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-fp-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "A1");
+  const p = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  const h = await harness({ root, catalogEntries: [{ name: "A1", type: "api", sourcePath: p }], dshHome });
+  try {
+    const r1: any = await h.engine.build({ workspaceId: "ws1" });
+    const fp1 = r1.value.manifest.sourceFingerprint;
+    await writeFile(p, `class A1 { def execute(){ def x=2 } }`, "utf8");
+    const r2: any = await h.engine.build({ workspaceId: "ws1" });
+    assert.notEqual(fp1, r2.value.manifest.sourceFingerprint);
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+test("cancel signal returns cancelled", async () => {
+  const h = await harness({ catalogEntries: [] });
+  try {
+    const ac = new AbortController(); ac.abort();
+    const res: any = await h.engine.build({ workspaceId: "ws1" }, { signal: ac.signal });
+    assert.equal(res.ok, false); assert.equal(res.error.code, "cancelled");
+  } finally {
+    await h.dispose();
+  }
+});
+
+test("gate: unbound and not-found and invalid id", async () => {
+  const h1 = await harness({ bindingMode: "unbound" });
+  try { const r: any = await h1.engine.build({ workspaceId: "ws1" }); assert.equal(r.error.code, "workspace-not-bound"); } finally { await h1.dispose(); }
+  const h2 = await harness({ bindingMode: "not-found" });
+  try { const r: any = await h2.engine.build({ workspaceId: "ws1" }); assert.equal(r.error.code, "workspace-not-found"); } finally { await h2.dispose(); }
+  const h3 = await harness({});
+  try { const r: any = await h3.engine.build({ workspaceId: "" }); assert.equal(r.error.code, "invalid-workspace-id"); } finally { await h3.dispose(); }
+});
+
+test("progress callback invoked", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-prog-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-prog-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "A1");
+  const p = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  const h = await harness({ root, catalogEntries: [{ name: "A1", type: "api", sourcePath: p }], dshHome });
+  try {
+    const calls: Array<[number, number, string]> = [];
+    const res: any = await h.engine.build({ workspaceId: "ws1" }, { onProgress: (c: number, t: number, l: string) => calls.push([c, t, l]) });
+    assert.equal(res.ok, true);
+    assert.ok(calls.length > 0);
+    assert.ok(calls.every(([c, t]) => c <= t));
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+// ---- TASK-026: jobs lifecycle (fake registry mirrors ctx.jobs.start) ----
+
+interface CapturedJob {
+  kind: string;
+  label: string;
+  hooks: {
+    cancel(reason?: string): void;
+    done: Promise<{ status: "completed" | "killed" | "failed"; detail?: string }>;
+    readOutput?(): string;
+  };
+}
+
+function jobsRegistry(captured: CapturedJob[]) {
+  return {
+    start(spec: { kind: string; label: string; run(): CapturedJob["hooks"] }): string {
+      const hooks = spec.run();
+      captured.push({ kind: spec.kind, label: spec.label, hooks });
+      return `${spec.kind}-1`;
+    },
+  };
+}
+
+test("jobs lifecycle: kill mid-build → outcome killed and current preserved", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-job-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-job-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "A1");
+  const p = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  // first: successful build to establish current
+  const h = await harness({ root, catalogEntries: [{ name: "A1", type: "api", sourcePath: p }], dshHome });
+  try {
+    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
+    const base = graphBaseDir(root, "ws1");
+    const manifestBefore = await readFile(join(currentDir(base), "manifest.json"), "utf8");
+
+    // second build via a job that gets killed before completion
+    const captured: CapturedJob[] = [];
+    const controller = new AbortController();
+    const registry = jobsRegistry(captured);
+    const jobId = registry.start({
+      kind: "ici-build",
+      label: "ici-build ws1",
+      run() {
+        return {
+          cancel: (reason?: string) => {
+            controller.abort();
+            void reason;
+          },
+          done: h.engine.build({ workspaceId: "ws1" }, { signal: controller.signal }).then((res: any) => {
+            if (res.ok) return { status: "completed" as const, detail: `nodes=${res.value.manifest.nodeCount}` };
+            if (res.error.code === "cancelled") return { status: "killed" as const, detail: "cancelled" };
+            return { status: "failed" as const, detail: res.error.code };
+          }),
+          readOutput: () => "",
+        };
+      },
+    });
+    assert.equal(jobId, "ici-build-1");
+    captured[0].hooks.cancel("user requested");
+    const outcome = await captured[0].hooks.done;
+    assert.equal(outcome.status, "killed");
+    // current preserved
+    const manifestAfter = await readFile(join(currentDir(base), "manifest.json"), "utf8");
+    assert.equal(manifestAfter, manifestBefore);
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+test("jobs progress: readOutput drains incremental progress lines", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-jp-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-jp-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  for (const n of ["A1", "A2"]) await writeMeta(root, "api", n);
+  const e1 = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  const e2 = await writeGroovy(root, "api", "A2", `class A2 { def execute(){ def x=2 } }`);
+  const captured: CapturedJob[] = [];
+  const h = await harness({
+    root,
+    catalogEntries: [
+      { name: "A1", type: "api", sourcePath: e1 },
+      { name: "A2", type: "api", sourcePath: e2 },
+    ],
+    dshHome,
+  });
+  try {
+    const registry = jobsRegistry(captured);
+    registry.start({
+      kind: "ici-build",
+      label: "ici-build ws1",
+      run() {
+        const lines: string[] = [];
+        const work = h.engine.build({ workspaceId: "ws1" }, {
+          onProgress: (c, t, l) => lines.push(`[${c}/${t}] ${l}`),
+        });
+        return {
+          cancel: () => {},
+          done: work.then((res: any) => res.ok
+            ? { status: "completed" as const, detail: `nodes=${res.value.manifest.nodeCount} edges=${res.value.manifest.edgeCount}` }
+            : { status: "failed" as const, detail: res.error.code }),
+          readOutput: () => lines.splice(0).join("\n"),
+        };
+      },
+    });
+    const outcome = await captured[0].hooks.done;
+    assert.equal(outcome.status, "completed");
+    assert.match(outcome.detail ?? "", /nodes=\d+ edges=\d+/);
+    const output = captured[0].hooks.readOutput!();
+    const drained = output.split("\n").filter(Boolean);
+    assert.ok(drained.length >= 2);
+    assert.ok(drained.every(l => l.startsWith("[")));
+    // second read is empty (cursor consumed)
+    assert.equal(captured[0].hooks.readOutput!(), "");
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
 });

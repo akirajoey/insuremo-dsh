@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "ici/build-job", "ici/status", "ici/cleanup-plan", "ici/cleanup-apply", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -934,6 +934,125 @@ const schemas = {
           },
         },
         ["workspaceId", "rows", "truncated"],
+      ),
+    },
+  },
+  "ici-build-job.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-build-job.json",
+    title: "ici/build-job request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          mode: { enum: ["graph", "search-index"] },
+          rebuild: { type: "boolean" },
+        },
+        ["requestId", "schemaVersion", "workspaceId"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          kind: { enum: ["inline", "background"] },
+          jobId: { type: "string", minLength: 1 },
+          label: { type: "string", minLength: 1 },
+          detail: objectSchema(
+            {
+              nodeCount: { type: "integer", minimum: 0 },
+              edgeCount: { type: "integer", minimum: 0 },
+              builtAt: { type: "string", minLength: 1 },
+              total: { type: "integer", minimum: 0 },
+              embedded: { type: "integer", minimum: 0 },
+              reused: { type: "integer", minimum: 0 },
+            },
+            [],
+          ),
+          error: objectSchema({ code: { type: "string", minLength: 1 } }, ["code"]),
+        },
+        ["workspaceId", "kind"],
+      ),
+    },
+  },
+  "ici-status.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-status.json",
+    title: "ici/status request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        { ...requestProperties, workspaceId: { type: "string", minLength: 1 } },
+        ["requestId", "schemaVersion", "workspaceId"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          builtAt: { type: "string" },
+          nodeCount: { type: "integer", minimum: 0 },
+          edgeCount: { type: "integer", minimum: 0 },
+          searchVectors: { type: "integer", minimum: 0 },
+          stale: { type: "boolean" },
+          engineVersion: { type: "string", minLength: 1 },
+          schemaVersion: { type: "integer", minimum: 1 },
+          requiredFiles: objectSchema(
+            {
+              nodes: { type: "boolean" },
+              edges: { type: "boolean" },
+              manifest: { type: "boolean" },
+            },
+            ["nodes", "edges", "manifest"],
+          ),
+          error: objectSchema({ code: { type: "string", minLength: 1 } }, ["code"]),
+        },
+        ["workspaceId"],
+      ),
+    },
+  },
+  "ici-cleanup-plan.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-cleanup-plan.json",
+    title: "ici/cleanup-plan request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        { ...requestProperties, workspaceId: { type: "string", minLength: 1 } },
+        ["requestId", "schemaVersion", "workspaceId"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          paths: { type: "array", items: { type: "string", minLength: 1 } },
+        },
+        ["workspaceId", "paths"],
+      ),
+    },
+  },
+  "ici-cleanup-apply.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-cleanup-apply.json",
+    title: "ici/cleanup-apply request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          expectedPaths: { type: "array", items: { type: "string", minLength: 1 } },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "expectedPaths"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          removed: { type: "array", items: { type: "string", minLength: 1 } },
+          skipped: { type: "array", items: { type: "string", minLength: 1 } },
+        },
+        ["workspaceId", "removed", "skipped"],
       ),
     },
   },

@@ -74,6 +74,9 @@ export interface IciEngineFace {
   queryImpact(input: QueryImpactInput, options?: BuildOptions | AbortSignal): Promise<Result<QueryImpactResult>>;
   index(input: SearchIndexInput, options?: BuildOptions | AbortSignal): Promise<Result<SearchIndexResult>>;
   search(input: SearchInput, options?: BuildOptions | AbortSignal): Promise<Result<SearchResult>>;
+  diagnostics(input: { readonly workspaceId: string }): Promise<Result<DiagnosticsResult>>;
+  cleanupPlan(input: { readonly workspaceId: string }): Promise<Result<CleanupPlan>>;
+  cleanupApply(input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }): Promise<Result<CleanupApplyResult>>;
 }
 
 // ---- query surface (TASK-024; Rust query/mod.rs semantics) ----
@@ -180,4 +183,34 @@ export interface SearchResult {
   readonly rows: readonly SearchRow[];
   readonly truncated: boolean;
   readonly stale?: true;
+}
+
+// ---- jobs / diagnostics / cleanup (TASK-026) ----
+
+export type IciJobMode = "graph" | "search-index";
+
+export interface DiagnosticsResult {
+  readonly workspaceId: string;
+  /** Paths relative to DSH_HOME. */
+  readonly indexPaths: { readonly graphCurrent: string; readonly searchJsonl: string };
+  readonly schemaVersion: number;
+  readonly engineVersion: string;
+  readonly builtAt: string | null;
+  readonly nodeCount: number;
+  readonly edgeCount: number;
+  readonly searchVectors: number;
+  readonly stale: boolean;
+  readonly requiredFiles: { readonly nodes: boolean; readonly edges: boolean; readonly manifest: boolean };
+}
+
+export interface CleanupPlan {
+  readonly workspaceId: string;
+  /** Absolute DSH_HOME paths safe to delete (generated residue only). */
+  readonly paths: readonly string[];
+}
+
+export interface CleanupApplyResult {
+  readonly workspaceId: string;
+  readonly removed: readonly string[];
+  readonly skipped: readonly string[];
 }

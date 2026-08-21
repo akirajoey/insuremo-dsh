@@ -34,6 +34,11 @@ export async function harness(opts: { root?: string; bindingMode?: "bound" | "un
   ctx.provide("imoAuth" as never, opts.imoAuth ?? {
     prepare: async () => ({ ok: false, error: { code: "invalid-auth" } }),
   } as never);
+  // Jobs are started by Agent tools, never by the engine itself; tests that
+  // exercise job lifecycles drive their own registry.
+  ctx.provide("jobs" as never, {
+    start: () => { throw new Error("jobs registry not wired in this harness"); },
+  } as never);
   const fiber = await ctx.plugin(IciEngineService);
   await fiber.await();
   const engine = ctx.get("iciEngine") as IciEngineService;

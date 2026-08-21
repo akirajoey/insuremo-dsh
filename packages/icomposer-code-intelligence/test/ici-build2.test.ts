@@ -194,3 +194,131 @@ async function findCount(dir: string, matcher: (name: string) => boolean, exclud
   await walk(dir);
   return count;
 }
+
+// ---- TASK-026: diagnostics + cleanup ----
+
+test("diagnostics: counts, staleness, required files, index paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-diag-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-diag-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "A1");
+  const p = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  const h = await harness({ root, catalogEntries: [{ name: "A1", type: "api", sourcePath: p }], dshHome });
+  try {
+    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
+    const diag: any = await h.engine.diagnostics({ workspaceId: "ws1" });
+    assert.equal(diag.ok, true);
+    if (diag.ok) {
+      assert.equal(diag.value.workspaceId, "ws1");
+      assert.equal(diag.value.schemaVersion, 1);
+      assert.equal(diag.value.engineVersion, "0.1.0");
+      assert.ok(diag.value.nodeCount >= 1);
+      assert.equal(diag.value.stale, false);
+      assert.deepEqual(diag.value.requiredFiles, { nodes: true, edges: true, manifest: true });
+      assert.ok(diag.value.indexPaths.graphCurrent.includes(join("ici", "")) || diag.value.indexPaths.graphCurrent.includes("ici"));
+      assert.ok(diag.value.builtAt !== null);
+    }
+    // stale after content change
+    await writeFile(p, `class A1 { def execute(){ def y=2 } }`, "utf8");
+    const diag2: any = await h.engine.diagnostics({ workspaceId: "ws1" });
+    if (diag2.ok) assert.equal(diag2.value.stale, true);
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+test("cleanupPlan lists injected residue; cleanupApply removes exactly those; foreign paths skipped", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-cln-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-cln-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "A1");
+  const p = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  const h = await harness({ root, catalogEntries: [{ name: "A1", type: "api", sourcePath: p }], dshHome });
+  try {
+    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
+    // inject residue exactly like the promote would leave behind
+    const base = graphBaseDir(root, "ws1");
+    const residueA = join(base, "staging-1700000000-abc");
+    const residueB = join(base, "stale-1700000001-def");
+    await mkdir(residueA, { recursive: true });
+    await writeFile(join(residueA, "nodes.json"), "[]", "utf8");
+    await mkdir(residueB, { recursive: true });
+
+    const plan: any = await h.engine.cleanupPlan({ workspaceId: "ws1" });
+    assert.equal(plan.ok, true);
+    if (plan.ok) {
+      assert.ok(plan.value.paths.includes(residueA));
+      assert.ok(plan.value.paths.includes(residueB));
+      assert.equal(plan.value.paths.length, 2);
+    }
+    // apply with a foreign path mixed in → foreign skipped
+    const foreign = join(root, "src", "dev", "Tenant", "Group", "api", "A1", "A1.groovy");
+    const apply: any = await h.engine.cleanupApply({
+      workspaceId: "ws1",
+      expectedPaths: [residueA, residueB, foreign],
+    });
+    assert.equal(apply.ok, true);
+    if (apply.ok) {
+      assert.deepEqual(apply.value.removed.sort(), [residueA, residueB].sort());
+      assert.deepEqual(apply.value.skipped, [foreign]);
+    }
+    // residue gone; source file untouched
+    const stillThere = await readFile(foreign, "utf8");
+    assert.ok(stillThere.includes("class A1"));
+    // idempotent second apply: nothing left to remove
+    const apply2: any = await h.engine.cleanupApply({ workspaceId: "ws1", expectedPaths: [residueA] });
+    if (apply2.ok) assert.equal(apply2.value.removed.length, 0);
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+test("real ssapocpa ici_status smoke: 4502 nodes / 10308 edges / stale flag; cleanup clears injected staging residue", async () => {
+  const projectRoot = "/Users/junjie.zhang/skills/ssapocpa";
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-stsmoke-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  const { scanWorkspace } = await import("../../icomposer-catalog/src/scan.ts");
+  const scan = await scanWorkspace(projectRoot);
+  const entries = scan.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as any).sourcePath }));
+  const h = await harness({ root: projectRoot, catalogEntries: entries, dshHome });
+  try {
+    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
+    const diag: any = await h.engine.diagnostics({ workspaceId: "ws1" });
+    assert.equal(diag.ok, true);
+    if (diag.ok) {
+      assert.equal(diag.value.nodeCount, 4502);
+      assert.equal(diag.value.edgeCount, 10308);
+      assert.equal(diag.value.stale, false);
+      assert.equal(diag.value.schemaVersion, 1);
+      assert.deepEqual(diag.value.requiredFiles, { nodes: true, edges: true, manifest: true });
+    }
+    // inject staging residue into the isolated DSH_HOME and clear via plan+apply
+    const base = graphBaseDir(projectRoot, "ws1");
+    const residue = join(base, "staging-1700000000-injected");
+    await mkdir(residue, { recursive: true });
+    const plan: any = await h.engine.cleanupPlan({ workspaceId: "ws1" });
+    assert.equal(plan.ok, true);
+    if (plan.ok) {
+      assert.equal(plan.value.paths.length, 1);
+      assert.equal(plan.value.paths[0], residue);
+    }
+    const apply: any = await h.engine.cleanupApply({ workspaceId: "ws1", expectedPaths: plan.value.paths });
+    assert.equal(apply.ok, true);
+    if (apply.ok) {
+      assert.equal(apply.value.removed.length, 1);
+      assert.equal(apply.value.skipped.length, 0);
+    }
+    const planAfter: any = await h.engine.cleanupPlan({ workspaceId: "ws1" });
+    if (planAfter.ok) assert.equal(planAfter.value.paths.length, 0);
+  } finally {
+    await h.dispose();
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});

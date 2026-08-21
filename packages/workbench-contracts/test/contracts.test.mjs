@@ -42,6 +42,10 @@ const iciQuerySchemaFiles = [
   "ici-query-impact.schema.json",
   "ici-search-index.schema.json",
   "ici-search.schema.json",
+  "ici-build-job.schema.json",
+  "ici-status.schema.json",
+  "ici-cleanup-plan.schema.json",
+  "ici-cleanup-apply.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -57,7 +61,7 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 39);
+  assert.equal(files.length, 43);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles, ...iciQuerySchemaFiles].sort(),

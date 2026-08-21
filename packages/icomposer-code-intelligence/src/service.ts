@@ -4,10 +4,20 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
+import { applyCleanup, collectFileFacts, planCleanup } from "./maintenance.ts";
 import { apiEmbeddingText, downstreamNodeNames, searchEvidence, type ApiSearchDoc } from "./search-core.ts";
 import { graphBaseDir, loadSnapshot, writeAtomic } from "./storage.ts";
 import { buildDownstreamTrees, buildImpactPaths, candidatesOf, DEFAULT_DEPTH, DEFAULT_MAX_NODES, MAX_DEPTH, MAX_MAX_NODES, resolveFocusId, resolveQueryNodes } from "./query.ts";
-import type { BuildOptions, EmbeddingMode, IciBuildResult, IciEdge, IciErrorCode, IciManifest, IciNode, ProgressCallback, QueryApiInput, QueryApiResult, QueryImpactInput, QueryImpactResult, Result, SearchIndexInput, SearchIndexResult, SearchInput, SearchResult } from "./types.ts";
+import type { BuildOptions, CleanupApplyResult, CleanupPlan, DiagnosticsResult, EmbeddingMode, IciBuildResult, IciEdge, IciErrorCode, IciManifest, IciNode, ProgressCallback, QueryApiInput, QueryApiResult, QueryImpactInput, QueryImpactResult, Result, SearchIndexInput, SearchIndexResult, SearchInput, SearchResult } from "./types.ts";
+import { getDshHome, workspaceHash } from "./storage.ts";
+
+
+declare module "@deepseek-ai/dsh-jobs" {
+  interface JobKindMap {
+    "ici-build": "ici-build";
+    "ici-index": "ici-index";
+  }
+}
 
 const PASSTHROUGH_CODES = new Set<IciErrorCode>([
   "workspace-not-found",
@@ -36,7 +46,7 @@ interface GraphView {
 
 
 export class IciEngineService extends Service {
-  static inject = ["workspaceBinding", "icomposerCatalog", "imoAuth"] as const;
+  static inject = ["workspaceBinding", "icomposerCatalog", "imoAuth", "jobs"] as const;
   #disposed = false;
   #queue: Promise<void> = Promise.resolve();
   readonly #engineVersion = "0.1.0";
@@ -52,6 +62,9 @@ export class IciEngineService extends Service {
       queryImpact: (input: QueryImpactInput, options?: BuildOptions | AbortSignal) => self.queryImpact(input, options),
       index: (input: SearchIndexInput, options?: BuildOptions | AbortSignal) => self.index(input, options),
       search: (input: SearchInput, options?: BuildOptions | AbortSignal) => self.search(input, options),
+      diagnostics: (input: { readonly workspaceId: string }) => self.diagnostics(input),
+      cleanupPlan: (input: { readonly workspaceId: string }) => self.cleanupPlan(input),
+      cleanupApply: (input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }) => self.cleanupApply(input),
     });
     ctx.set("iciEngine", face);
     ctx.effect(() => () => { self.#disposed = true; }, "iciEngine.dispose");
@@ -346,6 +359,77 @@ export class IciEngineService extends Service {
     } catch {
       return err("lease-revoked");
     }
+  }
+
+
+  async diagnostics(input: { readonly workspaceId: string }): Promise<Result<DiagnosticsResult>> {
+    if (this.#disposed) return err("service-disposed");
+    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
+    const binding = await this.bindingEntry(input.workspaceId);
+    if (!binding.ok) return binding as Result<never>;
+    const { canonicalPath } = binding.value;
+    const base = graphBaseDir(canonicalPath, input.workspaceId);
+    const workspaceDir = join(base, "..");
+    const facts = await collectFileFacts({ workspaceDir });
+    let manifest: Record<string, unknown> | null = null;
+    try { manifest = JSON.parse(facts.manifest ?? "null") as Record<string, unknown> | null; } catch { manifest = null; }
+    // stale: recompute source fingerprint when a snapshot exists.
+    let isStale = false;
+    if (manifest !== null && typeof manifest.sourceFingerprint === "string") {
+      try {
+        const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as {
+          listAssets(input: { workspaceId: string }, signal?: AbortSignal): Promise<CatalogResult>;
+        } | undefined;
+        if (catalog) {
+          const catalogRes = await catalog.listAssets({ workspaceId: input.workspaceId });
+          if (catalogRes.ok) {
+            const entries = catalogRes.value!.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath }));
+            const sources = await collectSources(canonicalPath, entries);
+            if (fingerprintSources(sources.values()) !== manifest.sourceFingerprint) isStale = true;
+          }
+        }
+      } catch { /* best-effort */ }
+    }
+    const home = getDshHome();
+    const result: DiagnosticsResult = {
+      workspaceId: input.workspaceId,
+      indexPaths: {
+        graphCurrent: join(home, "ici", workspaceHash(canonicalPath, input.workspaceId), "graph", "current"),
+        searchJsonl: join(home, "ici", workspaceHash(canonicalPath, input.workspaceId), "graph", "search", "api_embeddings.jsonl"),
+      },
+      schemaVersion: 1,
+      engineVersion: this.#engineVersion,
+      builtAt: manifest !== null && typeof manifest.builtAt === "string" ? manifest.builtAt : null,
+      nodeCount: manifest !== null && typeof manifest.nodeCount === "number" ? manifest.nodeCount : 0,
+      edgeCount: manifest !== null && typeof manifest.edgeCount === "number" ? manifest.edgeCount : 0,
+      searchVectors: facts.searchVectors,
+      stale: isStale,
+      requiredFiles: { nodes: facts.nodesExists, edges: facts.edgesExists, manifest: manifest !== null },
+    };
+    return { ok: true, value: result };
+  }
+
+  async cleanupPlan(input: { readonly workspaceId: string }): Promise<Result<CleanupPlan>> {
+    if (this.#disposed) return err("service-disposed");
+    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
+    const binding = await this.bindingEntry(input.workspaceId);
+    if (!binding.ok) return binding as Result<never>;
+    const { canonicalPath } = binding.value;
+    const workspaceDir = join(graphBaseDir(canonicalPath, input.workspaceId), "..");
+    const paths = await planCleanup(workspaceDir);
+    return { ok: true, value: { workspaceId: input.workspaceId, paths } };
+  }
+
+  async cleanupApply(input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }): Promise<Result<CleanupApplyResult>> {
+    if (this.#disposed) return err("service-disposed");
+    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
+    if (!Array.isArray(input.expectedPaths)) return err("invalid-workspace-id", "expectedPaths must be an array");
+    const binding = await this.bindingEntry(input.workspaceId);
+    if (!binding.ok) return binding as Result<never>;
+    const { canonicalPath } = binding.value;
+    const workspaceDir = join(graphBaseDir(canonicalPath, input.workspaceId), "..");
+    const { removed, skipped } = await applyCleanup(workspaceDir, input.expectedPaths);
+    return { ok: true, value: { workspaceId: input.workspaceId, removed, skipped } };
   }
 
   private async bindingEntry(workspaceId: string): Promise<Result<{ canonicalPath: string; workspaceId: string; authProfile?: string; environmentId?: string }>> {

@@ -36,3 +36,26 @@ declare module "@deepseek-ai/dsh-subprocess" {
     }): SubprocessHandle;
   }
 }
+
+declare module "@deepseek-ai/dsh-jobs" {
+  export interface JobKindMap { bash: "bash"; subagent: "subagent"; }
+  export type JobKind = JobKindMap[keyof JobKindMap];
+  export interface JobOutcome {
+    status: "completed" | "killed" | "failed";
+    detail?: string;
+    output?: string;
+  }
+  export interface JobHooks {
+    cancel(reason?: string): void;
+    done: Promise<JobOutcome>;
+    readOutput?(): string;
+  }
+  export interface JobStart {
+    kind: JobKind;
+    label: string;
+    outputLimitBytes?: number;
+    owner?: unknown;
+    run(): JobHooks;
+  }
+  export interface JobRegistry { start(spec: JobStart): string; }
+}

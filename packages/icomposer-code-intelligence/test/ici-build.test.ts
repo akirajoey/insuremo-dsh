@@ -196,3 +196,127 @@ test("progress callback invoked", async () => {
     await rm(dshHome, { recursive: true, force: true });
   }
 });
+
+// ---- TASK-026: jobs lifecycle (fake registry mirrors ctx.jobs.start) ----
+
+interface CapturedJob {
+  kind: string;
+  label: string;
+  hooks: {
+    cancel(reason?: string): void;
+    done: Promise<{ status: "completed" | "killed" | "failed"; detail?: string }>;
+    readOutput?(): string;
+  };
+}
+
+function jobsRegistry(captured: CapturedJob[]) {
+  return {
+    start(spec: { kind: string; label: string; run(): CapturedJob["hooks"] }): string {
+      const hooks = spec.run();
+      captured.push({ kind: spec.kind, label: spec.label, hooks });
+      return `${spec.kind}-1`;
+    },
+  };
+}
+
+test("jobs lifecycle: kill mid-build → outcome killed and current preserved", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-job-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-job-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  await writeMeta(root, "api", "A1");
+  const p = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  // first: successful build to establish current
+  const h = await harness({ root, catalogEntries: [{ name: "A1", type: "api", sourcePath: p }], dshHome });
+  try {
+    assert.equal((await h.engine.build({ workspaceId: "ws1" })).ok, true);
+    const base = graphBaseDir(root, "ws1");
+    const manifestBefore = await readFile(join(currentDir(base), "manifest.json"), "utf8");
+
+    // second build via a job that gets killed before completion
+    const captured: CapturedJob[] = [];
+    const controller = new AbortController();
+    const registry = jobsRegistry(captured);
+    const jobId = registry.start({
+      kind: "ici-build",
+      label: "ici-build ws1",
+      run() {
+        return {
+          cancel: (reason?: string) => {
+            controller.abort();
+            void reason;
+          },
+          done: h.engine.build({ workspaceId: "ws1" }, { signal: controller.signal }).then((res: any) => {
+            if (res.ok) return { status: "completed" as const, detail: `nodes=${res.value.manifest.nodeCount}` };
+            if (res.error.code === "cancelled") return { status: "killed" as const, detail: "cancelled" };
+            return { status: "failed" as const, detail: res.error.code };
+          }),
+          readOutput: () => "",
+        };
+      },
+    });
+    assert.equal(jobId, "ici-build-1");
+    captured[0].hooks.cancel("user requested");
+    const outcome = await captured[0].hooks.done;
+    assert.equal(outcome.status, "killed");
+    // current preserved
+    const manifestAfter = await readFile(join(currentDir(base), "manifest.json"), "utf8");
+    assert.equal(manifestAfter, manifestBefore);
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});
+
+test("jobs progress: readOutput drains incremental progress lines", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-jp-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-jp-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  for (const n of ["A1", "A2"]) await writeMeta(root, "api", n);
+  const e1 = await writeGroovy(root, "api", "A1", `class A1 { def execute(){ def x=1 } }`);
+  const e2 = await writeGroovy(root, "api", "A2", `class A2 { def execute(){ def x=2 } }`);
+  const captured: CapturedJob[] = [];
+  const h = await harness({
+    root,
+    catalogEntries: [
+      { name: "A1", type: "api", sourcePath: e1 },
+      { name: "A2", type: "api", sourcePath: e2 },
+    ],
+    dshHome,
+  });
+  try {
+    const registry = jobsRegistry(captured);
+    registry.start({
+      kind: "ici-build",
+      label: "ici-build ws1",
+      run() {
+        const lines: string[] = [];
+        const work = h.engine.build({ workspaceId: "ws1" }, {
+          onProgress: (c, t, l) => lines.push(`[${c}/${t}] ${l}`),
+        });
+        return {
+          cancel: () => {},
+          done: work.then((res: any) => res.ok
+            ? { status: "completed" as const, detail: `nodes=${res.value.manifest.nodeCount} edges=${res.value.manifest.edgeCount}` }
+            : { status: "failed" as const, detail: res.error.code }),
+          readOutput: () => lines.splice(0).join("\n"),
+        };
+      },
+    });
+    const outcome = await captured[0].hooks.done;
+    assert.equal(outcome.status, "completed");
+    assert.match(outcome.detail ?? "", /nodes=\d+ edges=\d+/);
+    const output = captured[0].hooks.readOutput!();
+    const drained = output.split("\n").filter(Boolean);
+    assert.ok(drained.length >= 2);
+    assert.ok(drained.every(l => l.startsWith("[")));
+    // second read is empty (cursor consumed)
+    assert.equal(captured[0].hooks.readOutput!(), "");
+  } finally {
+    await h.dispose();
+    await rm(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+    await rm(dshHome, { recursive: true, force: true });
+  }
+});

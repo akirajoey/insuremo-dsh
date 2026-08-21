@@ -416,7 +416,33 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   ctx.provide("subprocess", fakeSubprocess() as never);
   ctx.provide("workspaceBinding", fakeBinding("bound", await mkdtemp(join(tmpdir(), "verify-tools-"))) as never);
   ctx.provide("imoAuth" as never, stubAuth("ok") as never);
+  let buildShouldFail = false;
   ctx.provide("iciEngine", {
+    build: async (input: { workspaceId: string }, options?: { signal?: AbortSignal; onProgress?: (c: number, t: number, l: string) => void }) => {
+      if (buildShouldFail) return { ok: false, error: { code: "storage-error" } };
+      options?.onProgress?.(1, 2, "scanning metadata api");
+      options?.onProgress?.(2, 2, "writing graph outputs");
+      return { ok: true, value: { manifest: { nodeCount: 3, edgeCount: 2, sourceFingerprint: "f".repeat(64), builtAt: new Date().toISOString() } } };
+    },
+    index: async (input: { workspaceId: string; rebuild?: boolean }, options?: { signal?: AbortSignal; onProgress?: (c: number, t: number, l: string) => void }) => {
+      if (buildShouldFail) return { ok: false, error: { code: "embedding-error" } };
+      options?.onProgress?.(1, 1, "embedding batch");
+      return { ok: true, value: { total: 5, embedded: input.rebuild === true ? 5 : 1, reused: input.rebuild === true ? 0 : 4 } };
+    },
+    diagnostics: async () => ({
+      ok: true,
+      value: {
+        indexPaths: { graphCurrent: "ici/x/graph/current", searchJsonl: "ici/x/graph/search/api_embeddings.jsonl" },
+        schemaVersion: 1,
+        engineVersion: "0.1.0",
+        builtAt: new Date().toISOString(),
+        nodeCount: 3,
+        edgeCount: 2,
+        searchVectors: 5,
+        stale: false,
+        requiredFiles: { nodes: true, edges: true, manifest: true },
+      },
+    }),
     search: async () => ({
       ok: true,
       value: {
@@ -485,8 +511,8 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   const { registerIcomposerToolsWith } = await import("../src/tool-defs.ts");
   const disposers = registerIcomposerToolsWith(ctx, (options) => options);
   try {
-    assert.deepEqual([...registered.keys()].sort(), ["ici_query", "ici_search", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
-    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150, 150]);
+    assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150, 150, 150, 150]);
     assert.equal(sections.every(x => x.name.startsWith("tool:")), true);
     const exec = { signal: new AbortController().signal };
 
@@ -523,9 +549,127 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     assert.equal(searchOut.rows[0].apiName, "AlphaAPI");
     assert.ok(Math.abs(searchOut.rows[0].score - 0.92) < 1e-9);
     assert.equal(searchOut.error, undefined);
+    // ici_build small workspace → inline with full detail
+    const buildInline: any = await registered.get("ici_build")!.execute({ workspace_id: "ws1" }, exec);
+    assert.equal(buildInline.kind, "inline");
+    assert.equal(buildInline.detail.nodeCount, 3);
+    assert.equal(buildInline.detail.edgeCount, 2);
+    assert.equal(buildInline.error, undefined);
+    // ici_build search-index mode
+    const indexInline: any = await registered.get("ici_build")!.execute({ workspace_id: "ws1", mode: "search-index", rebuild: true }, exec);
+    assert.equal(indexInline.kind, "inline");
+    assert.deepEqual(indexInline.detail, { total: 5, embedded: 5, reused: 0 });
+    // ici_status diagnostics projection
+    const status: any = await registered.get("ici_status")!.execute({ workspace_id: "ws1" }, exec);
+    assert.equal(status.workspace_id, "ws1");
+    assert.ok(status.requiredFiles.manifest === false || status.requiredFiles.manifest === true);
   } finally {
     for (const dispose of disposers) dispose();
   }
-  assert.deepEqual(removed.sort(), ["ici_query", "ici_search", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+  assert.deepEqual(removed.sort(), ["ici_build", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
   assert.equal(registered.size, 0);
 });
+
+test("ici_build background: production mapper maps engine cancelled to JobOutcome killed; failure path stays failed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-bg-"));
+  const dshHome = await mkdtemp(join(tmpdir(), "ici-bg-dsh-"));
+  const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
+  const started: Array<{ kind: string; hooks: { cancel(reason?: string): void; done: Promise<{ status: string; detail?: string }>; readOutput?(): string } }> = [];
+  const reg: Array<{ name: string; execute: (a: Record<string, unknown>, e: { signal: AbortSignal }) => Promise<unknown> }> = [];
+
+  // Controllable engine: hangs until the job signal aborts (→ cancelled), or
+  // fails immediately when armed (→ failed).
+  let engineFailNext = false;
+  let lastSignal: AbortSignal | undefined;
+  const iciEngineStub = {
+    build: (_input: unknown, options?: { signal?: AbortSignal }) => new Promise(resolve => {
+      lastSignal = options?.signal;
+      const finish = () => resolve(
+        engineFailNext ? { ok: false, error: { code: "storage-error" } }
+          : options?.signal?.aborted ? { ok: false, error: { code: "cancelled" } }
+            : { ok: true, value: { manifest: { nodeCount: 9, edgeCount: 8, sourceFingerprint: "x", builtAt: new Date().toISOString() } } },
+      );
+      if (engineFailNext || options?.signal?.aborted) finish();
+      else options?.signal?.addEventListener("abort", finish, { once: true });
+    }),
+    index: async () => ({ ok: true, value: { total: 0, embedded: 0, reused: 0 } }),
+    diagnostics: async () => ({ ok: true, value: {
+      indexPaths: { graphCurrent: "g", searchJsonl: "s" }, schemaVersion: 1, engineVersion: "0.1.0",
+      builtAt: null, nodeCount: 0, edgeCount: 0, searchVectors: 0, stale: false,
+      requiredFiles: { nodes: false, edges: false, manifest: false },
+    } }),
+    search: async () => ({ ok: true, value: { rows: [], truncated: false } }),
+    queryApi: async () => ({ ok: true, value: { matched: [], roots: [], truncated: false, truncatedAt: [] } }),
+    queryImpact: async () => ({ ok: true, value: { matched: [], paths: [], confidenceCounts: { static: 0, platform: 0, inferred: 0 }, truncated: false } }),
+  };
+
+  const ctx = new Context();
+  ctx.provide("iciEngine", iciEngineStub as never);
+  // >50 assets forces the background path through ctx.jobs.start.
+  ctx.provide("icomposerCatalog", {
+    listAssets: async () => ({ ok: true, value: { entries: [], counts: { api: 60, function: 0, batch: 0, model: 0, total: 60 }, truncated: false } }),
+  } as never);
+  ctx.provide("workspaceBinding", {
+    get: async () => ({ ok: true, value: { workspaceId: "ws1", canonicalPath: root, binding: { authProfile: "portal:demo", environmentId: "env" } } }),
+  } as never);
+  ctx.provide("imoAuth" as never, { prepare: async () => ({ ok: true, value: { use: async (cb: any) => cb({ accessToken: "t" }) } }) } as never);
+  ctx.provide("subprocess", fakeSubprocess() as never);
+  ctx.provide("jobs", {
+    start(spec: { kind: string; label: string; run(): { cancel(reason?: string): void; done: Promise<{ status: string; detail?: string }>; readOutput?(): string } }) {
+      const hooks = spec.run();
+      started.push({ kind: spec.kind, hooks });
+      return `${spec.kind}-1`;
+    },
+  } as never);
+  ctx.provide("tools", {
+    register(definition: { name: string; execute: (a: Record<string, unknown>, e: { signal: AbortSignal }) => Promise<unknown> }) {
+      reg.push(definition);
+      return () => {};
+    },
+  } as never);
+  const sections: Array<{ order: number }> = [];
+  ctx.provide("systemPrompt", {
+    section(section: { name: string; order: number }) {
+      sections.push(section);
+      return () => {};
+    },
+  } as never);
+
+  // Mount ONLY the ici job tools against this context (the other tool
+  // families need faces this test does not provide).
+  const { registerIciJobTools } = await import("../src/ici-jobs-tools.ts");
+  registerIciJobTools(ctx, (o: unknown) => o as never);
+  try {
+    assert.deepEqual(reg.map(d => d.name).sort(), ["ici_build", "ici_status"]);
+    const exec = { signal: new AbortController().signal };
+    const startRes: any = await reg.find(d => d.name === "ici_build")!.execute({ workspace_id: "ws1" }, exec);
+    assert.equal(startRes.kind, "background");
+    assert.match(startRes.jobId, /^ici-build-/);
+    assert.equal(started.length, 1);
+
+    // kill the job → engine sees abort → cancelled → production mapper → killed
+    started[0].hooks.cancel("user requested");
+    const outcome: any = await Promise.race([
+      started[0].hooks.done,
+      new Promise(r => setTimeout(() => r({ status: "RACE-TIMEOUT", detail: `signalAborted=${lastSignal?.aborted}` }), 2000)),
+    ]);
+    assert.equal(outcome.status, "killed");
+    assert.equal(outcome.detail, "cancelled");
+
+    // failed path stays failed
+    engineFailNext = true;
+    const failStart: any = await reg.find(d => d.name === "ici_build")!.execute({ workspace_id: "ws1" }, exec);
+    assert.equal(failStart.kind, "background");
+    const failOutcome = await started[1].hooks.done;
+    assert.equal(failOutcome.status, "failed");
+    assert.equal(failOutcome.detail, "storage-error");
+  } finally {
+    await h_cleanup(root, dshHome, prev);
+  }
+});
+
+async function h_cleanup(root: string, dshHome: string, prev: string | undefined): Promise<void> {
+  if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+  await rm(dshHome, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
+}
