@@ -26,6 +26,7 @@
     "@icomposer/icomposer-catalog": "file:../icomposer-catalog",
     "@icomposer/icomposer-reference": "file:../icomposer-reference",
     "@icomposer/icomposer-lifecycle": "file:../icomposer-lifecycle",
-    "@icomposer/icomposer-verify": "file:../icomposer-verify"
+    "@icomposer/icomposer-verify": "file:../icomposer-verify",
+    "@icomposer/icomposer-code-intelligence": "file:../icomposer-code-intelligence"
   }
 }

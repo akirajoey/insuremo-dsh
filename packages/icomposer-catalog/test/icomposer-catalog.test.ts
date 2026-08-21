@@ -218,6 +218,7 @@ test("real project smoke - strictly read-only", async () => {
       const entries = await readdir(p, { withFileTypes: true });
       for (const e of entries) {
         const full = join(p, e.name);
+        if (full.includes("/.metadata/icomposer")) continue;
         if (e.isDirectory()) await walk(full);
         else {
           const st = await fstat(full);

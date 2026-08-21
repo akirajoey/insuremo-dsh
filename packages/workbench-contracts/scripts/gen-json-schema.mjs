@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -719,6 +719,38 @@ const schemas = {
       stdoutDigest: { type: "string", minLength: 1 },
     },
     ["workspaceId", "query", "matches", "count", "truncated", "durationMs", "stdoutDigest"],
+    ),
+  },
+  "ici-build-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-build-request.json",
+    title: "ici/build request",
+    ...objectSchema({ ...requestProperties, workspaceId: { type: "string", minLength: 1 } }, ["requestId", "schemaVersion", "workspaceId"]),
+  },
+  "ici-build-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-build-response.json",
+    title: "ici/build response",
+    ...objectSchema(
+      {
+        workspaceId: { type: "string", minLength: 1 },
+        manifest: objectSchema(
+          {
+            schemaVersion: { const: 1 },
+            engineVersion: { type: "string", minLength: 1 },
+            sourceFingerprint: { type: "string", minLength: 1 },
+            builtAt: { type: "string", minLength: 1 },
+            nodeCount: { type: "integer", minimum: 0 },
+            edgeCount: { type: "integer", minimum: 0 },
+            workspaceId: { type: "string", minLength: 1 },
+            canonicalPath: { type: "string", minLength: 1 },
+          },
+          ["schemaVersion", "engineVersion", "sourceFingerprint", "builtAt", "nodeCount", "edgeCount", "workspaceId", "canonicalPath"],
+        ),
+        nodeCount: { type: "integer", minimum: 0 },
+        edgeCount: { type: "integer", minimum: 0 },
+      },
+      ["workspaceId", "manifest", "nodeCount", "edgeCount"],
     ),
   },
   "operation-record.schema.json": commandSchema(

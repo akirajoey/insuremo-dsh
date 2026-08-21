@@ -33,6 +33,8 @@ const baseSchemaFiles = [
   "icomposer-utils-list-response.schema.json",
   "icomposer-utils-search-request.schema.json",
   "icomposer-utils-search-response.schema.json",
+  "ici-build-request.schema.json",
+  "ici-build-response.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -48,7 +50,7 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 33);
+  assert.equal(files.length, 35);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles].sort(),
@@ -65,6 +67,7 @@ const serviceViewResponses = [
   "icomposer-verify-utils-response.schema.json",
   "icomposer-utils-list-response.schema.json",
   "icomposer-utils-search-response.schema.json",
+  "ici-build-response.schema.json",
 ];
 
 test("base contract schemas are valid JSON Schema documents", async () => {

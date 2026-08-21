@@ -34,6 +34,7 @@ export const COMMANDS = {
   verifyUtils: "icomposer/verify-utils",
   utilsList: "icomposer/utils-list",
   utilsSearch: "icomposer/utils-search",
+  iciBuild: "ici/build",
   operationRecord: "operation/record",
   operationList: "operation/list",
   operationDecide: "operation/decide",
@@ -74,6 +75,7 @@ export * from "./icomposer-catalog.ts";
 export * from "./icomposer-reference.ts";
 export * from "./icomposer-lifecycle.ts";
 export * from "./icomposer-verify.ts";
+export * from "./icomposer-code-intelligence.ts";
 
 export const OPERATION_DECISIONS = {
   pending: "pending",

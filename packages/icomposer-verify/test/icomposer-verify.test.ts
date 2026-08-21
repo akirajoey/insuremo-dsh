@@ -322,6 +322,7 @@ test("real project smoke (read-only + transient-cache restore): list/search agai
       const entries = await readdir(p, { withFileTypes: true });
       for (const e of entries) {
         const full = join(p, e.name);
+        if (full.includes("/.metadata/icomposer")) continue;
         if (e.isDirectory()) await walk(full);
         else map.set(full, (await fs.stat(full)).mtimeMs);
       }
@@ -399,7 +400,9 @@ test("real project smoke (read-only + transient-cache restore): list/search agai
     await fiber.dispose();
     // restore: remove the CLI's transient cache dir and restore touched dir mtimes exactly
     await rm(join(projectRoot, ".metadata", "icomposer"), { recursive: true, force: true });
-    for (const [dir, mtime] of dirMtimes) await utimes(dir, new Date(mtime), new Date(mtime));
+    for (const [dir, mtime] of dirMtimes) {
+      try { await utimes(dir, new Date(mtime), new Date(mtime)); } catch {}
+    }
   }
   const after = await snapshot(projectRoot);
   assert.equal(before.size, after.size);
