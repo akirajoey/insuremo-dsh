@@ -34,6 +34,17 @@ interface IciIndexResultLike {
   reused: number;
 }
 
+interface IciEngineExplainFace {
+  explainContext(input: { workspaceId: string; query: string }): Promise<ResultLike<{
+    api: { id: string; name: string; path: string };
+    technicalText: string;
+    downstream: readonly { id: string; kind: string; ref?: string }[];
+    impact: ReadonlyArray<{ apiId: string; hops: ReadonlyArray<{ nodeId: string }> }>;
+    businessReference: readonly string[];
+    manifest: { schemaVersion: number; engineVersion: string; sourceFingerprint: string; stale?: true };
+  }>>;
+}
+
 interface IciEngineJobsFace {
   build(input: { workspaceId: string }, options?: { signal?: AbortSignal; onProgress?: (c: number, t: number, l: string) => void }): Promise<ResultLike<IciBuildResultLike>>;
   index(input: { workspaceId: string; rebuild?: boolean }, options?: { signal?: AbortSignal; onProgress?: (c: number, t: number, l: string) => void }): Promise<ResultLike<IciIndexResultLike>>;
@@ -82,6 +93,11 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
     name: "tool:ici_build",
     order: 150,
     text: "ici_build rebuilds the iComposer Code Intelligence graph and/or embedding index for a bound workspace. Small workspaces complete inline; larger ones run as cancellable background jobs.",
+  });
+  ctx.systemPrompt.section({
+    name: "tool:ici_explain",
+    order: 150,
+    text: "ici_explain assembles a read-only context bundle (technical text, downstream tree, upstream impact, reference hints) for one api so the current Agent can write its business explanation. Read-only: it never writes files.",
   });
   ctx.systemPrompt.section({
     name: "tool:ici_status",
@@ -218,6 +234,73 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         engineVersion: res.value.engineVersion,
         schemaVersion: res.value.schemaVersion,
         requiredFiles: { ...res.value.requiredFiles },
+      };
+    },
+  })));
+
+  disposers.push(ctx.tools.register(defineTool({
+    name: "ici_explain",
+    description: "Build a bounded context bundle for one api of a bound workspace: technical text, downstream tree, upstream impact, and reference-doc hints. The current Agent writes the {technical,business,method} explanation from this bundle. Effect: none.",
+    parameters: {
+      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      query: { type: "string", required: true, description: "Api name or id substring." },
+    },
+    output: {
+      schema: objectSchema2(
+        {
+          workspace_id: { type: "string", required: true },
+          api: objectSchema2(
+            {
+              id: { type: "string", required: true },
+              name: { type: "string", required: true },
+              path: { type: "string" },
+            },
+            ["id", "name"],
+          ),
+          technicalText: { type: "string" },
+          downstreamCount: { type: "integer" },
+          impactCount: { type: "integer" },
+          businessReference: { type: "array", items: { type: "string" } },
+          stale: { type: "boolean" },
+          error: objectSchema2({ code: { type: "string", required: true } }, ["code"]),
+        },
+        ["workspace_id", "api"],
+      ),
+    },
+    render: (_args: unknown, value: unknown) => {
+      const v = value as {
+        workspace_id: string;
+        api: { name: string };
+        technicalText?: string;
+        downstreamCount?: number;
+        impactCount?: number;
+        businessReference?: readonly string[];
+        error?: { code: string };
+      };
+      if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+      return [{
+        type: "text",
+        text: [
+          `workspace ${v.workspace_id}: api=${v.api.name} downstream=${v.downstreamCount ?? 0} impact=${v.impactCount ?? 0}`,
+          `reference=${v.businessReference?.join(", ") || "none"}`,
+        ].join("\n"),
+      }];
+    },
+    isConcurrencySafe: () => true,
+    async execute(rawArgs: Record<string, unknown>, exec: ToolExecContext) {
+      const args = rawArgs as { workspace_id: string; query: string };
+      const ici = ctx.get("iciEngine") as unknown as IciEngineExplainFace | undefined;
+      if (!ici) return { workspace_id: args.workspace_id, error: { code: "cli-error" } };
+      const res = await ici.explainContext({ workspaceId: args.workspace_id, query: args.query });
+      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
+      return {
+        workspace_id: args.workspace_id,
+        api: { ...res.value.api },
+        technicalText: res.value.technicalText,
+        downstreamCount: res.value.downstream.length,
+        impactCount: res.value.impact.length,
+        businessReference: [...res.value.businessReference],
+        ...(res.value.manifest.stale === true ? { stale: true } : {}),
       };
     },
   })));

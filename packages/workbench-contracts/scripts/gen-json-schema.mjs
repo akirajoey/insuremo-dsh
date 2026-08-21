@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "ici/build-job", "ici/status", "ici/cleanup-plan", "ici/cleanup-apply", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "ici/build-job", "ici/status", "ici/cleanup-plan", "ici/cleanup-apply", "ici/explain-context", "ici/explain-deterministic", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -1053,6 +1053,76 @@ const schemas = {
           skipped: { type: "array", items: { type: "string", minLength: 1 } },
         },
         ["workspaceId", "removed", "skipped"],
+      ),
+    },
+  },
+  "ici-explain-context.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-explain-context.json",
+    title: "ici/explain-context request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          query: { type: "string", minLength: 1 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "query"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          api: objectSchema(
+            { id: { type: "string", minLength: 1, required: true }, name: { type: "string", minLength: 1, required: true }, path: { type: "string" } },
+            ["id", "name"],
+          ),
+          technicalText: { type: "string" },
+          downstream: { type: "array", items: { type: "object" } },
+          impact: { type: "array", items: objectSchema({ apiId: { type: "string", minLength: 1 }, hops: { type: "array", items: objectSchema({ nodeId: { type: "string", minLength: 1 } }, ["nodeId"]) } }, ["apiId", "hops"]) },
+          businessReference: { type: "array", items: { type: "string" } },
+          manifest: objectSchema(
+            {
+              schemaVersion: { type: "integer", minimum: 1 },
+              engineVersion: { type: "string", minLength: 1 },
+              sourceFingerprint: { type: "string", minLength: 1 },
+              stale: { const: true },
+            },
+            ["schemaVersion", "engineVersion", "sourceFingerprint"],
+          ),
+        },
+        ["workspaceId", "api", "technicalText", "downstream", "impact", "businessReference", "manifest"],
+      ),
+    },
+  },
+  "ici-explain-deterministic.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-explain-deterministic.json",
+    title: "ici/explain-deterministic request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          query: { type: "string", minLength: 1 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "query"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          generatedBy: { const: "deterministic-v1" },
+          promptVersion: { const: "none" },
+          sourceFingerprint: { type: "string", minLength: 1 },
+          generatedAt: { type: "string", minLength: 1 },
+          technical: { type: "string", minLength: 1 },
+          business: { type: "string", minLength: 1 },
+          method: { type: "array", items: { type: "string", minLength: 1 } },
+        },
+        ["workspaceId", "generatedBy", "promptVersion", "sourceFingerprint", "generatedAt", "technical", "business", "method"],
       ),
     },
   },

@@ -68,6 +68,30 @@ export interface BuildOptions {
   readonly onProgress?: ProgressCallback;
 }
 
+export interface ExplainContextBundle {
+  readonly api: { readonly id: string; readonly name: string; readonly path: string };
+  readonly technicalText: string;
+  readonly downstream: readonly QueryApiTreeNode[];
+  readonly impact: ReadonlyArray<{ readonly apiId: string; readonly hops: ReadonlyArray<{ readonly nodeId: string }> }>;
+  readonly businessReference: readonly string[];
+  readonly manifest: {
+    readonly schemaVersion: number;
+    readonly engineVersion: string;
+    readonly sourceFingerprint: string;
+    readonly stale?: true;
+  };
+}
+
+export interface ExplainDeterministicResult {
+  readonly generatedBy: "deterministic-v1";
+  readonly promptVersion: "none";
+  readonly sourceFingerprint: string;
+  readonly generatedAt: string;
+  readonly technical: string;
+  readonly business: string;
+  readonly method: readonly string[];
+}
+
 export interface IciEngineFace {
   build(input: { readonly workspaceId: string }, options?: BuildOptions | AbortSignal): Promise<Result<IciBuildResult>>;
   queryApi(input: QueryApiInput, options?: BuildOptions | AbortSignal): Promise<Result<QueryApiResult>>;
@@ -77,6 +101,8 @@ export interface IciEngineFace {
   diagnostics(input: { readonly workspaceId: string }): Promise<Result<DiagnosticsResult>>;
   cleanupPlan(input: { readonly workspaceId: string }): Promise<Result<CleanupPlan>>;
   cleanupApply(input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }): Promise<Result<CleanupApplyResult>>;
+  explainContext(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainContextBundle>>;
+  explainDeterministic(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainDeterministicResult>>;
 }
 
 // ---- query surface (TASK-024; Rust query/mod.rs semantics) ----

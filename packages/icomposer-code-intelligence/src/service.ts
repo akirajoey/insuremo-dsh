@@ -1,16 +1,48 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
-import { applyCleanup, collectFileFacts, planCleanup } from "./maintenance.ts";
-import { apiEmbeddingText, downstreamNodeNames, searchEvidence, type ApiSearchDoc } from "./search-core.ts";
-import { graphBaseDir, loadSnapshot, writeAtomic } from "./storage.ts";
+import { embeddingLease, loadSearchDocs } from "./search-runtime.ts";
+import { getDshHome, graphBaseDir, loadSnapshot, writeAtomic, writeFileAtomic } from "./storage.ts";
+import { applyCleanup, buildDiagnosticsView, collectFileFacts, planCleanup } from "./maintenance.ts";
 import { buildDownstreamTrees, buildImpactPaths, candidatesOf, DEFAULT_DEPTH, DEFAULT_MAX_NODES, MAX_DEPTH, MAX_MAX_NODES, resolveFocusId, resolveQueryNodes } from "./query.ts";
-import type { BuildOptions, CleanupApplyResult, CleanupPlan, DiagnosticsResult, EmbeddingMode, IciBuildResult, IciEdge, IciErrorCode, IciManifest, IciNode, ProgressCallback, QueryApiInput, QueryApiResult, QueryImpactInput, QueryImpactResult, Result, SearchIndexInput, SearchIndexResult, SearchInput, SearchResult } from "./types.ts";
-import { getDshHome, workspaceHash } from "./storage.ts";
-
+import {
+  buildDeterministicExplain,
+  buildExplainBundle,
+  collectReachable,
+  countInferredEdges,
+  countKind,
+  countTreeNodes,
+  matchBusinessReference,
+  resolveSingleStart,
+  treeFirstLevelSteps,
+} from "./explain.ts";
+import type {
+  BuildOptions,
+  CleanupApplyResult,
+  CleanupPlan,
+  DiagnosticsResult,
+  EmbeddingMode,
+  ExplainContextBundle,
+  ExplainDeterministicResult,
+  IciBuildResult,
+  IciEdge,
+  IciErrorCode,
+  IciManifest,
+  IciNode,
+  ProgressCallback,
+  QueryApiInput,
+  QueryApiResult,
+  QueryImpactInput,
+  QueryImpactResult,
+  Result,
+  SearchIndexInput,
+  SearchIndexResult,
+  SearchInput,
+  SearchResult,
+} from "./types.ts";
 
 declare module "@deepseek-ai/dsh-jobs" {
   interface JobKindMap {
@@ -35,15 +67,25 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }
 
-type CatalogEntry = { name: string; type: string; sourcePath?: string; metadata?: Record<string, unknown> };
+interface CatalogEntry { name: string; type: string; sourcePath?: string; metadata?: Record<string, unknown> }
 type CatalogResult = { ok: boolean; value?: { entries: CatalogEntry[]; counts: Record<string, number>; truncated: boolean }; error?: { code?: unknown; message?: string } };
 
-interface GraphView {
+interface ApiSearchDocLike {
+    apiId: string;
+    apiName: string;
+    sourceHash: string;
+    technicalText: string;
+    businessText: string;
+    technicalEvidence: string;
+    businessEvidence: string;
+    textHash: string;
+  }
+
+  interface GraphView {
   nodes: Map<string, IciNode>;
   edges: IciEdge[];
   manifest: IciManifest;
 }
-
 
 export class IciEngineService extends Service {
   static inject = ["workspaceBinding", "icomposerCatalog", "imoAuth", "jobs"] as const;
@@ -65,6 +107,8 @@ export class IciEngineService extends Service {
       diagnostics: (input: { readonly workspaceId: string }) => self.diagnostics(input),
       cleanupPlan: (input: { readonly workspaceId: string }) => self.cleanupPlan(input),
       cleanupApply: (input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }) => self.cleanupApply(input),
+      explainContext: (input: { readonly workspaceId: string; readonly query: string }) => self.explainContext(input),
+      explainDeterministic: (input: { readonly workspaceId: string; readonly query: string }) => self.explainDeterministic(input),
     });
     ctx.set("iciEngine", face);
     ctx.effect(() => () => { self.#disposed = true; }, "iciEngine.dispose");
@@ -86,19 +130,8 @@ export class IciEngineService extends Service {
       const binding = await this.bindingEntry(input.workspaceId);
       if (!binding.ok) return binding as Result<never>;
       const { canonicalPath } = binding.value;
-      const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as {
-        listAssets(input: { workspaceId: string }, signal?: AbortSignal): Promise<CatalogResult>;
-      } | undefined;
-      if (!catalog) return err("storage-error");
-      const catalogRes = await catalog.listAssets({ workspaceId: input.workspaceId }, signal);
-      if (!catalogRes.ok) {
-        const raw = (catalogRes.error as { code?: unknown } | undefined)?.code;
-        const code = typeof raw === "string" ? (raw as IciErrorCode) : undefined;
-        if (code === "workspace-not-found") return err("workspace-not-found", "workspace does not exist");
-        if (code && PASSTHROUGH_CODES.has(code)) return err(code);
-        if (code === "workspace-not-bound") return err("workspace-not-bound");
-        return err("storage-error");
-      }
+      const catalogRes = await this.listCatalog(input.workspaceId, signal);
+      if (!catalogRes.ok) return catalogRes as Result<never>;
       const entries = catalogRes.value!.entries;
       const normalized = entries.map(e => ({
         name: e.name,
@@ -134,6 +167,23 @@ export class IciEngineService extends Service {
     return options instanceof AbortSignal ? { signal: options } : (options ?? {});
   }
 
+  private async listCatalog(workspaceId: string, signal?: AbortSignal): Promise<Result<CatalogResult["value"]>> {
+    const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as {
+      listAssets(input: { workspaceId: string }, signal?: AbortSignal): Promise<CatalogResult>;
+    } | undefined;
+    if (!catalog) return err("storage-error");
+    const res = await catalog.listAssets({ workspaceId }, signal);
+    if (!res.ok) {
+      const raw = (res.error as { code?: unknown } | undefined)?.code;
+      const code = typeof raw === "string" ? (raw as IciErrorCode) : undefined;
+      if (code === "workspace-not-found") return err("workspace-not-found", "workspace does not exist");
+      if (code && PASSTHROUGH_CODES.has(code)) return err(code);
+      if (code === "workspace-not-bound") return err("workspace-not-bound");
+      return err("storage-error");
+    }
+    return { ok: true, value: res.value };
+  }
+
   /** Shared gate + snapshot load + staleness detection for query/search faces. */
   private async loadQueryContext(
     workspaceId: string,
@@ -157,19 +207,13 @@ export class IciEngineService extends Service {
       edges: snapshot.edges as unknown as IciEdge[],
       manifest: snapshot.manifest,
     };
-    // Staleness: recompute the source fingerprint from the current tree.
     let stale: true | undefined;
     try {
-      const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as {
-        listAssets(input: { workspaceId: string }, signal?: AbortSignal): Promise<CatalogResult>;
-      } | undefined;
-      if (catalog) {
-        const catalogRes = await catalog.listAssets({ workspaceId }, signal);
-        if (catalogRes.ok) {
-          const entries = catalogRes.value!.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath }));
-          const sources = await collectSources(canonicalPath, entries, signal);
-          if (fingerprintSources(sources.values()) !== snapshot.manifest.sourceFingerprint) stale = true;
-        }
+      const catalogRes = await this.listCatalog(workspaceId, signal);
+      if (catalogRes.ok) {
+        const entries = catalogRes.value!.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath }));
+        const sources = await collectSources(canonicalPath, entries, signal);
+        if (fingerprintSources(sources.values()) !== snapshot.manifest.sourceFingerprint) stale = true;
       }
     } catch { /* staleness check is best-effort */ }
     return { ok: true, graph, canonicalPath, ...(stale ? { stale } : {}) };
@@ -228,39 +272,7 @@ export class IciEngineService extends Service {
     return { ok: true, value: result };
   }
 
-
-  // ---- semantic search (TASK-025; Rust search/mod.rs semantics) ----
-
-  private async loadSearchDocs(canonicalPath: string, graph: GraphView): Promise<ApiSearchDoc[]> {
-    const { readFile: rf } = await import("node:fs/promises");
-    const apiNodes = [...graph.nodes.values()].filter(n => n.kind === "api").sort((a, b) => a.id.localeCompare(b.id));
-    const docs: ApiSearchDoc[] = [];
-    for (const node of apiNodes) {
-      const downstream = downstreamNodeNames(graph.nodes, graph.edges, node.id);
-      const technicalText = apiEmbeddingText(node.name, "technical", "", downstream);
-      const businessText = apiEmbeddingText(node.name, "business", "", downstream);
-      const evidence = searchEvidence("", downstream);
-      // node.sourceFile is workspace-relative; resolve against canonicalPath.
-      let sourceHash = "";
-      if (node.sourceFile) {
-        try {
-          const content = await rf(join(canonicalPath, node.sourceFile), "utf8");
-          sourceHash = fingerprintSources([{ source: content }]);
-        } catch { /* unreadable source: hash stays empty */ }
-      }
-      docs.push({
-        apiId: node.id,
-        apiName: node.name,
-        sourceHash,
-        technicalText,
-        businessText,
-        technicalEvidence: evidence,
-        businessEvidence: evidence,
-        textHash: fingerprintSources([{ source: technicalText }, { source: businessText }]),
-      });
-    }
-    return docs;
-  }
+  // ---- semantic search ----
 
   async index(input: SearchIndexInput, options?: BuildOptions | AbortSignal): Promise<Result<SearchIndexResult>> {
     const opts = this.normalizeOptions(options);
@@ -274,9 +286,11 @@ export class IciEngineService extends Service {
       const ctxLoad = await this.loadQueryContext(input.workspaceId, signal);
       if (!ctxLoad.ok) return ctxLoad.result;
       const { graph, canonicalPath, stale } = ctxLoad;
-      const docs = await this.loadSearchDocs(canonicalPath, graph);
+      const docs = await loadSearchDocs(canonicalPath, graph);
       const cachePath = join(graphBaseDir(canonicalPath, input.workspaceId), "search", "api_embeddings.jsonl");
-      const outcome = await this.embeddingLease(input.workspaceId, signal, (rt, token) =>
+      const bindingInfo = await this.bindingEntry(input.workspaceId);
+      if (!bindingInfo.ok) return bindingInfo as Result<never>;
+      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), binding: bindingInfo.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
         indexEmbeddings({ rt, token, cachePath, docs, rebuild: input.rebuild === true, timeoutMs: this.#timeoutMs, signal }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
@@ -310,7 +324,9 @@ export class IciEngineService extends Service {
       const cachePath = join(graphBaseDir(canonicalPath, input.workspaceId), "search", "api_embeddings.jsonl");
       const mode: EmbeddingMode = input.mode ?? "all";
       const top = clampInt(input.top, 10, 1, 50);
-      const outcome = await this.embeddingLease(input.workspaceId, signal, (rt, token) =>
+      const bindingInfo = await this.bindingEntry(input.workspaceId);
+      if (!bindingInfo.ok) return bindingInfo as Result<never>;
+      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), binding: bindingInfo.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
         searchEmbeddings({ rt, token, cachePath, query: input.query, mode, top, graph, timeoutMs: this.#timeoutMs, signal }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
@@ -321,46 +337,7 @@ export class IciEngineService extends Service {
     });
   }
 
-  private async embeddingLease<T>(
-    workspaceId: string,
-    signal: AbortSignal | undefined,
-    run: (rt: unknown, token: string) => Promise<T | { __failure: IciErrorCode }>,
-  ): Promise<Result<T>> {
-    const binding = await this.bindingEntry(workspaceId);
-    if (!binding.ok) return binding as Result<never>;
-    const auth = this.ctx.get("imoAuth" as never) as unknown as {
-      prepare(request: { profile?: string; env?: string }, signal?: AbortSignal): Promise<{
-        ok: boolean;
-        value?: { use<T2>(cb: (secret: { readonly accessToken: string }) => Promise<T2> | T2): Promise<T2> };
-        error?: { code?: string };
-      }>;
-    } | undefined;
-    if (!auth) return err("embedding-error");
-    const leaseResult = await auth.prepare({
-      profile: (binding.value as { authProfile?: string }).authProfile,
-      env: (binding.value as { environmentId?: string }).environmentId,
-    }, signal);
-    if (!leaseResult.ok) {
-      const code = (leaseResult.error as { code?: string } | undefined)?.code;
-      if (code === "invalid-auth" || code === "forbidden" || code === "prepare-invalidated" || code === "lease-revoked") {
-        return err(code as IciErrorCode);
-      }
-      if (code === "timeout") return err("embedding-error");
-      if (code === "cancelled") return err("cancelled");
-      if (code === "service-disposed") return err("service-disposed");
-      return err("embedding-error");
-    }
-    try {
-      const outcome = await leaseResult.value!.use(async (secret) => await run(this.ctx.subprocess, secret.accessToken));
-      if (outcome !== null && typeof outcome === "object" && "__failure" in outcome) {
-        return err((outcome as unknown as { __failure: IciErrorCode }).__failure);
-      }
-      return { ok: true, value: outcome as T };
-    } catch {
-      return err("lease-revoked");
-    }
-  }
-
+  // ---- diagnostics / cleanup ----
 
   async diagnostics(input: { readonly workspaceId: string }): Promise<Result<DiagnosticsResult>> {
     if (this.#disposed) return err("service-disposed");
@@ -368,45 +345,24 @@ export class IciEngineService extends Service {
     const binding = await this.bindingEntry(input.workspaceId);
     if (!binding.ok) return binding as Result<never>;
     const { canonicalPath } = binding.value;
-    const base = graphBaseDir(canonicalPath, input.workspaceId);
-    const workspaceDir = join(base, "..");
+    const workspaceDir = join(graphBaseDir(canonicalPath, input.workspaceId), "..");
     const facts = await collectFileFacts({ workspaceDir });
-    let manifest: Record<string, unknown> | null = null;
-    try { manifest = JSON.parse(facts.manifest ?? "null") as Record<string, unknown> | null; } catch { manifest = null; }
-    // stale: recompute source fingerprint when a snapshot exists.
     let isStale = false;
-    if (manifest !== null && typeof manifest.sourceFingerprint === "string") {
+    if (facts.manifest !== null) {
       try {
-        const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as {
-          listAssets(input: { workspaceId: string }, signal?: AbortSignal): Promise<CatalogResult>;
-        } | undefined;
-        if (catalog) {
-          const catalogRes = await catalog.listAssets({ workspaceId: input.workspaceId });
-          if (catalogRes.ok) {
-            const entries = catalogRes.value!.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath }));
-            const sources = await collectSources(canonicalPath, entries);
-            if (fingerprintSources(sources.values()) !== manifest.sourceFingerprint) isStale = true;
-          }
+        const parsed = JSON.parse(facts.manifest) as { sourceFingerprint?: string };
+        const catalogRes = await this.listCatalog(input.workspaceId);
+        if (catalogRes.ok && typeof parsed.sourceFingerprint === "string") {
+          const entries = catalogRes.value!.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath }));
+          const sources = await collectSources(canonicalPath, entries);
+          if (fingerprintSources(sources.values()) !== parsed.sourceFingerprint) isStale = true;
         }
       } catch { /* best-effort */ }
     }
-    const home = getDshHome();
-    const result: DiagnosticsResult = {
-      workspaceId: input.workspaceId,
-      indexPaths: {
-        graphCurrent: join(home, "ici", workspaceHash(canonicalPath, input.workspaceId), "graph", "current"),
-        searchJsonl: join(home, "ici", workspaceHash(canonicalPath, input.workspaceId), "graph", "search", "api_embeddings.jsonl"),
-      },
-      schemaVersion: 1,
-      engineVersion: this.#engineVersion,
-      builtAt: manifest !== null && typeof manifest.builtAt === "string" ? manifest.builtAt : null,
-      nodeCount: manifest !== null && typeof manifest.nodeCount === "number" ? manifest.nodeCount : 0,
-      edgeCount: manifest !== null && typeof manifest.edgeCount === "number" ? manifest.edgeCount : 0,
-      searchVectors: facts.searchVectors,
-      stale: isStale,
-      requiredFiles: { nodes: facts.nodesExists, edges: facts.edgesExists, manifest: manifest !== null },
+    return {
+      ok: true,
+      value: buildDiagnosticsView(workspaceDir, input.workspaceId, this.#engineVersion, facts.manifest, isStale, facts) as unknown as DiagnosticsResult,
     };
-    return { ok: true, value: result };
   }
 
   async cleanupPlan(input: { readonly workspaceId: string }): Promise<Result<CleanupPlan>> {
@@ -432,7 +388,84 @@ export class IciEngineService extends Service {
     return { ok: true, value: { workspaceId: input.workspaceId, removed, skipped } };
   }
 
-  private async bindingEntry(workspaceId: string): Promise<Result<{ canonicalPath: string; workspaceId: string; authProfile?: string; environmentId?: string }>> {
+  // ---- explain (TASK-027) ----
+  private async loadExplainBase(
+    workspaceId: string,
+    query: string,
+  ): Promise<{ ok: true; graph: GraphView; canonicalPath: string; start: IciNode; stale?: true } | { ok: false; result: Result<never> }> {
+    const ctxLoad = await this.loadQueryContext(workspaceId);
+    if (!ctxLoad.ok) return { ok: false, result: ctxLoad.result };
+    const { graph, canonicalPath, stale } = ctxLoad;
+    const start = resolveSingleStart(graph.nodes.values(), query);
+    if (!start.ok) {
+      const label = start.reason === "ambiguous" ? "ambiguous api match" : "no api matched";
+      return { ok: false, result: err("no-match", `${label}: ${query}; candidates: ${start.candidates.join(", ") || "none"}`) };
+    }
+    return { ok: true, graph, canonicalPath, start: start.node, ...(stale ? { stale: true } : {}) };
+  }
+
+  private async listRefDocNames(canonicalPath: string): Promise<string[]> {
+    try {
+      const names = await readdir(join(canonicalPath, "ref_doc"));
+      return names.filter(n => n.endsWith(".md")).map(n => n.slice(0, -3)).sort();
+    } catch {
+      return [];
+    }
+  }
+
+  async explainContext(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainContextBundle>> {
+    if (this.#disposed) return err("service-disposed");
+    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
+    if (typeof input.query !== "string" || !input.query.trim()) return err("invalid-workspace-id", "query is required");
+    const base = await this.loadExplainBase(input.workspaceId, input.query);
+    if (!base.ok) return base.result;
+    const { graph, canonicalPath, start, stale } = base;
+    const { roots } = buildDownstreamTrees(graph, [start.id], DEFAULT_DEPTH, DEFAULT_MAX_NODES);
+    const impactStarts = [...graph.nodes.values()].filter(n => n.kind === "function" || n.kind === "method");
+    const impactAll = buildImpactPaths(graph, impactStarts.map(s2 => s2.id));
+    const refDocNames = await this.listRefDocNames(canonicalPath);
+    const bundle = buildExplainBundle({
+      graph, canonicalPath, start,
+      downstreamRoot: roots[0],
+      // strip edge metadata at the transport boundary: hops carry only nodeId
+      impactPaths: impactAll.paths.filter(p => p.hops.some(h => h.nodeId === start.id)).slice(0, 50)
+        .map(p => ({ apiId: p.apiId, hops: p.hops.map(h => ({ nodeId: h.nodeId })) })),
+      refDocNames,
+      ...(stale ? { stale: true as const } : {}),
+    });
+    return { ok: true, value: bundle };
+  }
+
+  async explainDeterministic(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainDeterministicResult>> {
+    if (this.#disposed) return err("service-disposed");
+    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
+    if (typeof input.query !== "string" || !input.query.trim()) return err("invalid-workspace-id", "query is required");
+    const base = await this.loadExplainBase(input.workspaceId, input.query);
+    if (!base.ok) return base.result;
+    const { graph, canonicalPath, start, stale } = base;
+    const { roots } = buildDownstreamTrees(graph, [start.id], DEFAULT_DEPTH, DEFAULT_MAX_NODES);
+    const refDocNames = await this.listRefDocNames(canonicalPath);
+    const parts = buildDeterministicExplain({
+      graph, canonicalPath, start,
+      downstreamRoot: roots[0],
+      refDocNames,
+      sourceFingerprint: graph.manifest.sourceFingerprint,
+      ...(stale ? { stale: true as const } : {}),
+    });
+    const result: ExplainDeterministicResult = {
+      generatedBy: "deterministic-v1",
+      promptVersion: "none",
+      sourceFingerprint: graph.manifest.sourceFingerprint,
+      generatedAt: new Date().toISOString(),
+      technical: parts.technical,
+      business: parts.business,
+      method: parts.method,
+    };
+    return { ok: true, value: result };
+  }
+
+  private async bindingEntry(
+    workspaceId: string): Promise<Result<{ canonicalPath: string; workspaceId: string; authProfile?: string; environmentId?: string }>> {
     const svc = this.ctx.get("workspaceBinding" as never) as unknown as {
       get(id: string): Promise<{ ok: boolean; value?: { canonicalPath: string; workspaceId: string; binding: { authProfile: string; environmentId: string } | null }; error?: { code?: unknown } }>;
     } | undefined;

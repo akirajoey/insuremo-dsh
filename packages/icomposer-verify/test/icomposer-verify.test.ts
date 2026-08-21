@@ -429,6 +429,17 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
       options?.onProgress?.(1, 1, "embedding batch");
       return { ok: true, value: { total: 5, embedded: input.rebuild === true ? 5 : 1, reused: input.rebuild === true ? 0 : 4 } };
     },
+    explainContext: async () => ({
+      ok: true,
+      value: {
+        api: { id: "api:TestAPI", name: "TestAPI", path: "src/x.groovy" },
+        technicalText: "API: TestAPI\nMode: technical\nDownstream: function:Fn",
+        downstream: [{ id: "method:TestAPI.execute", kind: "method" }],
+        impact: [{ apiId: "api:TestAPI", hops: [{ nodeId: "api:TestAPI" }] }],
+        businessReference: ["IComposerPaymentUtils"],
+        manifest: { schemaVersion: 1, engineVersion: "0.1.0", sourceFingerprint: "x".repeat(64) },
+      },
+    }),
     diagnostics: async () => ({
       ok: true,
       value: {
@@ -511,8 +522,8 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   const { registerIcomposerToolsWith } = await import("../src/tool-defs.ts");
   const disposers = registerIcomposerToolsWith(ctx, (options) => options);
   try {
-    assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
-    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150, 150, 150, 150]);
+    assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150, 150, 150, 150, 150]);
     assert.equal(sections.every(x => x.name.startsWith("tool:")), true);
     const exec = { signal: new AbortController().signal };
 
@@ -563,10 +574,17 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     const status: any = await registered.get("ici_status")!.execute({ workspace_id: "ws1" }, exec);
     assert.equal(status.workspace_id, "ws1");
     assert.ok(status.requiredFiles.manifest === false || status.requiredFiles.manifest === true);
+    // ici_explain context bundle
+    const explainOut: any = await registered.get("ici_explain")!.execute({ workspace_id: "ws1", query: "TestAPI" }, exec);
+    assert.equal(explainOut.api.id, "api:TestAPI");
+    assert.equal(explainOut.downstreamCount, 1);
+    assert.equal(explainOut.impactCount, 1);
+    assert.deepEqual(explainOut.businessReference, ["IComposerPaymentUtils"]);
+    assert.equal(explainOut.error, undefined);
   } finally {
     for (const dispose of disposers) dispose();
   }
-  assert.deepEqual(removed.sort(), ["ici_build", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+  assert.deepEqual(removed.sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
   assert.equal(registered.size, 0);
 });
 
@@ -593,6 +611,17 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
       else options?.signal?.addEventListener("abort", finish, { once: true });
     }),
     index: async () => ({ ok: true, value: { total: 0, embedded: 0, reused: 0 } }),
+    explainContext: async (input: { workspaceId: string; query: string }) => ({
+      ok: true,
+      value: {
+        api: { id: "api:TestAPI", name: "TestAPI", path: "src/x.groovy" },
+        technicalText: "API: TestAPI\nMode: technical\nDownstream: function:Fn",
+        downstream: [{ id: "method:TestAPI.execute", kind: "method" }],
+        impact: [{ apiId: "api:TestAPI", hops: [{ nodeId: "api:TestAPI" }] }],
+        businessReference: ["IComposerPaymentUtils"],
+        manifest: { schemaVersion: 1, engineVersion: "0.1.0", sourceFingerprint: "x".repeat(64) },
+      },
+    }),
     diagnostics: async () => ({ ok: true, value: {
       indexPaths: { graphCurrent: "g", searchJsonl: "s" }, schemaVersion: 1, engineVersion: "0.1.0",
       builtAt: null, nodeCount: 0, edgeCount: 0, searchVectors: 0, stale: false,
@@ -640,7 +669,7 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
   const { registerIciJobTools } = await import("../src/ici-jobs-tools.ts");
   registerIciJobTools(ctx, (o: unknown) => o as never);
   try {
-    assert.deepEqual(reg.map(d => d.name).sort(), ["ici_build", "ici_status"]);
+    assert.deepEqual(reg.map(d => d.name).sort(), ["ici_build", "ici_explain", "ici_status"]);
     const exec = { signal: new AbortController().signal };
     const startRes: any = await reg.find(d => d.name === "ici_build")!.execute({ workspace_id: "ws1" }, exec);
     assert.equal(startRes.kind, "background");

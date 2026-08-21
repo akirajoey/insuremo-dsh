@@ -114,3 +114,46 @@ export async function applyCleanup(
   // Paths planned but not present anymore are silently dropped (idempotent).
   return { removed, skipped };
 }
+
+export interface DiagnosticsView {
+  readonly workspaceId: string;
+  readonly indexPaths: { readonly graphCurrent: string; readonly searchJsonl: string };
+  readonly schemaVersion: number;
+  readonly engineVersion: string;
+  readonly builtAt: string | null;
+  readonly nodeCount: number;
+  readonly edgeCount: number;
+  readonly searchVectors: number;
+  readonly stale: boolean;
+  readonly requiredFiles: { readonly nodes: boolean; readonly edges: boolean; readonly manifest: boolean };
+}
+
+/** Build the diagnostics projection for one workspace ICI tree. */
+export function buildDiagnosticsView(
+  workspaceDir: string,
+  workspaceId: string,
+  engineVersion: string,
+  manifestText: string | null,
+  stale: boolean,
+  fileFacts?: { nodesExists: boolean; edgesExists: boolean },
+): DiagnosticsView {
+  interface ParsedManifest { builtAt?: string; nodeCount?: number; edgeCount?: number }
+  let parsed: ParsedManifest | null = null;
+  try { parsed = JSON.parse(manifestText ?? "null") as ParsedManifest; } catch { parsed = null; }
+  const manifest = parsed;
+  return {
+    workspaceId,
+    indexPaths: {
+      graphCurrent: join(workspaceDir, "graph", "current"),
+      searchJsonl: join(workspaceDir, "graph", "search", "api_embeddings.jsonl"),
+    },
+    schemaVersion: 1,
+    engineVersion,
+    builtAt: manifest?.builtAt ?? null,
+    nodeCount: manifest?.nodeCount ?? 0,
+    edgeCount: manifest?.edgeCount ?? 0,
+    searchVectors: 0,
+    stale,
+    requiredFiles: { nodes: fileFacts?.nodesExists ?? false, edges: fileFacts?.edgesExists ?? false, manifest: manifest !== null },
+  };
+}
