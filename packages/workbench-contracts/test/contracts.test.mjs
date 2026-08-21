@@ -15,6 +15,14 @@ const baseSchemaFiles = [
   "workspace-unbind-response.schema.json",
   "icomposer-list-assets-request.schema.json",
   "icomposer-list-assets-response.schema.json",
+  "icomposer-sdk-list-request.schema.json",
+  "icomposer-sdk-list-response.schema.json",
+  "icomposer-sdk-query-request.schema.json",
+  "icomposer-sdk-query-response.schema.json",
+  "icomposer-util-list-request.schema.json",
+  "icomposer-util-list-response.schema.json",
+  "icomposer-util-query-request.schema.json",
+  "icomposer-util-query-response.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -30,12 +38,19 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 15);
+  assert.equal(files.length, 23);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles].sort(),
   );
 });
+
+const serviceViewResponses = [
+  "icomposer-sdk-list-response.schema.json",
+  "icomposer-sdk-query-response.schema.json",
+  "icomposer-util-list-response.schema.json",
+  "icomposer-util-query-response.schema.json",
+];
 
 test("base contract schemas are valid JSON Schema documents", async () => {
   for (const file of baseSchemaFiles) {
@@ -44,8 +59,15 @@ test("base contract schemas are valid JSON Schema documents", async () => {
     assert.equal(schema.type, "object");
     assert.equal(schema.additionalProperties, false);
     assert.ok(Array.isArray(schema.required));
-    assert.ok(schema.required.includes("requestId"));
-    assert.ok(schema.required.includes("schemaVersion"));
+    if (serviceViewResponses.includes(file)) {
+      // response schemas mirror the service view (no transport envelope fields)
+      assert.ok(schema.required.includes("workspaceId"));
+      assert.equal(schema.required.includes("requestId"), false);
+      assert.equal(schema.required.includes("schemaVersion"), false);
+    } else {
+      assert.ok(schema.required.includes("requestId"));
+      assert.ok(schema.required.includes("schemaVersion"));
+    }
   }
 });
 

@@ -25,6 +25,10 @@ export const COMMANDS = {
   workspaceBind: "workspace/bind",
   workspaceUnbind: "workspace/unbind",
   icomposerListAssets: "icomposer/list-assets",
+  sdkList: "icomposer/sdk-list",
+  sdkQuery: "icomposer/sdk-query",
+  utilList: "icomposer/util-list",
+  utilQuery: "icomposer/util-query",
   operationRecord: "operation/record",
   operationList: "operation/list",
   operationDecide: "operation/decide",
@@ -62,6 +66,7 @@ export const SystemCapabilitiesResponseSchema = systemCapabilitiesResponseSchema
 // Workspace schemas live in ./workspace.ts; re-export to preserve existing import paths.
 export * from "./workspace.ts";
 export * from "./icomposer-catalog.ts";
+export * from "./icomposer-reference.ts";
 
 export const OPERATION_DECISIONS = {
   pending: "pending",

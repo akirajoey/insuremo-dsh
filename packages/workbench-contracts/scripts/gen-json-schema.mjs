@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -349,6 +349,148 @@ const schemas = {
         ),
       },
       ["requestId", "schemaVersion", "catalog"],
+    ),
+  },
+  "icomposer-sdk-list-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-sdk-list-request.json",
+    title: "icomposer/sdk-list request",
+    ...objectSchema(
+    { ...requestProperties, workspaceId: { type: "string", minLength: 1 } },
+    ["requestId", "schemaVersion", "workspaceId"],
+    ),
+  },
+  "icomposer-sdk-list-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-sdk-list-response.json",
+    title: "icomposer/sdk-list response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      clients: {
+        type: "array",
+        maxItems: 5000,
+        items: objectSchema(
+          {
+            client: { type: "string", minLength: 1 },
+            swaggerPath: { type: "string", minLength: 1 },
+            operationCount: { type: "integer", minimum: 0 },
+            status: { enum: ["ok", "invalid", "skipped-escape"] },
+          },
+          ["client", "swaggerPath", "operationCount", "status"],
+        ),
+      },
+      counts: objectSchema({ clients: { type: "integer", minimum: 0 }, operations: { type: "integer", minimum: 0 } }, ["clients", "operations"]),
+    },
+    ["workspaceId", "clients", "counts"],
+    ),
+  },
+  "icomposer-sdk-query-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-sdk-query-request.json",
+    title: "icomposer/sdk-query request",
+    ...objectSchema(
+    {
+      ...requestProperties,
+      workspaceId: { type: "string", minLength: 1 },
+      client: { type: "string" },
+      keyword: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 200 },
+    },
+    ["requestId", "schemaVersion", "workspaceId"],
+    ),
+  },
+  "icomposer-sdk-query-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-sdk-query-response.json",
+    title: "icomposer/sdk-query response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      operations: {
+        type: "array",
+        maxItems: 200,
+        items: objectSchema(
+          {
+            client: { type: "string", minLength: 1 },
+            method: { enum: ["get", "post", "put", "delete", "patch", "head", "options", "trace"] },
+            path: { type: "string", minLength: 1 },
+            operationId: { type: "string", minLength: 1 },
+            summary: { type: "string", minLength: 1, maxLength: 200 },
+            tag: { type: "string", minLength: 1, maxLength: 200 },
+          },
+          ["client", "method", "path", "operationId"],
+        ),
+      },
+      counts: objectSchema({ clients: { type: "integer", minimum: 0 }, operations: { type: "integer", minimum: 0 } }, ["clients", "operations"]),
+      limit: { type: "integer", minimum: 1, maximum: 200 },
+      truncated: { type: "boolean" },
+    },
+    ["workspaceId", "operations", "counts", "limit", "truncated"],
+    ),
+  },
+  "icomposer-util-list-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-util-list-request.json",
+    title: "icomposer/util-list request",
+    ...objectSchema(
+    { ...requestProperties, workspaceId: { type: "string", minLength: 1 } },
+    ["requestId", "schemaVersion", "workspaceId"],
+    ),
+  },
+  "icomposer-util-list-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-util-list-response.json",
+    title: "icomposer/util-list response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      utils: {
+        type: "array",
+        maxItems: 5000,
+        items: objectSchema(
+          {
+            util: { type: "string", minLength: 1 },
+            docPath: { type: "string", minLength: 1 },
+            methodCount: { type: "integer", minimum: 0 },
+            status: { enum: ["ok", "invalid"] },
+          },
+          ["util", "docPath", "methodCount", "status"],
+        ),
+      },
+      counts: objectSchema({ utils: { type: "integer", minimum: 0 }, methods: { type: "integer", minimum: 0 } }, ["utils", "methods"]),
+    },
+    ["workspaceId", "utils", "counts"],
+    ),
+  },
+  "icomposer-util-query-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-util-query-request.json",
+    title: "icomposer/util-query request",
+    ...objectSchema(
+    {
+      ...requestProperties,
+      workspaceId: { type: "string", minLength: 1 },
+      util: { type: "string" },
+      keyword: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 200 },
+    },
+    ["requestId", "schemaVersion", "workspaceId"],
+    ),
+  },
+  "icomposer-util-query-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-util-query-response.json",
+    title: "icomposer/util-query response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      methods: { type: "array", maxItems: 200, items: objectSchema({ util: { type: "string", minLength: 1 }, method: { type: "string", minLength: 1 } }, ["util", "method"]) },
+      counts: objectSchema({ utils: { type: "integer", minimum: 0 }, methods: { type: "integer", minimum: 0 } }, ["utils", "methods"]),
+      limit: { type: "integer", minimum: 1, maximum: 200 },
+      truncated: { type: "boolean" },
+    },
+    ["workspaceId", "methods", "counts", "limit", "truncated"],
     ),
   },
   "operation-record.schema.json": commandSchema(

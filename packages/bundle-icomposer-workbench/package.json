@@ -23,6 +23,7 @@
     "@icomposer/ui-workbench-jobs": "file:../ui-workbench-jobs",
     "@icomposer/workbench-operation-log": "file:../workbench-operation-log",
     "@icomposer/workspace-binding": "file:../workspace-binding",
-    "@icomposer/icomposer-catalog": "file:../icomposer-catalog"
+    "@icomposer/icomposer-catalog": "file:../icomposer-catalog",
+    "@icomposer/icomposer-reference": "file:../icomposer-reference"
   }
 }

@@ -14,6 +14,10 @@
       name: '@icomposer/icomposer-catalog'
       inject: [workspaceBinding]
 
+    - id: icomposer-reference
+      name: '@icomposer/icomposer-reference'
+      inject: [workspaceBinding]
+
     - id: insuremo-service
       name: '@icomposer/insuremo-service'
       inject: [subprocess, operationLog, skills, storageDomain, webServer]
