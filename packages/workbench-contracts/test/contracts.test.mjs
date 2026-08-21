@@ -48,6 +48,11 @@ const iciQuerySchemaFiles = [
   "ici-cleanup-apply.schema.json",
   "ici-explain-context.schema.json",
   "ici-explain-deterministic.schema.json",
+  "icomposer-write-push-preview.schema.json",
+  "icomposer-write-push-request.schema.json",
+  "icomposer-write-push-execute.schema.json",
+  "icomposer-write-push-resolve.schema.json",
+  "icomposer-write-push-status.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -63,7 +68,7 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 45);
+  assert.equal(files.length, 50);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles, ...iciQuerySchemaFiles].sort(),

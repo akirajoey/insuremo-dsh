@@ -1,0 +1,61 @@
+# @icomposer/icomposer-write
+
+Approval-gated iComposer push write path: dry-run preview, receipted push
+request/execute, explicit conflict resolution, and status reads. This is the
+only package in the Workbench that may cause remote writes, and it never does
+so without an approved operation record.
+
+Host-only. Injects `[subprocess, workspaceBinding, imoAuth, operationLog]`.
+
+## Face `ctx.icomposerWrite` (frozen)
+
+- `pushPreview({workspaceId, files, batch?})` — read-only `push current|batch
+  … --dry-run --json` inside an imoAuth lease. Per-file allowlist projection
+  `{file, target, localVersion, serverVersion, conflict, compileChecks?,
+  warnings≤20}`; `localVersion` is a sha256 digest of the local file content
+  (never the content itself). Digest-only evidence; raw output never crosses
+  the face.
+- `pushRequest({workspaceId, files, batch?, checkUsages?, skipCompile?})` —
+  appends a pending operation record (kind `imo-icomposer-push`,
+  `paramsDigest` = sha256 of canonical files+flags) after running the same
+  dry-run preview, and returns the pending view with the embedded preview.
+- `pushExecute(operationId)` — the write gate. Requires the operation record
+  to be externally approved and pending; a one-shot in-process journal
+  guarantees at most one external push attempt (retries are pure evidence
+  reads). Runs the real push **without any prefer flag**; a CLI conflict
+  becomes a `conflict`-status receipt (zero auto-resolution) recorded via
+  `recordResult`.
+- `pushResolve({operationId, choice, by})` — explicit conflict decision.
+  `cancel` appends a resolve operation (kind `imo-icomposer-push-resolve`)
+  and immediately finalizes it as `rejected` with `reason=cancel`.
+  `prefer-local` / `prefer-server` append a **pending** resolve operation
+  (paramsDigest hashes choice + original operation id); only after it is
+  approved does `pushExecute(resolveOperationId)` re-push with the
+  corresponding prefer flag. The whole chain is receipted.
+- `pushStatus(operationId)` — operation record + journal state projection.
+
+## Safety properties
+
+- Zero spawn until an approved operation exists (`pushExecute` on a pending
+  or rejected record never spawns).
+- Conflict is never auto-resolved: no prefer flag is ever passed unless an
+  explicitly approved resolve operation says so.
+- Timeout/cancel after the spawn is marked outcome-unknown and the operation
+  is never re-run.
+- File arguments are workspace-relative `.groovy` paths (same contract as
+  `@icomposer/icomposer-verify`); `../`, absolute paths, backslashes, and
+  duplicates are rejected client-side. `--insecure` is never passed.
+- Errors are a closed union (`invalid-auth`, `not-approved`,
+  `already-executed`, `conflict-resolution-required`, …) with fixed
+  messages; hostile CLI output is dropped, only digests and bounded
+  allowlist fields survive.
+
+## Tests
+
+`pnpm --filter @icomposer/icomposer-write run test` covers the dry-run argv
+exactness (no prefer flags), file validation, pending request appends,
+unapproved zero-spawn gate, one-shot execution with already-executed retries,
+the full conflict → cancel / prefer-local approval chain, batch order,
+auth-error passthrough, cancel/dispose, and digest-only output.
+`test/real-write-smoke.tmp.mts` is a deliberately-run real-project dry-run
+smoke (no real push in this card; `src/dev` verified unchanged).

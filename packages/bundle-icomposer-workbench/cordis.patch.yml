@@ -30,6 +30,10 @@
       name: '@icomposer/icomposer-code-intelligence'
       inject: [workspaceBinding, icomposerCatalog, imoAuth, jobs]
 
+    - id: icomposer-write
+      name: '@icomposer/icomposer-write'
+      inject: [subprocess, workspaceBinding, imoAuth, operationLog]
+
     - id: insuremo-service
       name: '@icomposer/insuremo-service'
       inject: [subprocess, operationLog, skills, storageDomain, webServer]

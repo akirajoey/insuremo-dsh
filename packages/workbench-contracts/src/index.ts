@@ -35,6 +35,11 @@ export const COMMANDS = {
   utilsList: "icomposer/utils-list",
   utilsSearch: "icomposer/utils-search",
   iciBuild: "ici/build",
+  writePushPreview: "icomposer-write/push-preview",
+  writePushRequest: "icomposer-write/push-request",
+  writePushExecute: "icomposer-write/push-execute",
+  writePushResolve: "icomposer-write/push-resolve",
+  writePushStatus: "icomposer-write/push-status",
   operationRecord: "operation/record",
   operationList: "operation/list",
   operationDecide: "operation/decide",
@@ -75,6 +80,7 @@ export * from "./icomposer-catalog.ts";
 export * from "./icomposer-reference.ts";
 export * from "./icomposer-lifecycle.ts";
 export * from "./icomposer-verify.ts";
+export * from "./icomposer-write.ts";
 export * from "./icomposer-code-intelligence.ts";
 
 export const OPERATION_DECISIONS = {
