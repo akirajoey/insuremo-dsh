@@ -4,7 +4,9 @@ Host-only iComposer Code Intelligence pure TypeScript graph build core. Replaces
 
 Frozen face: `ctx.iciEngine.build({workspaceId}, {signal, onProgress})`,
 `ctx.iciEngine.queryApi({workspaceId, query, depth?, focus?, maxNodes?})`,
-`ctx.iciEngine.queryImpact({workspaceId, query})`.
+`ctx.iciEngine.queryImpact({workspaceId, query})`,
+`ctx.iciEngine.index({workspaceId, mode?, rebuild?}, {signal, onProgress})`,
+`ctx.iciEngine.search({workspaceId, query, mode?, top?})`.
 
 - Reuses binding gate (`workspaceBinding`) and catalog semantics (`icomposerCatalog.listAssets`) for metadata/assets; performs direct groovy source scans with containment and 5000 bound. Sources or assets whose path contains `STD_DISCARD` are skipped entirely (no nodes/edges/placeholders) — Rust `collect_build_sources` semantics.
 - Extracts relationships:
@@ -34,3 +36,26 @@ Frozen face: `ctx.iciEngine.build({workspaceId}, {signal, onProgress})`,
   `is_redundant_upstream_method_call`): a CALLS hop into a method is dropped
   when the caller also calls the method's owning function directly. Edge
   confidence is summarised as `{static, platform, inferred}` counts.
+
+## Semantic search (TASK-025; Rust `search/mod.rs` semantics)
+
+- Embedding texts follow the Rust `api_embedding_text` template
+  (`API: <name>` / `Mode: technical|business` / `Downstream: …` / body),
+  truncated at 8000 chars; downstream names come from a depth-2 BFS capped
+  at 80 labels.
+- Embedding requests run **inside an `imoAuth.prepare` lease** through
+  `ctx.subprocess` curl (`-sS`, HTTP-status trailer, fixed portal headers,
+  Bearer token from the lease, `--data-raw {"text":[…],"batch_size":N}`).
+  Batches are 16 texts (8 apis × technical+business). stdout is bounded
+  16MB and parsed for vectors only — URL/token never escape the lease;
+  failures surface as fixed-code errors (`invalid-auth` on 401,
+  `embedding-error` otherwise).
+- Vector store: JSONL only (`<DSH_HOME>/ici/<hash>/graph/search/
+  api_embeddings.jsonl`), written atomically (three-phase promote). Lines
+  carry `text_hash` + `source_hash`; indexing reuses cached vectors per api
+  unless the source/text changed (`rebuild: true` forces full re-embed).
+  zvec is intentionally not migrated (P2 residual).
+- `search`: query vector via the same lease flow, cosine similarity scored
+  in memory over the cache, top default 10 cap 50, rows
+  `{apiId, apiName, score, evidence≤200, downstream≤5}`; no cache →
+  fixed `no-index`; stale sources → `stale: true`.

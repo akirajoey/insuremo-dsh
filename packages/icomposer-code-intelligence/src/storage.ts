@@ -36,6 +36,82 @@ export async function readManifest(base: string): Promise<IciManifest | null> {
   }
 }
 
+export interface WriteFileAtomicOptions {
+  readonly signal?: AbortSignal;
+  readonly renameFn?: typeof rename;
+  readonly rmFn?: typeof rm;
+  readonly warn?: (message: string) => void;
+}
+
+/**
+ * Three-phase atomic file write (same promote semantics as the graph
+ * snapshot, applied to a single file such as the JSONL vector cache):
+ * final → stale-<ts> (skip if absent), tmp → final (rollback on failure),
+ * best-effort stale cleanup.
+ */
+export async function writeFileAtomic(
+  finalPath: string,
+  content: string,
+  options: WriteFileAtomicOptions = {},
+): Promise<void> {
+  const signal = options.signal;
+  const renameFn = options.renameFn ?? rename;
+  const rmFn = options.rmFn ?? rm;
+  const warn = options.warn ?? ((message: string) => console.warn(`[ici] ${message}`));
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const dir = join(finalPath, "..");
+  const tmp = `${finalPath}.staging-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(tmp, content, "utf8");
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const stale = `${finalPath}.stale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let movedStale = false;
+    let hasFinal = false;
+    try {
+      await stat(finalPath);
+      hasFinal = true;
+    } catch {
+      hasFinal = false;
+    }
+    if (hasFinal) {
+      try {
+        await renameFn(finalPath, stale);
+        movedStale = true;
+      } catch (error) {
+        await rmFn(tmp, { force: true }).catch(() => {});
+        warn(`promote: could not move previous file aside (${String(error)}); previous version kept`);
+        throw error;
+      }
+    }
+    try {
+      await renameFn(tmp, finalPath);
+    } catch (error) {
+      if (movedStale) {
+        try {
+          await renameFn(stale, finalPath);
+          movedStale = false;
+        } catch (rollbackError) {
+          warn(`promote rollback failed: ${String(rollbackError)}`);
+        }
+      }
+      await rmFn(tmp, { force: true }).catch(() => {});
+      throw error;
+    }
+    if (movedStale) {
+      try {
+        await rmFn(stale, { force: true });
+      } catch (error) {
+        warn(`cleanup of stale file failed: ${String(error)}`);
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof DOMException)) {
+      await rmFn(tmp, { force: true }).catch(() => {});
+    }
+    throw error;
+  }
+}
 export interface GraphSnapshot {
   readonly manifest: IciManifest;
   readonly nodes: IciNodeLike[];

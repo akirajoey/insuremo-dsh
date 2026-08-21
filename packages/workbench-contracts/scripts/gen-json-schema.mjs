@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -865,6 +865,75 @@ const schemas = {
           stale: { const: true },
         },
         ["workspaceId", "matched", "paths", "confidenceCounts", "truncated"],
+      ),
+    },
+  },
+  "ici-search-index.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-search-index.json",
+    title: "ici/search-index request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          mode: { enum: ["technical", "business", "all"] },
+          rebuild: { type: "boolean" },
+        },
+        ["requestId", "schemaVersion", "workspaceId"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          total: { type: "integer", minimum: 0 },
+          embedded: { type: "integer", minimum: 0 },
+          reused: { type: "integer", minimum: 0 },
+          stale: { const: true },
+        },
+        ["workspaceId", "total", "embedded", "reused"],
+      ),
+    },
+  },
+  "ici-search.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/ici-search.json",
+    title: "ici/search request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          query: { type: "string", minLength: 1 },
+          mode: { enum: ["technical", "business", "all"] },
+          top: { type: "integer", minimum: 1, maximum: 50 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "query"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          truncated: { type: "boolean" },
+          stale: { const: true },
+          rows: {
+            type: "array",
+            maxItems: 50,
+            items: objectSchema(
+              {
+                apiId: { type: "string", minLength: 1 },
+                apiName: { type: "string", minLength: 1 },
+                score: { type: "number" },
+                evidence: { type: "string", maxLength: 200 },
+                downstream: { type: "array", maxItems: 5, items: { type: "string", minLength: 1 } },
+              },
+              ["apiId", "apiName", "score", "evidence", "downstream"],
+            ),
+          },
+        },
+        ["workspaceId", "rows", "truncated"],
       ),
     },
   },

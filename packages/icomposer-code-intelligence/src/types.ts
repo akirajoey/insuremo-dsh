@@ -49,7 +49,13 @@ export type IciErrorCode =
   | "cancelled"
   | "storage-error"
   | "no-match"
-  | "no-snapshot";
+  | "no-snapshot"
+  | "no-index"
+  | "embedding-error"
+  | "invalid-auth"
+  | "forbidden"
+  | "prepare-invalidated"
+  | "lease-revoked";
 
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
@@ -66,6 +72,8 @@ export interface IciEngineFace {
   build(input: { readonly workspaceId: string }, options?: BuildOptions | AbortSignal): Promise<Result<IciBuildResult>>;
   queryApi(input: QueryApiInput, options?: BuildOptions | AbortSignal): Promise<Result<QueryApiResult>>;
   queryImpact(input: QueryImpactInput, options?: BuildOptions | AbortSignal): Promise<Result<QueryImpactResult>>;
+  index(input: SearchIndexInput, options?: BuildOptions | AbortSignal): Promise<Result<SearchIndexResult>>;
+  search(input: SearchInput, options?: BuildOptions | AbortSignal): Promise<Result<SearchResult>>;
 }
 
 // ---- query surface (TASK-024; Rust query/mod.rs semantics) ----
@@ -128,6 +136,48 @@ export interface QueryImpactResult {
   readonly matched: readonly string[];
   readonly paths: readonly ImpactPath[];
   readonly confidenceCounts: { readonly static: number; readonly platform: number; readonly inferred: number };
+  readonly truncated: boolean;
+  readonly stale?: true;
+}
+
+// ---- semantic search surface (TASK-025; Rust search/mod.rs semantics) ----
+
+export type EmbeddingMode = "technical" | "business" | "all";
+
+export interface SearchIndexInput {
+  readonly workspaceId: string;
+  /** Which text(s) to embed; default embeds both vectors per api. */
+  readonly mode?: EmbeddingMode;
+  /** true re-embeds every api, ignoring cached vectors. */
+  readonly rebuild?: boolean;
+}
+
+export interface SearchIndexResult {
+  readonly workspaceId: string;
+  readonly total: number;
+  readonly embedded: number;
+  readonly reused: number;
+  readonly stale?: true;
+}
+
+export interface SearchInput {
+  readonly workspaceId: string;
+  readonly query: string;
+  readonly mode?: EmbeddingMode;
+  readonly top?: number;
+}
+
+export interface SearchRow {
+  readonly apiId: string;
+  readonly apiName: string;
+  readonly score: number;
+  readonly evidence: string;
+  readonly downstream: readonly string[];
+}
+
+export interface SearchResult {
+  readonly workspaceId: string;
+  readonly rows: readonly SearchRow[];
   readonly truncated: boolean;
   readonly stale?: true;
 }

@@ -417,6 +417,16 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   ctx.provide("workspaceBinding", fakeBinding("bound", await mkdtemp(join(tmpdir(), "verify-tools-"))) as never);
   ctx.provide("imoAuth" as never, stubAuth("ok") as never);
   ctx.provide("iciEngine", {
+    search: async () => ({
+      ok: true,
+      value: {
+        rows: [
+          { apiId: "api:AlphaAPI", apiName: "AlphaAPI", score: 0.92, evidence: "evidence line" },
+          { apiId: "api:BetaAPI", apiName: "BetaAPI", score: 0.31, evidence: "" },
+        ],
+        truncated: false,
+      },
+    }),
     queryApi: async (input: { workspaceId: string; query: string }) => ({
       ok: true,
       value: {
@@ -475,8 +485,8 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   const { registerIcomposerToolsWith } = await import("../src/tool-defs.ts");
   const disposers = registerIcomposerToolsWith(ctx, (options) => options);
   try {
-    assert.deepEqual([...registered.keys()].sort(), ["ici_query", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
-    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150]);
+    assert.deepEqual([...registered.keys()].sort(), ["ici_query", "ici_search", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150, 150]);
     assert.equal(sections.every(x => x.name.startsWith("tool:")), true);
     const exec = { signal: new AbortController().signal };
 
@@ -507,9 +517,15 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     assert.equal(iciImpact.paths.length, 1);
     assert.equal(iciImpact.paths[0].apiId, "api:ApiA");
     assert.deepEqual(iciImpact.confidenceCounts, { static: 2, platform: 0, inferred: 0 });
+    const searchOut: any = await registered.get("ici_search")!.execute({ workspace_id: "ws1", query: "payment", top: 2 }, exec);
+    assert.equal(searchOut.rows.length, 2);
+    assert.equal(searchOut.rows[0].rank, 1);
+    assert.equal(searchOut.rows[0].apiName, "AlphaAPI");
+    assert.ok(Math.abs(searchOut.rows[0].score - 0.92) < 1e-9);
+    assert.equal(searchOut.error, undefined);
   } finally {
     for (const dispose of disposers) dispose();
   }
-  assert.deepEqual(removed.sort(), ["ici_query", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+  assert.deepEqual(removed.sort(), ["ici_query", "ici_search", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
   assert.equal(registered.size, 0);
 });

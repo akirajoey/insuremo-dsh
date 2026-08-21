@@ -28,7 +28,7 @@
 
     - id: icomposer-code-intelligence
       name: '@icomposer/icomposer-code-intelligence'
-      inject: [workspaceBinding, icomposerCatalog]
+      inject: [workspaceBinding, icomposerCatalog, imoAuth]
 
     - id: insuremo-service
       name: '@icomposer/insuremo-service'

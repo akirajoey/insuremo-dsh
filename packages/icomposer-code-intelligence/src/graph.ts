@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { readdir, readFile, stat, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { confidenceForSource, extractMethods, stableEdgeId, stableHashText, truncateChars, assignedVariableName, calledMethodsOnVariable, containsLocalMethodCall, extractQuotedAfter, stripLineComments } from "./parser.ts";
 import type { IciEdge, IciNode, ProgressCallback } from "./types.ts";
 
@@ -22,6 +23,24 @@ interface BuildContext {
 
 function addNode(ctx: BuildContext, node: IciNode) {
   if (!ctx.nodes.has(node.id)) ctx.nodes.set(node.id, node);
+}
+
+/**
+ * Workspace-relative POSIX path for an absolute (or already-relative) source
+ * path. Resolves symlinks via realpath so /var vs /private/var style mounts
+ * never leave an absolute prefix behind; returns undefined when the path
+ * escapes the workspace root.
+ */
+export function toRelativeWorkspacePath(canonicalRoot: string, sourcePath: string): string | undefined {
+  const absolute = isAbsolute(sourcePath) ? sourcePath : join(canonicalRoot, sourcePath);
+  let real: string;
+  try {
+    real = realpathSync(absolute);
+  } catch {
+    return undefined;
+  }
+  if (!isContained(real, canonicalRoot)) return undefined;
+  return relative(canonicalRoot, real).split("\\").join("/");
 }
 
 function addEdge(ctx: BuildContext, edge: IciEdge) {
@@ -61,25 +80,21 @@ export async function buildGraph(
     }
     const kind = entry.type as IciNode["kind"];
     const id = `${kind}:${entry.name}`;
-    const path = entry.sourcePath ? entry.sourcePath.replace(canonicalRoot + "/", "") : "";
-    const evidence = "";
+    const relPath = entry.sourcePath !== undefined ? toRelativeWorkspacePath(canonicalRoot, entry.sourcePath) : undefined;
     const node: IciNode = {
       id,
       kind,
       name: entry.name,
-      path: path || `src/dev/**/${entry.name}/${entry.name}.groovy`,
-      evidence,
-      sourceFile: path,
+      path: relPath !== undefined && relPath !== "" ? relPath : `src/dev/**/${entry.name}/${entry.name}.groovy`,
+      evidence: "",
+      sourceFile: relPath ?? "",
     };
     addNode(ctx, node);
     // Also collect sourceByName for later relationship extraction
-    if (entry.sourcePath) {
+    if (relPath !== undefined) {
       try {
-        const real = await safeRealpath(entry.sourcePath);
-        if (real && isContained(real, canonicalRoot)) {
-          const content = await readFile(real, "utf8");
-          ctx.sourceByName.set(entry.name, { kind, source: content, sourceFile: path });
-        }
+        const content = await readFile(join(canonicalRoot, relPath), "utf8");
+        ctx.sourceByName.set(entry.name, { kind, source: content, sourceFile: relPath });
       } catch { /* ignore */ }
     }
     progress(`scanning metadata ${kind} ${entry.name}`);
@@ -102,12 +117,11 @@ export async function collectSources(
     if (signal?.aborted) break;
     if (isStdDiscard(entry.sourcePath) || isStdDiscard(entry.name)) continue;
     if (!entry.sourcePath) continue;
+    const relPath = toRelativeWorkspacePath(canonicalRoot, entry.sourcePath);
+    if (relPath === undefined) continue;
     try {
-      const real = await safeRealpath(entry.sourcePath);
-      if (real && isContained(real, canonicalRoot)) {
-        const content = await readFile(real, "utf8");
-        sourceByName.set(entry.name, { kind: entry.type, source: content, sourceFile: entry.sourcePath.replace(canonicalRoot + "/", "") });
-      }
+      const content = await readFile(join(canonicalRoot, relPath), "utf8");
+      sourceByName.set(entry.name, { kind: entry.type, source: content, sourceFile: relPath });
     } catch { /* ignore */ }
   }
   return sourceByName;
