@@ -31,6 +31,9 @@ export const COMMANDS = {
   utilQuery: "icomposer/util-query",
   initPreview: "icomposer/init-preview",
   reloadPreview: "icomposer/reload-preview",
+  verifyUtils: "icomposer/verify-utils",
+  utilsList: "icomposer/utils-list",
+  utilsSearch: "icomposer/utils-search",
   operationRecord: "operation/record",
   operationList: "operation/list",
   operationDecide: "operation/decide",
@@ -70,6 +73,7 @@ export * from "./workspace.ts";
 export * from "./icomposer-catalog.ts";
 export * from "./icomposer-reference.ts";
 export * from "./icomposer-lifecycle.ts";
+export * from "./icomposer-verify.ts";
 
 export const OPERATION_DECISIONS = {
   pending: "pending",

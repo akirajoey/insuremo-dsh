@@ -22,6 +22,10 @@
       name: '@icomposer/icomposer-lifecycle'
       inject: [subprocess, workspaceBinding, imoAuth]
 
+    - id: icomposer-verify
+      name: '@icomposer/icomposer-verify'
+      inject: [subprocess, workspaceBinding, imoAuth, tools]
+
     - id: insuremo-service
       name: '@icomposer/insuremo-service'
       inject: [subprocess, operationLog, skills, storageDomain, webServer]

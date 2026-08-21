@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -588,6 +588,137 @@ const schemas = {
       scannedAt: { type: "string", minLength: 1 },
     },
     ["workspaceId", "distribution", "total", "top", "scannedAt"],
+    ),
+  },
+  "icomposer-verify-utils-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-verify-utils-request.json",
+    title: "icomposer/verify-utils request",
+    ...objectSchema(
+    {
+      ...requestProperties,
+      workspaceId: { type: "string", minLength: 1 },
+      file: { type: "string", minLength: 1, maxLength: 256 },
+    },
+    ["requestId", "schemaVersion", "workspaceId", "file"],
+    ),
+  },
+  "icomposer-verify-utils-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-verify-utils-response.json",
+    title: "icomposer/verify-utils response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      file: { type: "string", minLength: 1, maxLength: 256 },
+      valid: { type: "boolean" },
+      classesChecked: { type: "integer", minimum: 0 },
+      used: {
+        type: "array",
+        maxItems: 1000,
+        items: objectSchema(
+          {
+            className: { type: "string", minLength: 1, maxLength: 200 },
+            methods: { type: "array", maxItems: 1000, items: { type: "string", minLength: 1, maxLength: 200 } },
+          },
+          ["className", "methods"],
+        ),
+      },
+      unknownClasses: { type: "array", maxItems: 1000, items: { type: "string", minLength: 1, maxLength: 200 } },
+      invalidMethods: {
+        type: "array",
+        maxItems: 1000,
+        items: objectSchema(
+          {
+            className: { type: "string", minLength: 1, maxLength: 200 },
+            method: { type: "string", minLength: 1, maxLength: 200 },
+            line: { type: "string", minLength: 1, maxLength: 200 },
+            suggestions: { type: "array", maxItems: 1000, items: { type: "string", minLength: 1, maxLength: 200 } },
+          },
+          [],
+        ),
+      },
+      durationMs: { type: "integer", minimum: 0 },
+      stdoutDigest: { type: "string", minLength: 1 },
+    },
+    ["workspaceId", "file", "valid", "classesChecked", "used", "unknownClasses", "invalidMethods", "durationMs", "stdoutDigest"],
+    ),
+  },
+  "icomposer-utils-list-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-utils-list-request.json",
+    title: "icomposer/utils-list request",
+    ...objectSchema(
+    { ...requestProperties, workspaceId: { type: "string", minLength: 1 } },
+    ["requestId", "schemaVersion", "workspaceId"],
+    ),
+  },
+  "icomposer-utils-list-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-utils-list-response.json",
+    title: "icomposer/utils-list response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      classes: {
+        type: "array",
+        maxItems: 1000,
+        items: objectSchema(
+          {
+            className: { type: "string", minLength: 1, maxLength: 200 },
+            methodCount: { type: "integer", minimum: 0 },
+            description: { type: "string", minLength: 1, maxLength: 200 },
+          },
+          ["className", "methodCount"],
+        ),
+      },
+      count: { type: "integer", minimum: 0 },
+      truncated: { type: "boolean" },
+      durationMs: { type: "integer", minimum: 0 },
+      stdoutDigest: { type: "string", minLength: 1 },
+    },
+    ["workspaceId", "classes", "count", "truncated", "durationMs", "stdoutDigest"],
+    ),
+  },
+  "icomposer-utils-search-request.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-utils-search-request.json",
+    title: "icomposer/utils-search request",
+    ...objectSchema(
+    {
+      ...requestProperties,
+      workspaceId: { type: "string", minLength: 1 },
+      keyword: { type: "string", minLength: 1, maxLength: 128 },
+    },
+    ["requestId", "schemaVersion", "workspaceId", "keyword"],
+    ),
+  },
+  "icomposer-utils-search-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-utils-search-response.json",
+    title: "icomposer/utils-search response",
+    ...objectSchema(
+    {
+      workspaceId: { type: "string", minLength: 1 },
+      query: { type: "string", minLength: 1, maxLength: 128 },
+      matches: {
+        type: "array",
+        maxItems: 1000,
+        items: objectSchema(
+          {
+            className: { type: "string", minLength: 1, maxLength: 200 },
+            method: { type: "string", minLength: 1, maxLength: 200 },
+            description: { type: "string", minLength: 1, maxLength: 200 },
+          },
+          ["className"],
+        ),
+      },
+      count: { type: "integer", minimum: 0 },
+      truncated: { type: "boolean" },
+      durationMs: { type: "integer", minimum: 0 },
+      stdoutDigest: { type: "string", minLength: 1 },
+    },
+    ["workspaceId", "query", "matches", "count", "truncated", "durationMs", "stdoutDigest"],
     ),
   },
   "operation-record.schema.json": commandSchema(

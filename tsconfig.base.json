@@ -11,6 +11,7 @@
       "@deepseek-ai/schemastery": ["../deepseek-harness/vendor/schemastery/src/index.ts"],
       "@deepseek-ai/dsh-invariants": ["../deepseek-harness/packages/runtime-diagnostics/invariants/src/index.ts"],
       "@deepseek-ai/dsh-subprocess": ["../deepseek-harness/packages/subprocess/subprocess/src/index.ts"],
+      "@deepseek-ai/dsh-tools": ["../deepseek-harness/packages/core/tools/src/index.ts"],
       "@deepseek-ai/dsh-skill": ["../deepseek-harness/packages/skill/skill/src/index.ts"],
       "@deepseek-ai/dsh-llm": ["../deepseek-harness/packages/llm/llm/src/index.ts"],
       "@deepseek-ai/dsh-scope": ["../deepseek-harness/packages/core/scope/src/index.ts"],
