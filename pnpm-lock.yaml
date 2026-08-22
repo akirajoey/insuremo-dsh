@@ -133,6 +133,15 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/icomposer-workbench-e2e:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.22.4
+        version: 4.23.12
+
   packages/icomposer-write:
     dependencies:
       zod:

@@ -1,0 +1,15 @@
+{
+  "name": "@icomposer/icomposer-workbench-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "node --import tsx runner.mts",
+    "e2e:stability": "node --import tsx runner.mts --stability",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "tsx": "^4.22.4"
+  }
+}

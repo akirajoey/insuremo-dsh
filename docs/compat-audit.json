@@ -1,0 +1,90 @@
+{
+  "auditedAt": "2026-08-22T02:04:11.859Z",
+  "harnessCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
+  "pinnedCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
+  "harnessClean": true,
+  "pluginCount": 14,
+  "lockfilePresent": true,
+  "checks": [
+    {
+      "ok": true,
+      "check": "harness HEAD pinned at 99f6f02fec"
+    },
+    {
+      "ok": true,
+      "check": "harness working tree clean"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/cordis -> ../deepseek-harness/vendor/cordis/src/index.ts (13 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-workspace resolved via harness-shims.d.ts in 5 referring package(s)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-skill -> ../deepseek-harness/packages/skill/skill/src/index.ts (1 referrer)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-storage-domain -> ../deepseek-harness/packages/storage/storage-domain/src/index.ts (4 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-subprocess -> ../deepseek-harness/packages/subprocess/subprocess/src/index.ts (1 referrer)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/schemastery -> ../deepseek-harness/vendor/schemastery/src/index.ts (1 referrer)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-locale -> ../deepseek-harness/packages/client/locale/src/index.ts (3 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-runtime -> ../deepseek-harness/packages/client/runtime/src/index.ts (3 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-ui-settings -> ../deepseek-harness/packages/client/ui-settings/src/index.ts (1 referrer)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-ui-slots -> ../deepseek-harness/packages/client/ui-slots/src/index.ts (3 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-invariants -> ../deepseek-harness/packages/runtime-diagnostics/invariants/src/index.ts (3 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-test-runtime -> ../deepseek-harness/packages/test-support/client-runtime/src/index.ts (3 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-ui-sidebar resolved via harness-shims.d.ts in 1 referring package(s)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-ui-conversation resolved via harness-shims.d.ts in 1 referring package(s)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-client-ui-primitives -> ../deepseek-harness/packages/client/ui-primitives/src/index.ts (2 referrers)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-storage -> ../deepseek-harness/packages/storage/storage/src/index.ts (1 referrer)"
+    },
+    {
+      "ok": true,
+      "check": "bundle declares all 14 patch plugins as dependencies"
+    },
+    {
+      "ok": true,
+      "check": "pnpm-lock.yaml present (sha256:916d67ea192d1d09)"
+    }
+  ]
+}
