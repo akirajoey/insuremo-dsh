@@ -108,9 +108,10 @@ test("built artifacts exist, are pure JS, and bundle @icomposer dependencies", a
   execFileSync("node", ["--check", join(libDir, "client.js")]);
 });
 
-test("pack-dist zip manifest lists the self-contained payload", async () => {
+test("pack-dist produces the self-contained tarball and matching manifest", async () => {
   const { existsSync } = await import("node:fs");
-  const manifestPath = join(distDir, "..", "..", "dist-release", "pack-manifest.json");
+  const releaseDir = join(distDir, "..", "..", "dist-release");
+  const manifestPath = join(releaseDir, "pack-manifest.json");
   if (!existsSync(manifestPath)) {
     // packing is a release-time step; when absent, assert the packer script exists
     const packer = await stat(join(distDir, "..", "..", "scripts", "pack-dist.mjs"));
@@ -121,13 +122,23 @@ test("pack-dist zip manifest lists the self-contained payload", async () => {
   assert.equal(summary.package, "@icomposer/workbench");
   const paths = summary.files.map(file => file.path);
   for (const required of ["lib/index.js", "lib/client.js", "cordis.patch.yml", "package.json", "README.md"]) {
-    assert.ok(paths.includes(required), `zip manifest missing ${required}`);
+    assert.ok(paths.includes(required), `pack manifest missing ${required}`);
   }
-  // no sibling sources, no node_modules in the zip payload
+  // no sibling sources, no node_modules in the payload
   assert.equal(paths.some(p => p.includes("node_modules")), false);
   assert.equal(paths.some(p => p.includes("../")), false);
+  // PRIMARY artifact is the tarball, and it exists next to the manifest
+  assert.ok(typeof summary.tgz === "string" && summary.tgz.endsWith(".tgz"), "pack manifest must name a .tgz artifact");
+  assert.ok(existsSync(join(releaseDir, summary.tgz)), `tarball ${summary.tgz} not present`);
+  // tgz contents match the staged payload exactly (packer self-check mirrors this)
+  const { execFileSync } = await import("node:child_process");
+  const listing = execFileSync("tar", ["-tzf", join(releaseDir, summary.tgz)], { encoding: "utf8" })
+    .split("\n").map(l => l.trim()).filter(l => l.length > 0 && !l.endsWith("/")).map(l => l.replace(/^package\//, ""));
+  for (const required of paths) {
+    assert.ok(listing.includes(required), `tgz missing staged file ${required}`);
+  }
   // the shipped manifest has no file: devDependencies and a no-op prepare
-  const staged = JSON.parse(await readFile(join(distDir, "..", "..", "dist-release", "icomposer-workbench-dist", "package.json"), "utf8"));
+  const staged = JSON.parse(await readFile(join(releaseDir, "icomposer-workbench-dist", "package.json"), "utf8"));
   assert.equal(staged.devDependencies, undefined);
   assert.ok(staged.scripts.prepare.includes("prebuilt"), "shipped prepare must be a no-op");
 });

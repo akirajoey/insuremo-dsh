@@ -6,20 +6,23 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 
 ## 安装(三种方式)
 
-前置:已安装 DeepSeek Harness(`dsh`)并可用 `pnpm`。
+前置:已安装 DeepSeek Harness(`dsh`)并可用 `pnpm`/`npm pack`(打包侧)。
 
-### 方式一:本地文件夹(离线分发,推荐 POC 阶段使用)
+### 方式一:tarball 本地分发(推荐,离线可用)
 
-拿到打包文件夹(zip 或目录)后:
+拿到打包产物 `icomposer-workbench-0.1.0.tgz` 后:
 
 ```bash
-unzip icomposer-workbench-dist-0.1.0.zip
-cd icomposer-workbench-dist
-dsh plugin --profile web add .
+dsh plugin --profile web add /path/to/icomposer-workbench-0.1.0.tgz
 ```
 
-zip 内已预构建 `lib/`(纯 JS 产物,无 TypeScript 源依赖),安装不触发
-构建、不需要 npm registry;仅 pnpm 本身需要可用。
+tgz 内已预构建 `lib/`(纯 JS 产物),安装不触发构建、不需要 npm
+registry。**tarball 是推荐形态**:npm 打包的 tar 会在 profile 的
+node_modules 里实体落盘,宿主插件的 `@deepseek-ai/*` peer 依赖能沿
+祖先链被 dsh loader 正确解析。目录式 `add .` 是 link: 安装,文件留在
+原位置,bare import 解析依赖周围 node_modules 布局,曾实测出现
+`ERR_MODULE_NOT_FOUND`——仅当该目录自身可解析 harness 包时可用
+(例如位于 profile node_modules 内),请统一使用 tgz。
 
 ### 方式二:GitHub 仓库路径
 

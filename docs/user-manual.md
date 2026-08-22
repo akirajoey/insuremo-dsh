@@ -155,16 +155,18 @@ pnpm test          # 325/325 期望全绿
 Workbench 以标准 dsh 插件包 `@icomposer/workbench` 分发（源码位于
 `packages/icomposer-workbench-dist`），三种安装方式：
 
-**方式一：本地文件夹（离线分发，推荐）** —— 拿到 zip 后解压安装，全程
+**方式一：tarball 本地分发（推荐）** —— 拿到打包产物 tgz 后安装，全程
 不需要 npm registry：
 
 ```sh
-unzip icomposer-workbench-dist-0.1.0.zip
-cd icomposer-workbench-dist
-dsh plugin --profile web add .
+dsh plugin --profile web add icomposer-workbench-0.1.0.tgz
 ```
 
-zip 内已预构建 `lib/`（纯 JS），安装不触发构建。
+tgz 内已预构建 `lib/`（纯 JS），安装不触发构建。**tarball 是推荐形
+态**：npm 打包的 tar 会在 profile node_modules 实体落盘，`@deepseek-ai/*`
+peer 沿祖先链可被 dsh loader 解析。目录式 `add .` 为 link: 安装，bare
+import 解析依赖周围 node_modules 布局（曾实测 `ERR_MODULE_NOT_FOUND`），
+仅当该目录自身可解析 harness 包时可用；请统一使用 tgz。
 
 **方式二：GitHub 路径**：
 
@@ -181,8 +183,8 @@ dsh plugin --profile web add github:<org>/insuremo-dsh#path:packages/icomposer-w
 维护者打包与验证：
 
 ```sh
-node scripts/pack-dist.mjs             # 产出 dist-release/*.zip（自包含）
-node scripts/verify-standard-install.mjs # 三场景安装验证（repo 路径/解压目录/github）
+node scripts/pack-dist.mjs             # 产出 dist-release/icomposer-workbench-<ver>.tgz（自包含）
+node scripts/verify-standard-install.mjs # 场景验证（repo 路径/tgz，均含真实 boot 冒烟）
 ```
 
 ### 3.4 组合本地 profile（开发态，隔离运行）

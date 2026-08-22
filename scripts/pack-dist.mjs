@@ -2,15 +2,17 @@
 /**
  * Pack the distributable plugin folder (TASK-034).
  *
- * Produces dist-release/icomposer-workbench-dist/ — a self-contained copy of
- * the dist package with the prebuilt lib/ included — and zips it to
- * dist-release/icomposer-workbench-dist-<version>.zip. Recipients unzip,
- * `cd` in, and run `dsh plugin --profile web add .`.
+ * Produces dist-release/icomposer-workbench-dist/ (staging copy with the
+ * prebuilt lib/) and the PRIMARY artifact dist-release/icomposer-workbench-<version>.tgz
+ * (npm pack of the staging copy). Recipients install with
+ * `dsh plugin --profile web add icomposer-workbench-<version>.tgz`.
  *
- * The zip carries only the dist package itself (no sibling sources, no
- * node_modules): the prebuilt lib/ artifacts are install-ready, so pnpm's
- * prepare can be skipped (files already present) — verify-standard-install
- * proves this end to end.
+ * The tarball is the recommended form: npm-packed tarballs materialize the
+ * package physically inside the profile's node_modules, whose ancestor
+ * chain lets the dsh loader resolve @deepseek-ai peers. A bare directory
+ * `add .` creates a link: install that keeps files at the original
+ * location — bare-import resolution from there can fail depending on the
+ * surrounding node_modules layout (observed as ERR_MODULE_NOT_FOUND).
  */
 import { cp, mkdir, readFile, rm, writeFile, readdir, stat } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -44,7 +46,7 @@ shipped.scripts = { ...manifest.scripts, prepare: "node -e \"console.log('@icomp
 delete shipped.devDependencies;
 await writeFile(join(staged, "package.json"), `${JSON.stringify(shipped, null, 2)}\n`, "utf8");
 
-// Manifest listing + zip.
+// Manifest listing + the tarball (PRIMARY artifact).
 const list = [];
 async function walk(dir, prefix) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -56,16 +58,29 @@ async function walk(dir, prefix) {
   }
 }
 await walk(staged, "");
-const zipName = `icomposer-workbench-dist-${version}.zip`;
-execFileSync("zip", ["-r", "-q", zipName, "icomposer-workbench-dist"], { cwd: releaseDir });
+// npm pack materializes the package physically inside the profile's
+// node_modules on install — the only layout whose ancestor chain lets the
+// dsh loader resolve @deepseek-ai peers (a directory link: keeps the files
+// at the linked location, where bare-import resolution can fail).
+const tgzName = `icomposer-workbench-${version}.tgz`;
+execFileSync("npm", ["pack", "--silent", "--pack-destination", releaseDir], { cwd: staged });
+
+// Verify tarball contents match the staged payload exactly.
+const tgzListing = execFileSync("tar", ["-tzf", join(releaseDir, tgzName)], { encoding: "utf8" })
+  .split("\n").map(line => line.trim()).filter(line => line.length > 0 && !line.endsWith("/"))
+  .map(line => line.replace(/^package\//, ""));
+const stagedPaths = list.map(file => file.path).sort();
+const missing = stagedPaths.filter(path => !tgzListing.includes(path));
+if (missing.length > 0) throw new Error(`tgz missing staged files: ${missing.join(", ")}`);
 
 const summary = {
   package: manifest.name,
   version,
   stagedAt: new Date().toISOString(),
   files: list,
-  zip: zipName,
+  tgz: tgzName,
+  tgzContents: tgzListing.sort(),
 };
 await writeFile(join(releaseDir, "pack-manifest.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-console.log(`packed ${list.length} files -> ${join(relative(repoRoot, releaseDir), zipName)}`);
+console.log(`packed ${list.length} files -> ${join(relative(repoRoot, releaseDir), tgzName)}`);
 for (const file of list) console.log(`  ${file.path} (${file.bytes} bytes)`);

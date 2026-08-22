@@ -61,8 +61,8 @@ The Workbench also ships as a standard dsh plugin bundle
 installation routes are documented in that package's README:
 
 ```sh
-# 1) local offline distribution (unzip + add; no npm registry needed)
-cd icomposer-workbench-dist && dsh plugin --profile web add .
+# 1) local offline distribution via tarball (recommended; no npm registry needed)
+dsh plugin --profile web add icomposer-workbench-0.1.0.tgz
 
 # 2) GitHub path spec
 dsh plugin --profile web add github:<org>/insuremo-dsh#path:packages/icomposer-workbench-dist
@@ -71,10 +71,13 @@ dsh plugin --profile web add github:<org>/insuremo-dsh#path:packages/icomposer-w
 dsh plugin --profile web add @icomposer/workbench
 ```
 
-Release tooling: `node scripts/pack-dist.mjs` builds the self-contained zip
-(prebuilt `lib/`, no sibling sources, no node_modules) and
-`node scripts/verify-standard-install.mjs` proves the repo-path and
-unzipped-local installs end to end in isolated DSH_HOME profiles. The
+Release tooling: `node scripts/pack-dist.mjs` builds the self-contained
+tarball (`dist-release/icomposer-workbench-<version>.tgz`, prebuilt `lib/`,
+no sibling sources) and `node scripts/verify-standard-install.mjs` proves
+the installs end to end in isolated DSH_HOME profiles — including a real
+boot smoke (port line + no loader/module errors), not just a dump. The
+tarball is the recommended form: directory `add .` is a link: install whose
+bare-import resolution depends on the surrounding node_modules layout. The
 `pnpm setup-profile` flow below is the **development-mode** profile wiring
 (symlinks the source bundle); end users install the distributable instead.
 
