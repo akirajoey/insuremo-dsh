@@ -258,3 +258,13 @@ restart. No action uses `--insecure`; tests and real smoke never run auth writes
 - `GET .../insuremo/overview/workspaces/status` → `{workspaces:[{workspaceId,detected,autoBindState,graphReady,explainReady}]}`（≤100；binding face join ici diagnostics manifest + explain-state 文件标记；全程只读、miss 降级 false）。
 - explain 标记：ici 包首次 explainContext/explainDeterministic 成功后写 `<DSH_HOME>/ici/<hash>/explain-state.json` `{schemaVersion:1,lastExplainAt,apiName}`（原子 tmp+rename；文件即状态，不引入新域）。
 - overview response 增可选 `ici` section `{status,embeddingUrl,graphWorkspaces,explainWorkspaces}`（向后兼容）。
+
+## TASK-039: 设置简化重构（去审批直执行）
+
+**架构变更（用户裁定）**：IMO upgrade / skills install-update-remove / default-profile 等本地 CLI 操作从 Settings 一键直跑——**不再走 operationLog 审批链**。operationLog 服务本身保留（write 闭环 push/test/release/create/metadata 仍审批化），仅 InsureMO 本地动作退出。
+
+**直跑入口**：`imoUpgrade.executeDirect(targetVersion)`（共享单飞锁+smoke+事件）；`imoSkillActions.runDirect(input)`（preview→直跑内核，argv 校验/lease/digest 全复用，receipt 不落 operationLog）；`authActions.runDirectDefaultSwitch(profile)`。写桥 POST 六动作（imo-upgrade/skill-activation/skill-update/skill-install/skill-remove/default-profile）全部直调这些内核；Origin/X-Workbench-Action/JSON/8KB 门不变。
+
+**settings.plugin.item 注册范式（侦察结论）**：Plugins 设置页的卡片来自 `settings.plugin.item` keyed slot（声明在 `@deepseek-ai/dsh-client-ui-settings-plugins`，key=卡片所编辑的 settings namespace）；ConfigurablePluginsTab 通过 `api.settings.describe({})` 读 Host serve 的 namespace 列表，与浏览器侧注册的卡片 key 求交集后逐个 dispatch（`renderSlot(key, owner, { entryKey: ns })`）。**Host 侧必须 `ctx.inject(["settings"], sctx => sctx.settings.register(ns, schema, { base }))` 注册 namespace**（insuremo-service 现注册占位 namespace `insuremo`），浏览器侧同 key 注册卡片即自动配对——不自造 tab。
+
+**UI 重做**：ui-insuremo-settings 旧 InsuremoSection/四面板已删；新 `InsuremoCard`（settings.plugin.item, key="insuremo"）四区：IMO（版本+一键升级）、Auth（profile 单选切换+CLI 提示）、Skills（开关+更新全部+单项移除）、Code Intelligence（embedding 端点展示）。侧栏 footer 徽标/ProfilePicker（ui-insuremo-status）不变。

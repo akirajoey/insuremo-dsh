@@ -67,6 +67,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     ctx.set("imoSkillActions", Object.freeze({
       request: (input: SkillActionInput, signal?: AbortSignal) => this.request(input, signal),
       execute: (operationId: string, signal?: AbortSignal) => this.execute(operationId, signal),
+      runDirect: (input: SkillActionInput, signal?: AbortSignal) => this.runDirect(input, signal),
       status: () => this.status(),
     } satisfies ImoSkillActions));
     this.ctx.effect(() => () => {
@@ -99,6 +100,134 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     }
     this.#pending.set(record.id, { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest });
     return { ok: true, value: { operationId: record.id, kind: normalized.value.kind, paramsDigest, preview: preview.value } };
+  }
+
+  /**
+   * Direct execution for one-shot UI actions (TASK-039): runs the same
+   * preview + execution kernel as the approval loop but never touches the
+   * operation log — the caller gets the receipt-style outcome immediately.
+   * Reuses the single-flight lock and the one-shot journal semantics.
+   */
+  async runDirect(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionExecution> {
+    if (this.#disposed) return executionFailure("service-disposed", "IMO skill action service is disposed", "");
+    if (signal?.aborted) return executionFailure("cancelled", "skill action was cancelled", "");
+    if (this.#running !== null) return executionFailure("busy", "another skill action is already running", "");
+    const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
+    if (!normalized.ok) return normalized as unknown as SkillActionExecution;
+    const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
+    if (!preview.ok) return preview as unknown as SkillActionExecution;
+    const operationId = `direct:${normalized.value.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const pending: PendingSkillAction = { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest: skillActionParamsDigest(normalized.value) };
+    this.#running = { operationId, kind: pending.kind };
+    try {
+      const outcome = await this.executeDirectKernel(operationId, pending, signal);
+      return outcome;
+    } finally {
+      this.#running = null;
+    }
+  }
+
+  /** Direct kernel: executePending minus every operationLog write. */
+  private async executeDirectKernel(operationId: string, pending: PendingSkillAction, signal?: AbortSignal): Promise<SkillActionExecution> {
+    const startedAt = new Date().toISOString();
+    try {
+      const before = pending.preview.before;
+      if (before === undefined) {
+        return this.directReceipt(operationId, pending, startedAt, { status: "failed", exitCode: null, stdoutDigest: EMPTY_DIGEST, stderrDigest: EMPTY_DIGEST, beforeCount: 0, afterCount: 0, added: [], removed: [], updated: [], catalogInvalidated: false, startedAt });
+      }
+      const expectedRevision = pending.preview.activation?.revision;
+      if (this.#controller === undefined) {
+        return this.directReceipt(operationId, pending, startedAt, { status: "failed", exitCode: null, stdoutDigest: EMPTY_DIGEST, stderrDigest: EMPTY_DIGEST, beforeCount: before.names.length, afterCount: before.names.length, added: [], removed: [], updated: [], activationAfterRevision: undefined, catalogInvalidated: false, startedAt });
+      }
+      let initialized: ImoSkillActivationSnapshot;
+      try {
+        initialized = await this.#controller.ensureInitialized(before.names);
+      } catch {
+        return this.directReceipt(operationId, pending, startedAt, { status: "failed", exitCode: null, stdoutDigest: EMPTY_DIGEST, stderrDigest: EMPTY_DIGEST, beforeCount: before.names.length, afterCount: before.names.length, added: [], removed: [], updated: [], activationBeforeRevision: expectedRevision, activationAfterRevision: undefined, catalogInvalidated: false, startedAt });
+      }
+      if (expectedRevision !== undefined && initialized.revision !== expectedRevision) {
+        return this.directReceipt(operationId, pending, startedAt, { status: "failed", exitCode: null, stdoutDigest: EMPTY_DIGEST, stderrDigest: EMPTY_DIGEST, beforeCount: before.names.length, afterCount: before.names.length, added: [], removed: [], updated: [], activationBeforeRevision: expectedRevision, activationAfterRevision: initialized.revision, catalogInvalidated: false, startedAt });
+      }
+      try {
+        if (pending.input.kind === SKILL_ACTIVATION_KIND) {
+          return await this.directActivation(operationId, pending, before, initialized, expectedRevision, startedAt, signal);
+        }
+        return await this.directCli(operationId, pending, before, initialized, expectedRevision, startedAt, signal);
+      } catch {
+        const recovery = await recoverInventory({ ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation, kind: pending.input.kind, beforeNames: before.names, expectedRevision });
+        const after = recovery.after;
+        const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
+        const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
+        return this.directReceipt(operationId, pending, startedAt, {
+          status: changed ? "partial-failure" : "failed",
+          exitCode: null, stdoutDigest: EMPTY_DIGEST, stderrDigest: EMPTY_DIGEST,
+          beforeCount: before.names.length, afterCount: after?.names.length ?? before.names.length,
+          added: diff.added, removed: diff.removed, updated: diff.updated,
+          activationBeforeRevision: expectedRevision ?? initialized.revision,
+          activationAfterRevision: recovery.activationRevision ?? expectedRevision ?? initialized.revision,
+          catalogInvalidated: recovery.catalogInvalidated, startedAt,
+        });
+      }
+    } catch {
+      return executionFailure("execution-outcome-unknown", "skill action outcome could not be determined", operationId);
+    }
+  }
+
+  private async directActivation(operationId: string, pending: PendingSkillAction, before: SkillInventorySnapshot, initialized: ImoSkillActivationSnapshot, expectedRevision: number | undefined, startedAt: string, signal?: AbortSignal): Promise<SkillActionExecution> {
+    void signal;
+    const input = pending.input as Extract<NormalizedSkillAction, { kind: typeof SKILL_ACTIVATION_KIND }>;
+    let afterActivation;
+    try {
+      afterActivation = await this.#controller!.setEnabled(input.name, input.enabled, before.names, expectedRevision);
+    } catch {
+      return this.directReceipt(operationId, pending, startedAt, { status: "failed", exitCode: null, stdoutDigest: EMPTY_DIGEST, stderrDigest: EMPTY_DIGEST, beforeCount: before.names.length, afterCount: before.names.length, added: [], removed: [], updated: [], activationBeforeRevision: expectedRevision ?? initialized.revision, activationAfterRevision: initialized.revision, catalogInvalidated: false, startedAt });
+    }
+    let catalogInvalidated = false;
+    try { invalidateInsuremoSkillCatalog(this.ctx); catalogInvalidated = true; } catch { catalogInvalidated = false; }
+    return this.directReceipt(operationId, pending, startedAt, {
+      status: "completed", exitCode: 0, stdoutDigest: EMPTY_DIGEST, stderrDigest: EMPTY_DIGEST,
+      beforeCount: before.names.length, afterCount: before.names.length, added: [], removed: [], updated: [],
+      activationBeforeRevision: expectedRevision ?? initialized.revision, activationAfterRevision: afterActivation.revision,
+      catalogInvalidated, startedAt,
+    });
+  }
+
+  private async directCli(operationId: string, pending: PendingSkillAction, before: SkillInventorySnapshot, initialized: ImoSkillActivationSnapshot, expectedRevision: number | undefined, startedAt: string, signal?: AbortSignal): Promise<SkillActionExecution> {
+    const run = await runCapture(this.ctx.subprocess, { command: this.#config.command, args: executionArgs(pending.input), timeoutMs: this.#config.timeoutMs, signal });
+    const recovery: RecoveryReport = await recoverInventory({ ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation, kind: pending.input.kind, beforeNames: before.names, expectedRevision });
+    const after = recovery.after;
+    const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
+    const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
+    const status = run.ok ? "completed" : (changed ? "partial-failure" : "failed");
+    const stdoutDigest = run.ok ? run.value.stdoutDigest : (run.error.stdoutDigest ?? EMPTY_DIGEST);
+    const stderrDigest = run.ok ? run.value.stderrDigest : (run.error.stderrDigest ?? EMPTY_DIGEST);
+    const exitCode = run.ok ? run.value.exitCode : (run.error.exitCode ?? null);
+    const hint = !run.ok
+      ? (run.error.httpStatus === 401 ? "login-required" : run.error.httpStatus === 403 ? "permission-denied" : undefined)
+      : undefined;
+    return this.directReceipt(operationId, pending, startedAt, {
+      status, exitCode, stdoutDigest, stderrDigest,
+      beforeCount: before.names.length,
+      afterCount: after?.names.length ?? before.names.length,
+      added: diff.added, removed: diff.removed, updated: diff.updated,
+      activationBeforeRevision: expectedRevision ?? initialized.revision,
+      activationAfterRevision: recovery.activationRevision ?? expectedRevision ?? initialized.revision,
+      catalogInvalidated: recovery.catalogInvalidated, startedAt,
+      ...(hint === undefined ? {} : { hint }),
+    });
+  }
+
+  /** Direct receipt: built like the approval receipt, never journaled. */
+  private directReceipt(operationId: string, pending: PendingSkillAction, startedAt: string, input: Omit<SkillReceiptInput, "operationId" | "kind">): SkillActionExecution {
+    const provenance: Partial<SkillReceiptInput> = pending.input.kind === SKILL_INSTALL_KIND
+      ? installSourceProvenance((pending.input as Extract<NormalizedSkillAction, { kind: typeof SKILL_INSTALL_KIND }>).source)
+      : pending.input.kind === SKILL_REMOVE_KIND
+        ? { actionTargetDigest: digest(`remove:${(pending.input as Extract<NormalizedSkillAction, { kind: typeof SKILL_REMOVE_KIND }>).names.join(",")}`) }
+        : pending.input.kind === SKILL_UPDATE_KIND
+          ? { actionTargetDigest: digest("update:all") }
+          : { actionTargetDigest: digest(`activation:${(pending.input as Extract<NormalizedSkillAction, { kind: typeof SKILL_ACTIVATION_KIND }>).name}:${(pending.input as Extract<NormalizedSkillAction, { kind: typeof SKILL_ACTIVATION_KIND }>).enabled}`) };
+    const { receipt } = buildSkillReceipt({ operationId, kind: pending.kind, ...input, ...provenance });
+    return input.hint === undefined ? { ok: true, receipt } : { ok: true, receipt, hint: input.hint };
   }
 
   async execute(operationId: string, signal?: AbortSignal): Promise<SkillActionExecution> {

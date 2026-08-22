@@ -106,3 +106,20 @@ test("a second approved action is busy while one runs", async () => {
     assert.equal(firstResult.ok, true);
   });
 });
+
+test("TASK-039 P0: frozen face exposes runDirect; direct run succeeds without operationLog", async () => {
+  await withFixture(["alpha"], async (fx) => {
+    // 1) the frozen ctx face exposes runDirect
+    const face = fx.ctx.get("imoSkillActions") as unknown as {
+      runDirect?: (input: { kind: string; agent?: string; names?: readonly string[] }, signal?: AbortSignal) => Promise<{ ok: boolean; receipt?: { status: string }; error?: { code: string } }>;
+    };
+    assert.equal(typeof face?.runDirect, "function", "frozen imoSkillActions face must expose runDirect");
+
+    // 2) a direct update-all run completes and appends zero operation records
+    const before = fx.opLog.records.size;
+    const outcome = await face!.runDirect!({ kind: "skill-update" });
+    assert.equal(outcome.ok, true, `runDirect should complete: ${JSON.stringify(outcome.error)}`);
+    assert.equal(fx.opLog.records.size, before, "runDirect must not append operation records");
+    assert.equal(findInvocation(fx, "update") !== undefined, true, "direct kernel still runs the CLI");
+  });
+});

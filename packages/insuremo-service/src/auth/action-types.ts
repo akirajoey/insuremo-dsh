@@ -121,6 +121,8 @@ export interface ImoAuthActions {
   executeRemote(operationId: string, signal?: AbortSignal): Promise<ImoAuthActionExecution>;
   requestDefaultSwitch(input: DefaultProfileSwitchRequest, signal?: AbortSignal): Promise<ImoAuthActionResult<ImoAuthActionRequest>>;
   executeDefaultSwitch(operationId: string, signal?: AbortSignal): Promise<ImoAuthActionExecution>;
+  /** One-shot direct default switch (TASK-039): no operation record, same kernel. */
+  runDirectDefaultSwitch(input: DefaultProfileSwitchRequest, signal?: AbortSignal): Promise<ImoAuthActionExecution>;
   executeAction(operationId: string, signal?: AbortSignal): Promise<ImoAuthActionExecution>;
   actionStatus(): ImoAuthActionStatus;
 }

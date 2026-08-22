@@ -203,11 +203,11 @@ test("receipt and event expose only allowlisted fields", async () => {
   });
 });
 
-test("root skill-actions face exposes only request, execute, and status", async () => {
+test("root skill-actions face exposes request, execute, runDirect, and status", async () => {
   await withFixture([], async (fx) => {
     const face = fx.ctx.get<Record<string, unknown>>("imoSkillActions");
     assert.equal(Object.isFrozen(face), true);
-    assert.deepEqual(Reflect.ownKeys(face ?? {}).map(String).sort(), ["execute", "request", "status"]);
+    assert.deepEqual(Reflect.ownKeys(face ?? {}).map(String).sort(), ["execute", "request", "runDirect", "status"]);
     const state = fx.ctx.get<ImoSkillActivation>("imoSkillActivation");
     assert.equal(typeof state?.ensureInitialized, "function");
   });

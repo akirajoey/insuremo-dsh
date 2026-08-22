@@ -161,6 +161,27 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
     return this.executeExpected(operationId, IMO_AUTH_DEFAULT_KIND, signal);
   }
 
+  /**
+   * Direct one-shot default-profile switch for the UI (TASK-039): same CLI
+   * kernel as request→approve→execute but no operation record. Shares the
+   * single-flight lock and receipt builder.
+   */
+  async runDirectDefaultSwitch(input: DefaultProfileSwitchRequest, signal?: AbortSignal): Promise<ImoAuthActionExecution> {
+    if (signal?.aborted) return { ok: false, error: failure("cancelled", "auth action was cancelled", "").error };
+    if (this.#disposed) return { ok: false, error: failure("action-state-lost", "auth action service is disposed", "").error };
+    if (input === null || typeof input !== "object") return { ok: false, error: failure("invalid-input", "default profile parameters are invalid", "").error };
+    const normalized = normalizeDefault(input);
+    if (!normalized.ok) return { ok: false, error: normalized.error };
+    if (this.#running !== null) return { ok: false, error: failure("busy", "another auth action is already running", "").error };
+    const operationId = `direct:${IMO_AUTH_DEFAULT_KIND}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    this.#running = { operationId, kind: IMO_AUTH_DEFAULT_KIND };
+    try {
+      return await this.executeDefaultProfile(operationId, normalized.value, signal);
+    } finally {
+      this.#running = null;
+    }
+  }
+
   async executeAction(operationId: string, signal?: AbortSignal): Promise<ImoAuthActionExecution> {
     return this.executePending(operationId, undefined, signal);
   }

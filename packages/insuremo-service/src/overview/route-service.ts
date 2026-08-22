@@ -8,6 +8,11 @@ import { mountCurrentProfileSection } from "../current-profile-section.ts";
 
 export type ActivationControllerLike = { setEnabled(name: string, enabled: boolean, installedNames: readonly string[], expectedRevision?: number): Promise<unknown> };
 
+/** Composition seam: index.ts stores the live controller here for the routes. */
+export function setActivationControllerOnContext(ctx: Context, controller: ActivationControllerLike | undefined): void {
+  (ctx as unknown as { __insuremoActivationController?: ActivationControllerLike }).__insuremoActivationController = controller;
+}
+
 type RouteDisposer = () => void;
 
 /**
@@ -47,7 +52,7 @@ export class InsuremoRoutesService extends Service {
       }
     };
     safe(() => mountOverviewRoute(ctx));
-    safe(() => mountWriteRoutes(ctx, { getActivationController: () => this.#activationController }));
+    safe(() => mountWriteRoutes(ctx));
     safe(() => mountWorkspacesStatusRoute(ctx));
     safe(() => mountCurrentProfileSection(ctx));
     const firstRequestGuard = (_req: IncomingMessage, res: ServerResponse): void => {

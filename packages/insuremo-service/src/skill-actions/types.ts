@@ -225,6 +225,8 @@ export interface SkillActionStatus {
 export interface ImoSkillActions {
   request(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionResult<SkillActionRequest>>;
   execute(operationId: string, signal?: AbortSignal): Promise<SkillActionExecution>;
+  /** One-shot direct execution (TASK-039): no operation record, same kernel. */
+  runDirect(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionExecution>;
   status(): SkillActionStatus;
 }
 

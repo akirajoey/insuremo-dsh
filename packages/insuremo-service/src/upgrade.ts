@@ -71,6 +71,8 @@ export interface ImoUpgradeStatus {
 export interface ImoUpgrade {
   requestUpgrade(targetVersion?: string, signal?: AbortSignal): Promise<RequestUpgradeResult>;
   executeUpgrade(operationId: string, signal?: AbortSignal): Promise<ImoUpgradeResult>;
+  /** One-shot direct execution (TASK-039): no operation record, same kernel. */
+  executeDirect(targetVersion: string | undefined, signal?: AbortSignal): Promise<ImoUpgradeResult>;
   upgradeStatus(): ImoUpgradeStatus;
 }
 
@@ -115,6 +117,101 @@ export class ImoUpgradeService extends Service implements ImoUpgrade {
     return this.running === null
       ? { running: false }
       : { running: true, current: { ...this.running } };
+  }
+
+  /**
+   * Direct one-shot upgrade for the UI (TASK-039): same kernel as
+   * request→approve→execute, but no operation record is created. The
+   * single-flight lock and the smoke verification are shared.
+   */
+  async executeDirect(targetVersion: string | undefined, signal?: AbortSignal): Promise<ImoUpgradeResult> {
+    signal?.throwIfAborted();
+    if (this.running !== null) {
+      return { ok: false, error: { code: "busy", message: `an IMO upgrade is already running for '${this.running.operationId}'`, operationId: this.running.operationId } };
+    }
+    const operationId = `direct-upgrade:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    this.targets.set(operationId, targetVersion ?? null);
+    this.running = { operationId, targetVersion: targetVersion ?? null };
+    try {
+      return await this.executeUpgradeKernel(operationId, signal);
+    } finally {
+      this.running = null;
+    }
+  }
+
+  private async executeUpgradeKernel(operationId: string, signal?: AbortSignal): Promise<ImoUpgradeResult> {
+    const startedAt = new Date().toISOString();
+    const before = await this.readVersion(signal);
+    if (before === undefined) {
+      return { ok: false, error: { code: "pre-check-failed", message: "could not read the current IMO version before upgrade", operationId } };
+    }
+
+    const upgradeArgs = this.running!.targetVersion === null
+      ? ["upgrade", "--yes"]
+      : ["upgrade", "--version", this.running!.targetVersion, "--yes"];
+    const run = await runCapture(this.ctx.subprocess, {
+      command: this.config.command,
+      args: upgradeArgs,
+      timeoutMs: this.config.upgradeTimeoutMs,
+      signal,
+    });
+    const stdoutDigest = run.ok ? run.value.stdoutDigest : (run.error.stdoutDigest ?? digest(""));
+    const stderrDigest = run.ok ? run.value.stderrDigest : (run.error.stderrDigest ?? digest(""));
+    const exitCode = run.ok ? run.value.exitCode : (run.error.exitCode ?? null);
+    const after = (await this.readVersion(signal)) ?? before;
+
+    if (!run.ok) {
+      return this.finishDirect("failed", operationId, { before, after, exitCode, stdoutDigest, stderrDigest, smoke: [], startedAt });
+    }
+
+    const smoke: ImoSmokeResult[] = [];
+    for (const args of this.config.smokeCommands) {
+      const smokeRun = await runCapture(this.ctx.subprocess, {
+        command: this.config.command,
+        args,
+        timeoutMs: this.config.timeoutMs,
+        signal,
+      });
+      smoke.push({
+        cmd: `${basename(run.value.executablePath)} ${args.join(" ")}`,
+        ok: smokeRun.ok,
+        exitCode: smokeRun.ok ? smokeRun.value.exitCode : (smokeRun.error.exitCode ?? null),
+        stdoutDigest: smokeRun.ok ? smokeRun.value.stdoutDigest : (smokeRun.error.stdoutDigest ?? digest("")),
+      });
+    }
+    return this.finishDirect("completed", operationId, { before, after, exitCode, stdoutDigest, stderrDigest, smoke, startedAt });
+  }
+
+  /** Direct settlement: receipt returned in-memory only (no durable record). */
+  private async finishDirect(
+    status: "completed" | "failed",
+    operationId: string,
+    input: {
+      before: string;
+      after: string;
+      exitCode: number | null;
+      stdoutDigest: string;
+      stderrDigest: string;
+      smoke: readonly ImoSmokeResult[];
+      startedAt: string;
+    },
+  ): Promise<ImoUpgradeResult> {
+    const receipt: ImoUpgradeReceipt = {
+      operationId,
+      status,
+      before: input.before,
+      after: input.after,
+      exitCode: input.exitCode,
+      stdoutDigest: input.stdoutDigest,
+      stderrDigest: input.stderrDigest,
+      smoke: input.smoke,
+      startedAt: input.startedAt,
+      finishedAt: new Date().toISOString(),
+      recovery: `imo upgrade --version ${input.before} restores the previous version if needed`,
+    };
+    const event = status === "completed" ? IMO_UPGRADE_COMPLETED_EVENT : IMO_UPGRADE_FAILED_EVENT;
+    (this.ctx as unknown as { emit(name: string, payload: unknown): void }).emit(event, { operationId, status, before: input.before, after: input.after });
+    return { ok: true, receipt };
   }
 
   async executeUpgrade(operationId: string, signal?: AbortSignal): Promise<ImoUpgradeResult> {

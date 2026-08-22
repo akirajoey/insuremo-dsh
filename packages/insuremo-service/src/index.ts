@@ -5,7 +5,7 @@ import { ImoUpgradeService } from "./upgrade.ts";
 import { ImoSkillsService } from "./skills.ts";
 import { ImoSkillActivationService } from "./skill-activation.ts";
 import { ImoOverviewService } from "./overview/service.ts";
-import { InsuremoRoutesService } from "./overview/route-service.ts";
+import { InsuremoRoutesService, setActivationControllerOnContext } from "./overview/route-service.ts";
 import { mountInsuremoSkillProvider } from "./skill-provider.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
 import { ImoSkillActionsService } from "./skill-actions/service.ts";
@@ -86,8 +86,24 @@ declare module "@deepseek-ai/cordis" {
   }
 }
 
+/**
+ * Settings namespace served on the Host so the Plugins settings tab
+ * dispatches our card (TASK-039). The card is display + one-shot actions —
+ * the schema is a permissive placeholder the card never edits; serving the
+ * namespace is what makes the tab pair it with the card.
+ */
+export const SETTINGS_NAMESPACE = "insuremo" as const;
+
 /** Mount all Host service fibers; the package-level config is loader-optional. */
 export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
+  // Settings namespace registration is best-effort: card dispatch needs the
+  // Host to serve the namespace; failures never affect the service lifecycle.
+  try {
+    (ctx as unknown as { inject(names: readonly string[], callback: (ctx: unknown) => void): unknown }).inject(["settings"], (injected: unknown) => {
+      const settingsCtx = injected as { settings: { register(ns: string, schema: unknown, options?: { base?: unknown }): unknown } };
+      settingsCtx.settings.register(SETTINGS_NAMESPACE, { safeParse: () => ({ success: true }), parse: (v: unknown) => v } as never, { base: {} });
+    });
+  } catch { /* settings unavailable in this composition */ }
   const merged = resolveConfig(config);
   ctx.plugin(ImoCliService, merged);
   ctx.plugin(ImoUpgradeService, merged as never);
@@ -95,15 +111,11 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   let actionsMounted = false;
   let activationController: SkillActivationController | undefined;
   const routesFiber = ctx.plugin(InsuremoRoutesService as never);
-  void routesFiber?.await?.()?.then(() => {
-    const mounted = ctx.get("insuremoRoutes") as unknown as { setActivationController(controller: unknown): void } | undefined;
-    mounted?.setActivationController(activationController);
-  }).catch(() => undefined);
+  void routesFiber;
   ctx.plugin(ImoSkillActivationService, {
     onController: (controller: SkillActivationController) => {
       activationController = controller;
-      const mounted = ctx.get("insuremoRoutes") as unknown as { setActivationController(controller: unknown): void } | undefined;
-      mounted?.setActivationController(controller);
+      setActivationControllerOnContext(ctx, controller);
       if (actionsMounted) return;
       actionsMounted = true;
       ctx.plugin(ImoSkillActionsService, merged as never);

@@ -2,13 +2,13 @@ import type {} from "@deepseek-ai/dsh-client-locale/client";
 import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import type {} from "@deepseek-ai/dsh-client-ui-settings/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
-import { InsuremoSection, type InsuremoSectionProps } from "./InsuremoSection.tsx";
+import { InsuremoCard } from "./InsuremoCard.tsx";
 import { en, zh, type InsuremoLocaleKey } from "./locales.ts";
 
-export type { InsuremoSectionProps } from "./InsuremoSection.tsx";
+export type { InsuremoCardProps } from "./InsuremoCard.tsx";
 export type { InsuremoLocaleKey } from "./locales.ts";
 
-/** Locale namespace contributed by the InsureMO settings section. */
+/** Locale namespace contributed by the InsureMO settings card. */
 export const NS = "settings.insuremo";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
@@ -17,19 +17,21 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
   }
 }
 
-/** Services used by the client-side settings contribution. */
+/** Services used by the client-side contribution. */
 export const inject = ["slots", "locale"];
 
-/** Register the localized InsureMO section lazily on the Settings slot. */
+/** Register the localized InsureMO Plugins-tab card. */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), "ui-insuremo-settings: dictionaries");
 
-  const t = ctx.locale.bind(NS);
-  ctx.slots.inject("settings.section", () => ctx.slots.register({
-    name: "settings.section",
+  // Plugins tab card (TASK-039): keyed by the Host-served "insuremo" settings
+  // namespace so ConfigurablePluginsTab dispatches it without a custom tab.
+  ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
+    name: "settings.plugin.item",
+    // keyed dispatch by the Host-served "insuremo" namespace in production;
+    // id keeps the same entry registrable under a list-kind test frame.
+    key: "insuremo",
     id: "insuremo",
-    order: 50,
-    label: () => t("nav"),
     locale: NS,
-  }, InsuremoSection));
+  }, InsuremoCard));
 }

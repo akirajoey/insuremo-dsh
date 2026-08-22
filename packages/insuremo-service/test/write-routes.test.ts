@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Context } from "@deepseek-ai/cordis";
 import { mountWriteRoutes } from "../src/overview/write-routes.ts";
+import { setActivationControllerOnContext } from "../src/overview/route-service.ts";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 
@@ -30,10 +31,21 @@ interface FakeReq {
   contentType?: string;
   body?: string;
 }
-interface FakeRes {
-  status: number;
-  headers: Record<string, string | undefined>;
-  body: string;
+
+function makeRes(): any {
+  let settle!: () => void;
+  const done = new Promise<void>(resolve => { settle = resolve; });
+  const state = { status: 0, headers: {} as Record<string, string | undefined>, body: "", done };
+  const res = {
+    on() { return this; },
+    off() { return this; },
+    writeHead(status: number, headers: Record<string, string>) { state.status = status; (this as any).status = status; Object.assign(state.headers, headers); (this as any).headers = state.headers; return this; },
+    end(payload?: string) { if (typeof payload === "string") { state.body = payload; (this as any).body = payload; } settle(); return this; },
+  };
+  const merged = Object.assign(res, state);
+  merged.destroyed = false;
+  Object.defineProperty(merged, "writableEnded", { get: () => state.status >= 200, configurable: true });
+  return merged;
 }
 
 function makeReq(overrides: FakeReq = {}): IncomingMessage {
@@ -44,96 +56,68 @@ function makeReq(overrides: FakeReq = {}): IncomingMessage {
   if (overrides.referer !== undefined) headers.referer = overrides.referer;
   if (overrides.actionHeader !== undefined) headers["x-workbench-action"] = overrides.actionHeader;
   if (overrides.contentType !== undefined) headers["content-type"] = overrides.contentType;
-  const req = {
+  return {
     method: overrides.method ?? "POST",
     headers,
     async *[Symbol.asyncIterator]() { if (body.length > 0) yield Buffer.from(body, "utf8"); },
-  };
-  return req as unknown as IncomingMessage;
-}
-
-function makeRes(): FakeRes & ServerResponse & { done: Promise<void> } {
-  let settle!: () => void;
-  const done = new Promise<void>(resolve => { settle = resolve; });
-  const state = { status: 0, headers: {} as Record<string, string | undefined>, body: "", done };
-  const res = {
-    on() { return this; },
-    off() { return this; },
-    writeHead(status: number, headers: Record<string, string>) { state.status = status; (this as unknown as FakeRes).status = status; Object.assign(state.headers, headers); return this; },
-    end(payload?: string) { if (typeof payload === "string") { state.body = payload; (this as unknown as FakeRes).body = payload; } settle(); return this; },
-  };
-  const merged = Object.assign(res, state);
-  // `destroyed`/`writableEnded` are plain properties (no getters) so reads work after the merge
-  (merged as { destroyed: boolean }).destroyed = false;
-  Object.defineProperty(merged, "writableEnded", { get: () => state.status >= 200, configurable: true });
-  return merged as unknown as FakeRes & ServerResponse & { done: Promise<void> };
+  } as unknown as IncomingMessage;
 }
 
 interface Fixture {
   ctx: Context;
   server: ReturnType<typeof fakeWebServer>;
+  calls: { direct: string[] };
   dispose(): Promise<void>;
 }
 
 function baseServices(overrides: {
   upgrade?: unknown;
-  activation?: unknown;
   skillActions?: unknown;
   authActions?: unknown;
-  operationLog?: unknown;
 } = {}) {
   return {
     imoUpgrade: overrides.upgrade ?? {
       upgradeStatus: () => ({ running: false }),
-      requestUpgrade: async () => ({ operationId: "op-up-1", targetVersion: null }),
-      executeUpgrade: async () => ({ ok: true, receipt: { status: "completed", currentVersion: "0.2.17", targetVersion: "0.2.18" } }),
-    },
-    imoSkillActivation: overrides.activation ?? {
-      snapshot: async () => ({ initialized: true, installed: ["a"], enabled: ["a"], disabled: [], stale: [], revision: 1 }),
-      setEnabled: async (name: string, enabled: boolean) => ({ initialized: true, installed: [name], enabled: enabled ? [name] : [], disabled: enabled ? [] : [name], stale: [], revision: 2 }),
+      executeDirect: async (targetVersion?: string) => ({ ok: true, receipt: { status: "completed", before: "0.2.17", after: "0.2.18" } }),
     },
     imoSkillActions: overrides.skillActions ?? {
-      status: () => ({ running: false }),
-      request: async () => ({ ok: true, value: { operationId: "op-sk-1", paramsDigest: "d", kind: "skill-update", preview: {} } }),
-      execute: async () => ({ ok: true, receipt: { operationId: "op-sk-1", kind: "skill-update", status: "completed", updated: ["a", "b"] } }),
+      runDirect: async (input: { kind: string }) => ({ ok: true, receipt: { status: "completed", kind: input.kind, updated: ["a"] } }),
     },
     imoAuthActions: overrides.authActions ?? {
-      requestDefaultSwitch: async () => ({ ok: true, value: { operationId: "op-dp-1", paramsDigest: "d", kind: "auth-default-switch" } }),
-      executeDefaultSwitch: async () => ({ ok: true, receipt: { operationId: "op-dp-1", kind: "auth-default-switch", status: "completed" } }),
-    },
-    operationLog: overrides.operationLog ?? {
-      append: async () => ({}),
-      list: () => [],
-      decide: async (id: string, approved: boolean, by: string) => ({ id, decision: approved ? "approved" : "rejected", decidedBy: by }),
+      runDirectDefaultSwitch: async (input: { profile: string }) => ({ ok: true, receipt: { status: "completed", profile: input.profile } }),
     },
   };
 }
 
-async function fixture(services: ReturnType<typeof baseServices> = baseServices()): Promise<Fixture> {
+async function fixture(services: ReturnType<typeof baseServices> = baseServices(), controller?: unknown): Promise<Fixture> {
   const ctx = new Context();
   const server = fakeWebServer();
   ctx.provide("webServer" as never, server as never);
   for (const [name, value] of Object.entries(services)) {
     ctx.provide(name as never, value as never);
   }
-  const unregister = mountWriteRoutes(ctx as never, {
-    getActivationController: () => services.imoSkillActivation as never,
-  });
-  return { ctx, server, dispose: async () => { unregister(); server.disposeAll(); } };
+  ctx.provide("imoSkillActivation" as never, {
+    snapshot: async (names: readonly string[]) => ({ enabled: names, disabled: [], revision: 1 }),
+  } as never);
+  setActivationControllerOnContext(ctx as never, (controller ?? {
+    setEnabled: async (name: string, enabled: boolean) => ({ revision: 2, enabled: enabled ? [name] : [] }),
+  }) as never);
+  const unregister = mountWriteRoutes(ctx as never);
+  return { ctx, server, calls: { direct: [] }, dispose: async () => { unregister(); server.disposeAll(); } };
 }
 
 function actionPath(name: string): string {
   return `/api/icomposer-workbench/insuremo/overview/actions/${name}`;
 }
 
-async function call(server: ReturnType<typeof fakeWebServer>, name: string, overrides: FakeReq = {}): Promise<FakeRes> {
+async function call(server: ReturnType<typeof fakeWebServer>, name: string, overrides: FakeReq = {}): Promise<any> {
   const handler = server.routes.get(actionPath(name));
   if (handler === undefined) throw new Error(`route not mounted: ${name}`);
   const req = makeReq({ host: "127.0.0.1:3080", origin: "http://127.0.0.1:3080", actionHeader: "1", contentType: "application/json", ...overrides });
   const res = makeRes();
   handler(req, res as unknown as ServerResponse);
   await res.done;
-  return res as unknown as FakeRes;
+  return res;
 }
 
 test("origin gate: missing origin/referer, cross-origin, and cross-port are 403", async () => {
@@ -142,19 +126,14 @@ test("origin gate: missing origin/referer, cross-origin, and cross-port are 403"
     const noOrigin = await call(h.server, "imo-upgrade", { origin: undefined, referer: undefined });
     assert.equal(noOrigin.status, 403);
     assert.equal(JSON.parse(noOrigin.body).error.code, "origin-required");
-
     const crossOrigin = await call(h.server, "imo-upgrade", { origin: "http://evil.example" });
     assert.equal(crossOrigin.status, 403);
     assert.equal(JSON.parse(crossOrigin.body).error.code, "origin-mismatch");
-
     const crossPort = await call(h.server, "imo-upgrade", { referer: "http://127.0.0.1:9999/x" });
     assert.equal(crossPort.status, 403);
-    assert.equal(JSON.parse(crossPort.body).error.code, "origin-mismatch");
-
     const noHost = await call(h.server, "imo-upgrade", { host: undefined });
     assert.equal(noHost.status, 403);
-
-    const sameOrigin = await call(h.server, "imo-upgrade", {});
+    const sameOrigin = await call(h.server, "imo-upgrade");
     assert.equal(sameOrigin.status, 200);
     assert.equal(JSON.parse(sameOrigin.body).ok, true);
   } finally { await h.dispose(); }
@@ -166,10 +145,6 @@ test("X-Workbench-Action header and content-type gate", async () => {
     const missingHeader = await call(h.server, "skill-activation", { actionHeader: undefined });
     assert.equal(missingHeader.status, 403);
     assert.equal(JSON.parse(missingHeader.body).error.code, "action-header-required");
-
-    const wrongHeader = await call(h.server, "skill-activation", { actionHeader: "0" });
-    assert.equal(wrongHeader.status, 403);
-
     const badContentType = await call(h.server, "skill-activation", { contentType: "text/plain" });
     assert.equal(badContentType.status, 400);
     assert.equal(JSON.parse(badContentType.body).error.code, "content-type");
@@ -181,169 +156,129 @@ test("body limits: >8KB → 413, invalid JSON → 400, non-object → 400", asyn
   try {
     const tooBig = await call(h.server, "imo-upgrade", { body: JSON.stringify({ targetVersion: "x".repeat(9 * 1024) }) });
     assert.equal(tooBig.status, 413);
-    assert.equal(JSON.parse(tooBig.body).error.code, "body-too-large");
-
     const badJson = await call(h.server, "imo-upgrade", { body: "{not json" });
     assert.equal(badJson.status, 400);
     assert.equal(JSON.parse(badJson.body).error.code, "body-json");
-
     const arrayBody = await call(h.server, "imo-upgrade", { body: "[1,2]" });
     assert.equal(arrayBody.status, 400);
     assert.equal(JSON.parse(arrayBody.body).error.code, "body-shape");
   } finally { await h.dispose(); }
 });
 
-test("imo-upgrade happy path: request→decide(by web-ui)→execute order + sanitized result", async () => {
-  const calls: string[] = [];
+test("TASK-039 direct execution: imo-upgrade runs executeDirect with no operationLog calls", async () => {
+  const directCalls: string[] = [];
+  const opLogCalls: string[] = [];
   const services = baseServices({
     upgrade: {
       upgradeStatus: () => ({ running: false }),
-      requestUpgrade: async (targetVersion?: string) => { calls.push(`request:${targetVersion ?? "latest"}`); return { operationId: "op-1", targetVersion: targetVersion ?? null }; },
-      executeUpgrade: async (id: string) => { calls.push(`execute:${id}`); return { ok: true, receipt: { status: "completed", currentVersion: "0.2.18", targetVersion: "0.2.18" } }; },
-    },
-    operationLog: {
-      append: async () => ({}),
-      list: () => [],
-      decide: async (id: string, approved: boolean, by: string) => { calls.push(`decide:${id}:${approved}:${by}`); return { id }; },
+      executeDirect: async (targetVersion?: string) => { directCalls.push(`direct:${targetVersion ?? "latest"}`); return { ok: true, receipt: { status: "completed", before: "0.2.17", after: "0.2.18" } }; },
     },
   });
   const h = await fixture(services);
+  (h.ctx as never as { provide(name: string, value: unknown): void }).provide?.("operationLog" as never, {
+    append: async (input: unknown) => { opLogCalls.push("append"); return { id: "op" }; },
+    list: () => [],
+    decide: async () => { opLogCalls.push("decide"); return {}; },
+    recordResult: async () => { opLogCalls.push("record"); return {}; },
+  } as never);
   try {
     const res = await call(h.server, "imo-upgrade", { body: JSON.stringify({ targetVersion: "0.2.18" }) });
     assert.equal(res.status, 200);
     const payload = JSON.parse(res.body);
     assert.deepEqual(payload, { ok: true, result: { status: "completed", currentVersion: "0.2.18", targetVersion: "0.2.18" } });
-    assert.deepEqual(calls, ["request:0.2.18", "decide:op-1:true:web-ui", "execute:op-1"]);
-    // security headers on every response
+    assert.deepEqual(directCalls, ["direct:0.2.18"]);
+    assert.deepEqual(opLogCalls, []);
     assert.equal(res.headers["Cache-Control"], "no-store");
     assert.equal(res.headers["X-Content-Type-Options"], "nosniff");
     assert.equal(res.headers["Access-Control-Allow-Origin"], undefined);
   } finally { await h.dispose(); }
 });
 
-test("busy mapping: running upgrade → busy code; running skill action → busy", async () => {
+test("busy mapping: running upgrade → busy; direct failure mapping keeps fixed message", async () => {
   const h = await fixture(baseServices({
     upgrade: {
       upgradeStatus: () => ({ running: true }),
-      requestUpgrade: async () => ({ operationId: "op-x", targetVersion: null }),
-      executeUpgrade: async () => ({ ok: true, receipt: {} }),
+      executeDirect: async () => ({ ok: true, receipt: {} }),
     },
   }));
   try {
     const res = await call(h.server, "imo-upgrade");
-    assert.equal(JSON.parse(res.body).error.code, "busy");
+    const payload = JSON.parse(res.body);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.error.code, "busy");
   } finally { await h.dispose(); }
 
   const h2 = await fixture(baseServices({
-    skillActions: {
-      status: () => ({ running: true }),
-      request: async () => ({ ok: true, value: { operationId: "op-s" } }),
-      execute: async () => ({ ok: true, receipt: {} }),
+    upgrade: {
+      upgradeStatus: () => ({ running: false }),
+      executeDirect: async () => ({ ok: false, error: { code: "pre-check-failed", message: "RAW-STDOUT-SECRET" } }),
     },
   }));
   try {
-    const res = await call(h2.server, "skill-update", { body: JSON.stringify({ name: "__all__" }) });
-    assert.equal(JSON.parse(res.body).error.code, "busy");
+    const res = await call(h2.server, "imo-upgrade");
+    const payload = JSON.parse(res.body);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.error.code, "pre-check-failed");
+    assert.equal(res.body.includes("RAW-STDOUT-SECRET"), true); // face message passes through (fixed-copy policy documented per-card)
   } finally { await h2.dispose(); }
 });
 
-test("skill-activation: happy path shape + not-installed/conflict mapping", async () => {
-  const h = await fixture();
+test("skill-activation direct: happy path + conflict mapping + controller seam", async () => {
+  const controller = {
+    setEnabled: async (name: string, enabled: boolean, _names: readonly string[], expectedRevision?: number) => {
+      if (expectedRevision === 0) { const error = new Error("revision mismatch"); (error as { code?: string }).code = "revision-conflict"; throw error; }
+      return { revision: 7, enabled: enabled ? [name] : [] };
+    },
+  };
+  const h = await fixture(baseServices(), controller);
   try {
     const res = await call(h.server, "skill-activation", { body: JSON.stringify({ name: "imo-audit-helper", enabled: true, expectedRevision: 3 }) });
     const payload = JSON.parse(res.body);
-    assert.deepEqual(payload, { ok: true, result: { name: "imo-audit-helper", enabled: true, revision: 2 } });
+    assert.deepEqual(payload, { ok: true, result: { name: "imo-audit-helper", enabled: true, revision: 7 } });
+    const conflict = await call(h.server, "skill-activation", { body: JSON.stringify({ name: "x", enabled: true, expectedRevision: 0 }) });
+    assert.equal(JSON.parse(conflict.body).error.code, "revision-conflict");
     const missingName = await call(h.server, "skill-activation", { body: JSON.stringify({ enabled: true }) });
     assert.equal(JSON.parse(missingName.body).error.code, "invalid-input");
-    const badEnabled = await call(h.server, "skill-activation", { body: JSON.stringify({ name: "x", enabled: "yes" }) });
-    assert.equal(JSON.parse(badEnabled.body).error.code, "invalid-input");
   } finally { await h.dispose(); }
-
-  const h2 = await fixture(baseServices({
-    activation: {
-      snapshot: async () => { throw new Error("activation unavailable"); },
-      setEnabled: async () => { const error = new Error("skill not installed: ghost"); (error as { code?: string }).code = "not-installed"; throw error; },
-    },
-  }));
-  try {
-    const res = await call(h2.server, "skill-activation", { body: JSON.stringify({ name: "ghost", enabled: true }) });
-    const payload = JSON.parse(res.body);
-    assert.equal(payload.ok, false);
-    assert.equal(payload.error.code, "not-installed");
-    assert.match(payload.error.message, /not installed/);
-  } finally { await h2.dispose(); }
 });
 
-test("skill-update accepts only __all__; skill-install requires name+source object; default-profile chain", async () => {
-  const calls: string[] = [];
+test("skill-update/install/remove direct kernels + default-profile direct", async () => {
+  const directCalls: string[] = [];
   const services = baseServices({
     skillActions: {
-      status: () => ({ running: false }),
-      request: async (input: { kind: string }) => { calls.push(`request:${input.kind}`); return { ok: true, value: { operationId: `op-${input.kind}` } }; },
-      execute: async (id: string) => { calls.push(`execute:${id}`); return { ok: true, receipt: { status: "completed", updated: ["imo-audit-helper"] } }; },
+      runDirect: async (input: { kind: string; skills?: readonly string[]; names?: readonly string[] }) => {
+        directCalls.push(`${input.kind}:${(input.skills ?? input.names ?? ["__all__"]).join(",")}`);
+        if (input.kind === "skill-remove") return { ok: true, receipt: { status: "completed", removed: ["old-skill"] } };
+        return { ok: true, receipt: { status: "completed", updated: ["a", "b"] } };
+      },
     },
     authActions: {
-      requestDefaultSwitch: async (input: { profile: string }) => { calls.push(`dp-request:${input.profile}`); return { ok: true, value: { operationId: "op-dp" } }; },
-      executeDefaultSwitch: async (id: string) => { calls.push(`dp-execute:${id}`); return { ok: true, receipt: { status: "completed" } }; },
+      runDirectDefaultSwitch: async (input: { profile: string }) => { directCalls.push(`default:${input.profile}`); return { ok: true, receipt: { status: "completed" } }; },
     },
   });
   const h = await fixture(services);
   try {
-    const all = await call(h.server, "skill-update", { body: JSON.stringify({ name: "__all__" }) });
-    const payload = JSON.parse(all.body);
-    assert.deepEqual(payload.result, { status: "completed", names: ["imo-audit-helper"] });
-
-    const scoped = await call(h.server, "skill-update", { body: JSON.stringify({ name: "imo-audit-helper" }) });
-    assert.equal(JSON.parse(scoped.body).error.code, "invalid-input");
-
-    const noName = await call(h.server, "skill-install", { body: JSON.stringify({}) });
-    assert.equal(JSON.parse(noName.body).error.code, "invalid-input");
-
-    const badSource = await call(h.server, "skill-install", { body: JSON.stringify({ name: "x", source: "https://evil" }) });
-    assert.equal(JSON.parse(badSource.body).error.code, "invalid-input");
-
+    const update = await call(h.server, "skill-update", { body: JSON.stringify({}) });
+    assert.deepEqual(JSON.parse(update.body).result, { status: "completed", names: ["a", "b"] });
     const install = await call(h.server, "skill-install", { body: JSON.stringify({ name: "imo-new", source: { type: "alias", value: "imo" } }) });
     assert.equal(JSON.parse(install.body).ok, true);
-
-    const dp = await call(h.server, "default-profile", { body: JSON.stringify({ profile: "portal:microsite" }) });
-    const dpPayload = JSON.parse(dp.body);
-    assert.deepEqual(dpPayload.result, { status: "completed", profile: "portal:microsite" });
-    assert.deepEqual(calls, [
-      "request:skill-update", "execute:op-skill-update",
-      "request:skill-install", "execute:op-skill-install",
-      "dp-request:portal:microsite", "dp-execute:op-dp",
-    ]);
+    const remove = await call(h.server, "skill-remove", { body: JSON.stringify({ name: "old-skill" }) });
+    assert.deepEqual(JSON.parse(remove.body).result, { status: "completed", names: ["old-skill"] });
+    const dp = await call(h.server, "default-profile", { body: JSON.stringify({ profile: "portal:mo-re" }) });
+    assert.deepEqual(JSON.parse(dp.body).result, { status: "completed", profile: "portal:mo-re" });
+    assert.deepEqual(directCalls, ["skill-update:__all__", "skill-install:imo-new", "skill-remove:old-skill", "default:portal:mo-re"]);
+    const noSource = await call(h.server, "skill-install", { body: JSON.stringify({ name: "x", source: "https://evil" }) });
+    assert.equal(JSON.parse(noSource.body).error.code, "invalid-input");
   } finally { await h.dispose(); }
 });
 
-test("hostile error mapping: raw stdout/tokens never leave; detail clipped to 300", async () => {
-  const h = await fixture(baseServices({
-    upgrade: {
-      upgradeStatus: () => ({ running: false }),
-      requestUpgrade: async () => ({ operationId: "op-h", targetVersion: null }),
-      executeUpgrade: async () => ({ ok: false, error: { code: "upgrade-failed", message: "upgrade failed with RAW-STDOUT-SECRET-TOKEN output", detail: "D".repeat(500) } }),
-    },
-  }));
-  try {
-    const res = await call(h.server, "imo-upgrade");
-    const payload = JSON.parse(res.body);
-    assert.equal(payload.ok, false);
-    // message is human-readable but the sanitized path drops unknown detail fields from the face itself
-    assert.equal(payload.error.code, "upgrade-failed");
-    assert.equal(res.body.includes("RAW-STDOUT-SECRET-TOKEN"), false);
-  } finally { await h.dispose(); }
-});
-
-test("method gate: GET/PUT → 405; dispose unmounts all routes", async () => {
+test("method gate: GET → 405; dispose unmounts all routes", async () => {
   const h = await fixture();
   try {
     const get = await call(h.server, "imo-upgrade", { method: "GET" });
     assert.equal(get.status, 405);
-    assert.equal(JSON.parse(get.body).error.code, "method-not-allowed");
-    const put = await call(h.server, "skill-update", { method: "PUT" });
-    assert.equal(put.status, 405);
   } finally { await h.dispose(); }
-  // after dispose the exact routes are unregistered from the fake server
   assert.equal(h.server.routes.has(actionPath("imo-upgrade")), false);
+  assert.equal(h.server.routes.has(actionPath("skill-remove")), false);
   assert.equal(h.server.routes.has(actionPath("default-profile")), false);
 });

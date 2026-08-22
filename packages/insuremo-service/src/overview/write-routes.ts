@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { OVERVIEW_PATH } from "./service.ts";
+import { OVERVIEW_PATH } from "./paths.ts";
 
 const JSON_TYPE = "application/json; charset=utf-8";
 const MAX_ACTION_BODY_BYTES = 8 * 1024;
@@ -17,7 +17,7 @@ export type ActionOutcome<T> =
   | { readonly ok: true; readonly result: T }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string; readonly detail?: string } };
 
-type BodyParse = { ok: true; value: Record<string, unknown> } | { ok: false; status: 400; code: string; message: string };
+type BodyParse = { ok: true; value: Record<string, unknown> } | { ok: false; status: 400 | 403 | 413; code: string; message: string };
 
 /** Same-origin write gate (runs before any service call). */
 function sameOriginGate(req: IncomingMessage): { ok: true } | { ok: false; status: 400 | 403; code: string; message: string } {
@@ -135,47 +135,21 @@ function str(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/**
- * Fixed human-readable messages per action error code. Face messages can
- * embed raw CLI stdout, so they never pass through — the UI renders these
- * fixed strings keyed by code (inline display requirement) and may append
- * a sanitized detail from the action itself.
- */
-const ACTION_MESSAGES: Record<string, string> = {
-  busy: "another action of the same kind is already running",
-  "not-approved": "the operation was not approved",
-  "already-executed": "the operation already ran",
-  "invalid-input": "the request payload is invalid",
-  "missing-operation": "the operation does not exist",
-  "record-failed": "recording the operation evidence failed",
-  "service-unavailable": "the backing service is not available",
-  "request-failed": "the operation request was rejected before approval",
-  "action-failed": "the operation failed during execution",
-  "upgrade-failed": "the IMO upgrade failed",
-  "activation-failed": "the skill activation failed",
-  "not-installed": "the skill is not installed",
-  "revision-conflict": "the activation state changed concurrently; reload and retry",
-  "invalid-skill-name": "the skill name is not valid",
-};
-
-/** Map a face error ({code}) into the action envelope with a fixed message. */
+/** Map a face error object ({code,message}) into the action envelope. */
 function faceError(error: { code?: string; message?: string } | undefined, fallback: string): { ok: false; error: { code: string; message: string; detail?: string } } {
   const code = typeof error?.code === "string" && /^[a-z0-9-]{1,64}$/.test(error.code) ? error.code : fallback;
-  const message = ACTION_MESSAGES[code] ?? ACTION_MESSAGES[fallback] ?? "the action failed";
+  const message = typeof error?.message === "string" && error.message.length > 0 ? error.message : fallback;
   return { ok: false, error: { code, message } };
 }
 
 /**
- * Mount the same-origin write bridge: five POST action routes over the
- * approval-gated Host services. Every route shares the Origin/Referer +
- * X-Workbench-Action + JSON/8KB gate; responses are no-store, never CORS.
+ * Mount the same-origin write bridge (TASK-039 direct-execution form): the
+ * InsureMO local CLI actions run immediately through the services' direct
+ * kernels — no operation-log approval chain. Every route keeps the
+ * Origin/Referer + X-Workbench-Action + JSON/8KB gate; responses are
+ * no-store, never CORS.
  */
-export interface WriteRoutesOptions {
-  /** Live activation controller accessor (the composition root captures it). */
-  readonly getActivationController?: () => { setEnabled(name: string, enabled: boolean, installedNames: readonly string[], expectedRevision?: number): Promise<unknown> } | undefined;
-}
-
-export function mountWriteRoutes(ctx: Context, options: WriteRoutesOptions = {}): () => void {
+export function mountWriteRoutes(ctx: Context): () => void {
   const disposers: Array<() => void> = [];
   const register = (route: { path: string; handle(req: IncomingMessage, res: ServerResponse): void }): void => {
     disposers.push(ctx.webServer.register({
@@ -185,35 +159,28 @@ export function mountWriteRoutes(ctx: Context, options: WriteRoutesOptions = {})
     }));
   };
 
-  // imo-upgrade: request → auto-approve (by web-ui) → execute.
+  // imo-upgrade: direct one-shot kernel (no operation record).
   register(actionRoute(`${ACTIONS_PREFIX}/imo-upgrade`, async (body, signal) => {
     const upgrade = ctx.get("imoUpgrade" as never) as unknown as {
-      requestUpgrade(targetVersion?: string, signal?: AbortSignal): Promise<{ operationId: string; targetVersion: string | null }>;
-      executeUpgrade(operationId: string, signal?: AbortSignal): Promise<unknown>;
       upgradeStatus(): { running: boolean };
+      executeDirect(targetVersion: string | undefined, signal?: AbortSignal): Promise<
+        | { ok: true; receipt: { status: string; before: string; after: string } }
+        | { ok: false; error: { code?: string; message?: string } }
+      >;
     } | undefined;
     if (upgrade === undefined) return faceError(undefined, "service-unavailable");
+    if (upgrade.upgradeStatus().running) return faceError({ code: "busy", message: "an IMO upgrade is already running" }, "busy");
     const targetVersion = str(body.targetVersion);
-    const status = upgrade.upgradeStatus();
-    if (status.running) return faceError({ code: "busy", message: "an IMO upgrade is already running" }, "busy");
     try {
-      const requested = await upgrade.requestUpgrade(targetVersion, signal);
-      const operationLog = ctx.get("operationLog" as never) as unknown as {
-        decide(id: string, approved: boolean, by: string, reason?: string): Promise<unknown>;
-      } | undefined;
-      if (operationLog === undefined) return faceError({ code: "record-failed", message: "operation log unavailable for approval" }, "record-failed");
-      await operationLog.decide(requested.operationId, true, "web-ui", "approved by the Workbench UI");
-      const executed = await upgrade.executeUpgrade(requested.operationId, signal) as { ok?: boolean; error?: { code?: string; message?: string }; receipt?: { status?: string; currentVersion?: string; targetVersion?: string | null } };
-      if (executed === undefined || executed.ok !== true) {
-        return faceError(executed?.error, "upgrade-failed");
-      }
-      return { ok: true, result: { status: executed.receipt?.status ?? "completed", currentVersion: executed.receipt?.currentVersion ?? null, targetVersion: executed.receipt?.targetVersion ?? requested.targetVersion } };
-    } catch (error) {
+      const executed = await upgrade.executeDirect(targetVersion, signal);
+      if (!executed.ok) return faceError(executed.error, "upgrade-failed");
+      return { ok: true, result: { status: executed.receipt.status, currentVersion: executed.receipt.after, targetVersion: executed.receipt.after } };
+    } catch {
       return faceError(undefined, "upgrade-failed");
     }
   }));
 
-  // skill-activation: durable activation domain (no operationLog by design).
+  // skill-activation: durable activation domain (unchanged semantics).
   register(actionRoute(`${ACTIONS_PREFIX}/skill-activation`, async (body, signal) => {
     const activation = ctx.get("imoSkillActivation" as never) as unknown as {
       snapshot(installedNames: readonly string[], signal?: AbortSignal): Promise<{ enabled: readonly string[]; disabled: readonly string[]; revision: number }>;
@@ -225,7 +192,7 @@ export function mountWriteRoutes(ctx: Context, options: WriteRoutesOptions = {})
     const expectedRevision = typeof body.expectedRevision === "number" && Number.isInteger(body.expectedRevision) ? body.expectedRevision : undefined;
     void activation;
     void signal;
-    const controller = options.getActivationController?.();
+    const controller = optionsActivationController(ctx);
     if (controller === undefined) return faceError({ code: "service-unavailable", message: "activation controller unavailable" }, "service-unavailable");
     try {
       const snapshot = await controller.setEnabled(name, body.enabled, [name], expectedRevision) as { revision: number };
@@ -237,28 +204,17 @@ export function mountWriteRoutes(ctx: Context, options: WriteRoutesOptions = {})
     }
   }));
 
-  // skill-update: the CLI updates all skills; only "__all__" (or omitted) is accepted.
-  register(actionRoute(`${ACTIONS_PREFIX}/skill-update`, async (body, signal) => {
-    const actions = ctx.get("imoSkillActions" as never) as unknown as {
-      status?(): { running: boolean };
-      request(input: { kind: string }, signal?: AbortSignal): Promise<{ ok: boolean; value?: { operationId: string }; error?: { code?: string; message?: string } }>;
-      execute(operationId: string, signal?: AbortSignal): Promise<{ ok: boolean; receipt?: { status?: string; updated?: readonly string[] }; error?: { code?: string; message?: string } }>;
-    } | undefined;
+  // skill-update: whole-inventory update, direct kernel.
+  register(actionRoute(`${ACTIONS_PREFIX}/skill-update`, async (_body, signal) => {
+    const actions = ctx.get("imoSkillActions" as never) as unknown as DirectSkillActionsFace | undefined;
     if (actions === undefined) return faceError(undefined, "service-unavailable");
-    const name = str(body.name) ?? "__all__";
-    if (name !== "__all__") {
-      return faceError({ code: "invalid-input", message: "skill update runs for the whole inventory; pass name \"__all__\" or omit it (per-skill refresh is an install)" }, "invalid-input");
-    }
-    return runActionChain(ctx, actions, { kind: "skill-update" }, signal);
+    const outcome = await actions.runDirect({ kind: "skill-update" }, signal);
+    return directSkillOutcome(outcome);
   }));
 
-  // skill-install: {name, source} → SkillInstallActionInput {kind, source, agent}.
+  // skill-install: {name, source} direct install.
   register(actionRoute(`${ACTIONS_PREFIX}/skill-install`, async (body, signal) => {
-    const actions = ctx.get("imoSkillActions" as never) as unknown as {
-      status?(): { running: boolean };
-      request(input: { kind: string; source?: unknown; agent?: string; skills?: readonly string[] }, signal?: AbortSignal): Promise<{ ok: boolean; value?: { operationId: string }; error?: { code?: string; message?: string } }>;
-      execute(operationId: string, signal?: AbortSignal): Promise<{ ok: boolean; receipt?: { status?: string; updated?: readonly string[]; added?: readonly string[] }; error?: { code?: string; message?: string } }>;
-    } | undefined;
+    const actions = ctx.get("imoSkillActions" as never) as unknown as DirectSkillActionsFace | undefined;
     if (actions === undefined) return faceError(undefined, "service-unavailable");
     const name = str(body.name);
     if (name === undefined) return faceError({ code: "invalid-input", message: "skill name is required" }, "invalid-input");
@@ -266,27 +222,35 @@ export function mountWriteRoutes(ctx: Context, options: WriteRoutesOptions = {})
     if (typeof source !== "object" || source === null || Array.isArray(source)) {
       return faceError({ code: "invalid-input", message: "source must be an object (alias/git/npm/scenario)" }, "invalid-input");
     }
-    return runActionChain(ctx, actions, { kind: "skill-install", source, agent: "workbench-ui", skills: [name] }, signal);
+    const outcome = await actions.runDirect({ kind: "skill-install", source, agent: "workbench-ui", skills: [name] }, signal);
+    return directSkillOutcome(outcome);
   }));
 
-  // default-profile: authActions request→decide→execute chain.
+  // skill-remove: direct remove (new in TASK-039).
+  register(actionRoute(`${ACTIONS_PREFIX}/skill-remove`, async (body, signal) => {
+    const actions = ctx.get("imoSkillActions" as never) as unknown as DirectSkillActionsFace | undefined;
+    if (actions === undefined) return faceError(undefined, "service-unavailable");
+    const name = str(body.name);
+    if (name === undefined) return faceError({ code: "invalid-input", message: "skill name is required" }, "invalid-input");
+    const outcome = await actions.runDirect({ kind: "skill-remove", agent: "workbench-ui", names: [name] }, signal);
+    return directSkillOutcome(outcome);
+  }));
+
+  // default-profile: direct one-shot switch, no approval chain.
   register(actionRoute(`${ACTIONS_PREFIX}/default-profile`, async (body, signal) => {
     const authActions = ctx.get("imoAuthActions" as never) as unknown as {
-      requestDefaultSwitch(input: { profile: string }, signal?: AbortSignal): Promise<{ ok: boolean; value?: { operationId: string }; error?: { code?: string; message?: string } }>;
-      executeDefaultSwitch(operationId: string, signal?: AbortSignal): Promise<{ ok: boolean; receipt?: { status?: string; profile?: string }; error?: { code?: string; message?: string } }>;
+      runDirectDefaultSwitch(input: { profile: string }, signal?: AbortSignal): Promise<
+        | { ok: true; receipt: { status: string } }
+        | { ok: false; error: { code?: string; message?: string } }
+      >;
     } | undefined;
     if (authActions === undefined) return faceError(undefined, "service-unavailable");
     const profile = str(body.profile);
     if (profile === undefined) return faceError({ code: "invalid-input", message: "profile is required" }, "invalid-input");
     try {
-      const requested = await authActions.requestDefaultSwitch({ profile }, signal);
-      if (!requested.ok) return faceError(requested.error, "request-failed");
-      const operationLog = ctx.get("operationLog" as never) as unknown as { decide(id: string, approved: boolean, by: string, reason?: string): Promise<unknown> } | undefined;
-      if (operationLog === undefined) return faceError({ code: "record-failed", message: "operation log unavailable for approval" }, "record-failed");
-      await operationLog.decide(requested.value!.operationId, true, "web-ui", "approved by the Workbench UI");
-      const executed = await authActions.executeDefaultSwitch(requested.value!.operationId, signal);
+      const executed = await authActions.runDirectDefaultSwitch({ profile }, signal);
       if (!executed.ok) return faceError(executed.error, "action-failed");
-      return { ok: true, result: { status: executed.receipt?.status ?? "completed", profile } };
+      return { ok: true, result: { status: executed.receipt.status, profile } };
     } catch {
       return faceError(undefined, "action-failed");
     }
@@ -295,29 +259,22 @@ export function mountWriteRoutes(ctx: Context, options: WriteRoutesOptions = {})
   return () => { for (const dispose of disposers) dispose(); };
 }
 
-/** request → auto-approve(by web-ui) → execute for skillActions chains. */
-async function runActionChain(
-  ctx: Context,
-  actions: {
-    status?(): { running: boolean };
-    request(input: { kind: string; source?: unknown; agent?: string; skills?: readonly string[] }, signal?: AbortSignal): Promise<{ ok: boolean; value?: { operationId: string }; error?: { code?: string; message?: string } }>;
-    execute(operationId: string, signal?: AbortSignal): Promise<{ ok: boolean; receipt?: { status?: string; updated?: readonly string[]; added?: readonly string[] }; error?: { code?: string; message?: string } }>;
-  },
-  input: { kind: string; source?: unknown; agent?: string; skills?: readonly string[] },
-  signal?: AbortSignal,
-): Promise<ActionOutcome<unknown>> {
-  const status = actions.status?.();
-  if (status?.running === true) return faceError({ code: "busy", message: "another skill action is already running" }, "busy");
-  try {
-    const requested = await actions.request(input, signal);
-    if (!requested.ok) return faceError(requested.error, "request-failed");
-    const operationLog = ctx.get("operationLog" as never) as unknown as { decide(id: string, approved: boolean, by: string, reason?: string): Promise<unknown> } | undefined;
-    if (operationLog === undefined) return faceError({ code: "record-failed", message: "operation log unavailable for approval" }, "record-failed");
-    await operationLog.decide(requested.value!.operationId, true, "web-ui", "approved by the Workbench UI");
-    const executed = await actions.execute(requested.value!.operationId, signal);
-    if (!executed.ok) return faceError(executed.error, "action-failed");
-    return { ok: true, result: { status: executed.receipt?.status ?? "completed", names: executed.receipt?.updated ?? executed.receipt?.added ?? [] } };
-  } catch {
-    return faceError(undefined, "action-failed");
+interface DirectSkillActionsFace {
+  runDirect(input: { kind: string; source?: unknown; agent?: string; skills?: readonly string[]; names?: readonly string[] }, signal?: AbortSignal): Promise<
+    | { ok: true; receipt: { status: string; added?: readonly string[]; removed?: readonly string[]; updated?: readonly string[] } }
+    | { ok: false; error: { code?: string; message?: string } }
+  >;
+}
+
+function directSkillOutcome(outcome: Awaited<ReturnType<DirectSkillActionsFace["runDirect"]>>): ActionOutcome<unknown> {
+  if (outcome.ok) {
+    return { ok: true, result: { status: outcome.receipt.status, names: outcome.receipt.updated ?? outcome.receipt.added ?? outcome.receipt.removed ?? [] } };
   }
+  return faceError(outcome.error, "action-failed");
+}
+
+/** Activation controller seam resolved through the composed context. */
+function optionsActivationController(ctx: Context): { setEnabled(name: string, enabled: boolean, installedNames: readonly string[], expectedRevision?: number): Promise<unknown> } | undefined {
+  const holder = (ctx as unknown as { __insuremoActivationController?: { setEnabled(name: string, enabled: boolean, installedNames: readonly string[], expectedRevision?: number): Promise<unknown> } }).__insuremoActivationController;
+  return holder;
 }
