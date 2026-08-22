@@ -1,3 +1,4 @@
+import z from "@deepseek-ai/schemastery";
 import type { Context } from "@deepseek-ai/cordis";
 import { resolveConfig, type Config as ImoConfig } from "./config.ts";
 import { ImoCliService } from "./cli.ts";
@@ -96,14 +97,19 @@ export const SETTINGS_NAMESPACE = "insuremo" as const;
 
 /** Mount all Host service fibers; the package-level config is loader-optional. */
 export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
-  // Settings namespace registration is best-effort: card dispatch needs the
-  // Host to serve the namespace; failures never affect the service lifecycle.
-  try {
-    (ctx as unknown as { inject(names: readonly string[], callback: (ctx: unknown) => void): unknown }).inject(["settings"], (injected: unknown) => {
+  // Settings namespace registration: the Plugins card dispatch needs the Host
+  // to serve this namespace. The schema is a permissive schemastery shape
+  // (settings.register resolves by CALLING the schema — a plain zod-style
+  // object throws and the namespace never registers); failures log loud but
+  // never affect the service lifecycle.
+  (ctx as unknown as { inject(names: readonly string[], callback: (ctx: unknown) => void): unknown }).inject(["settings"], (injected: unknown) => {
+    try {
       const settingsCtx = injected as { settings: { register(ns: string, schema: unknown, options?: { base?: unknown }): unknown } };
-      settingsCtx.settings.register(SETTINGS_NAMESPACE, { safeParse: () => ({ success: true }), parse: (v: unknown) => v } as never, { base: {} });
-    });
-  } catch { /* settings unavailable in this composition */ }
+      settingsCtx.settings.register(SETTINGS_NAMESPACE, z.object({ placeholder: z.string().default("insuremo") }), { base: {} });
+    } catch (error) {
+      (ctx as unknown as { logger?: { warn(message: string): void } }).logger?.warn(`insuremo settings namespace registration failed: ${String(error)}`);
+    }
+  });
   const merged = resolveConfig(config);
   ctx.plugin(ImoCliService, merged);
   ctx.plugin(ImoUpgradeService, merged as never);

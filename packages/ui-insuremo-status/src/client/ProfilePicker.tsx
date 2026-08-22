@@ -19,10 +19,22 @@ type PickerState =
 export class ProfilePicker extends Component<ProfilePickerProps, PickerState> {
   override state: PickerState = { phase: "collapsed" };
 
+  /** One retry after a short delay: a Host restart / plugin reinstall window
+   * answers transiently and should not immediately show "cannot connect". */
+  private async fetchOverviewRetry(): Promise<Response> {
+    const first = await fetch(OVERVIEW_URL, { headers: { Accept: "application/json" } }).catch(() => undefined);
+    if (first !== undefined && first.ok) return first;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const second = await fetch(OVERVIEW_URL, { headers: { Accept: "application/json" } }).catch(() => undefined);
+    if (second !== undefined) return second;
+    if (first !== undefined) return first;
+    throw new Error("overview");
+  }
+
   private async open(): Promise<void> {
     this.setState({ phase: "open", profiles: [], busy: true });
     try {
-      const response = await fetch(OVERVIEW_URL, { headers: { Accept: "application/json" } });
+      const response = await this.fetchOverviewRetry();
       if (!response.ok) throw new Error("overview");
       const payload = await response.json() as { auth?: { profiles?: unknown; defaultProfileName?: unknown; defaultProfile?: unknown } };
       const raw = payload.auth?.profiles;
