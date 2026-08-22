@@ -8,6 +8,7 @@ import { ImoOverviewService } from "./overview/service.ts";
 import { mountOverviewRoute } from "./overview/route.ts";
 import { mountWriteRoutes } from "./overview/write-routes.ts";
 import { mountWorkspacesStatusRoute } from "./overview/workspaces-status.ts";
+import { mountCurrentProfileSection } from "./current-profile-section.ts";
 import { mountInsuremoSkillProvider } from "./skill-provider.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
 import { ImoSkillActionsService } from "./skill-actions/service.ts";
@@ -110,6 +111,7 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   ctx.effect(() => mountOverviewRoute(ctx), "insuremo-overview-route");
   ctx.effect(() => mountWriteRoutes(ctx, { getActivationController: () => activationController }), "insuremo-write-routes");
   ctx.effect(() => mountWorkspacesStatusRoute(ctx), "insuremo-workspaces-status-route");
+  ctx.effect(() => mountCurrentProfileSection(ctx), "insuremo-current-profile-section");
   ctx.effect(() => mountInsuremoSkillProvider(ctx), "insuremo-skill-provider");
 }
 

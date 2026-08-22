@@ -33,6 +33,7 @@ export interface ImoOverviewView {
     readonly current?: string;
     readonly target?: string;
     readonly updateAvailable: boolean;
+    readonly busy?: boolean;
   };
   readonly auth: {
     readonly status: string;
@@ -49,6 +50,8 @@ export interface ImoOverviewView {
     readonly enabled: number;
     readonly disabled: number;
     readonly names: readonly string[];
+    readonly entries?: readonly { name: string; description: string; enabled: boolean }[];
+    readonly activationRevision?: number;
   };
   readonly operations: {
     readonly status: string;
@@ -100,6 +103,7 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
       ...optStr("current", imo.current),
       ...optStr("target", imo.target),
       updateAvailable: bool(imo.updateAvailable),
+      ...(bool(imo.busy) ? { busy: true } : {}),
     },
     auth: {
       status: str(auth.status, "error"),
@@ -125,6 +129,11 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
       enabled: num(skills.enabled),
       disabled: num(skills.disabled),
       names: arr(skills.names).filter((name): name is string => typeof name === "string").slice(0, 512),
+      ...(arr(skills.entries).length > 0 ? { entries: arr(skills.entries).slice(0, 100).map(item => {
+        const e = obj(item);
+        return { name: str(e?.name, ""), description: str(e?.description, ""), enabled: bool(e?.enabled) };
+      }).filter(e => e.name.length > 0) } : {}),
+      ...(typeof skills.activationRevision === "number" && Number.isFinite(skills.activationRevision) ? { activationRevision: Math.trunc(skills.activationRevision) } : {}),
     },
     operations: {
       status: str(operations.status, "error"),

@@ -25,6 +25,16 @@ export class InsuremoSection extends Component<InsuremoSectionProps, LoadState> 
     void this.load();
   }
 
+  /** Background refresh after an action: keep the previous view mounted. */
+  private async reload(): Promise<void> {
+    try {
+      const response = await fetch(OVERVIEW_URL, { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const view = parseOverview(await response.json());
+      if (view !== null) this.setState({ status: "ready", view });
+    } catch { /* keep previous */ }
+  }
+
   override componentWillUnmount(): void {
     this.#controller?.abort();
   }
@@ -65,9 +75,9 @@ export class InsuremoSection extends Component<InsuremoSectionProps, LoadState> 
         </div>
         {state.status === "ready" ? (
           <>
-            <OverviewPanel t={t} imo={state.view.imo} operations={state.view.operations} />
-            <AuthPanel t={t} auth={state.view.auth} />
-            <SkillsPanel t={t} skills={state.view.skills} />
+            <OverviewPanel t={t} imo={state.view.imo} operations={state.view.operations} onChanged={() => void this.reload()} />
+            <AuthPanel t={t} auth={state.view.auth} onChanged={() => void this.reload()} />
+            <SkillsPanel t={t} skills={state.view.skills} activationRevision={state.view.skills.activationRevision} onChanged={() => void this.reload()} />
             {state.view.ici !== undefined ? <IciPanel t={t} ici={state.view.ici} /> : null}
             <DiagnosticsPanel t={t} diagnostics={state.view.diagnostics} />
           </>

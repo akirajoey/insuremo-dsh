@@ -121,3 +121,189 @@ describe("InsureMO Settings overview section", () => {
     expect(runtime.slots.entries("settings.section")).toHaveLength(0);
   });
 });
+
+describe("InsureMO interactive panels (TASK-036)", () => {
+  let runtime: SlotTestRuntime;
+  let locale: LocaleRuntime;
+  let feature: Awaited<ReturnType<SlotTestRuntime["mount"]>>;
+
+  const richView = {
+    ...fixtureView,
+    imo: { status: "ok", available: true, current: "0.2.17", target: "0.2.18", updateAvailable: true, busy: false },
+    auth: { status: "ok", profiles: [
+      { name: "portal:microsite", env: "portal", tenantCode: "microsite", isDefault: true, valid: true },
+      { name: "portal:mo-re", env: "portal", tenantCode: "mo-re", valid: true },
+    ], count: 2, defaultProfile: "portal:microsite" },
+    skills: { status: "ok", installed: 3, valid: 3, enabled: 2, disabled: 1, names: ["a", "b", "c"], activationRevision: 7, entries: [
+      { name: "imo-audit-helper", description: "audit", enabled: true },
+      { name: "imo-log-helper", description: "log", enabled: false },
+      { name: "imo-x", description: "x".repeat(300), enabled: true },
+    ] },
+  };
+
+  beforeEach(async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+      clear: () => { values.clear(); },
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() { return values.size; },
+    });
+    runtime = await SlotTestRuntime.create();
+    await runtime.declare({ "settings.section": { kind: "list", scope: "root" } });
+    locale = new LocaleRuntime(runtime.ctx);
+    runtime.ctx.provide("locale", locale);
+    runtime.slots.installLocale(locale);
+    feature = await runtime.mount({ inject, apply });
+  });
+
+  afterEach(async () => {
+    await runtime.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it("renders the three panels with rich fixture (20-skill scale counts, busy flags)", async () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ name: `skill-${i}`, description: `d${i}`, enabled: i % 2 === 0 }));
+    const view20 = { ...richView, skills: { ...richView.skills, entries: many, installed: 20, enabled: 10, disabled: 10 } };
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(view20));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    expect(await view.view.findByText(zh.cliUpdate)).toBeTruthy();
+    expect(await view.view.findByText(zh.authSetDefault)).toBeTruthy();
+    expect(await view.view.findByText(zh.skillsUpdateAll)).toBeTruthy();
+    expect(view.view.getAllByRole("checkbox").length).toBe(20);
+  });
+
+  it("CLI update button: POST shape, success path, busy disable", async () => {
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/actions/imo-upgrade")) {
+        return jsonResponse({ ok: true, result: { status: "completed", currentVersion: "0.2.18", targetVersion: "0.2.18" } });
+      }
+      return jsonResponse(richView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    const button = await view.view.findByRole("button", { name: zh.cliUpdate });
+    button.click();
+    await vi.waitFor(() => {
+      const actionCall = fetchMock.mock.calls.find(call => String(call[0]).includes("/actions/imo-upgrade"));
+      expect(actionCall).toBeTruthy();
+      const init = actionCall![1] as RequestInit;
+      expect(init.method).toBe("POST");
+      expect((init.headers as Record<string, string>)["X-Workbench-Action"]).toBe("1");
+      expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    });
+    expect(await view.view.findByText(new RegExp(zh.cliUpdated))).toBeTruthy();
+  });
+
+  it("CLI update failure: inline error (code+message), network → fixed copy", async () => {
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/actions/imo-upgrade")) {
+        return jsonResponse({ ok: false, error: { code: "busy", message: "an upgrade is already running" } });
+      }
+      return jsonResponse(richView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    (await view.view.findByRole("button", { name: zh.cliUpdate })).click();
+    expect(await view.view.findByText(/busy: an upgrade is already running/)).toBeTruthy();
+
+    // network failure variant
+    const netMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      return String(input).includes("/actions/") ? Promise.reject(new Error("offline")) : jsonResponse(richView);
+    });
+    vi.stubGlobal("fetch", netMock);
+    const view2 = runtime.renderSlot("settings.section", { close: vi.fn() });
+    (await view2.view.findByRole("button", { name: zh.cliUpdate })).click();
+    expect(await view2.view.findByText(new RegExp(zh.errorNetwork))).toBeTruthy();
+  });
+
+  it("Skills toggle: optimistic flip + rollback + inline error on failure", async () => {
+    let latest = richView;
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-activation")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { name: string; enabled: boolean; expectedRevision?: number };
+        expect(body.expectedRevision).toBe(7);
+        if (body.name === "imo-audit-helper") {
+          return jsonResponse({ ok: false, error: { code: "not-installed", message: "the skill is not installed" } });
+        }
+        const entries = latest.skills.entries.map(e => e.name === body.name ? { ...e, enabled: body.enabled } : e);
+        latest = { ...latest, skills: { ...latest.skills, entries, enabled: entries.filter(e => e.enabled).length, disabled: entries.filter(e => !e.enabled).length, activationRevision: 8 } };
+        return jsonResponse({ ok: true, result: { name: body.name, enabled: body.enabled, revision: 8 } });
+      }
+      return jsonResponse(latest);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    await view.view.findByText(zh.skillsUpdateAll);
+    const toggle = view.view.getAllByRole("checkbox").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper"))!;
+    toggle.click();
+    expect(await view.view.findByText(/not-installed: the skill is not installed/)).toBeTruthy();
+    // rollback: checkbox back to original after refetch
+    await vi.waitFor(() => {
+      const after = view.view.getAllByRole("checkbox").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper")) as HTMLInputElement;
+      expect(after.checked).toBe(true);
+    });
+  });
+
+  it("Skills revision-conflict: error row + retry hint + refetch", async () => {
+    let latest = richView;
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-activation")) {
+        return jsonResponse({ ok: false, error: { code: "revision-conflict", message: "the activation state changed concurrently; reload and retry" } });
+      }
+      return jsonResponse(latest);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    await view.view.findByText(zh.skillsUpdateAll);
+    const toggle = view.view.getAllByRole("checkbox")[0];
+    toggle.click();
+    expect(await view.view.findByText(/revision-conflict/)).toBeTruthy();
+    expect(await view.view.findByText(new RegExp(zh.skillsRetryHint))).toBeTruthy();
+  });
+
+  it("Profile default switch (Auth radio): POST envelope + refetch", async () => {
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/default-profile")) {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({ profile: "portal:mo-re" });
+        return jsonResponse({ ok: true, result: { status: "completed", profile: "portal:mo-re" } });
+      }
+      return jsonResponse(richView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    const radio = await view.view.findByRole("radio", { name: `${zh.authSetDefault}: portal:mo-re` });
+    radio.click();
+    await vi.waitFor(() => {
+      const actionCall = fetchMock.mock.calls.find(call => String(call[0]).includes("/actions/default-profile"));
+      expect(actionCall).toBeTruthy();
+    });
+  });
+
+  it("busy imo section disables the update button", async () => {
+    const busyView = { ...richView, imo: { ...richView.imo, busy: true } };
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(busyView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    const button = await view.view.findByRole("button", { name: new RegExp(zh.cliUpdating) });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("no editable inputs beyond toggles/radios (Auth/Skills read-only surface)", async () => {
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(richView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.section", { close: vi.fn() });
+    await view.view.findByText(zh.cliUpdate);
+    expect(view.view.queryByRole("textbox")).toBeNull();
+    expect(view.container.querySelector("input[type=text]")).toBeNull();
+    expect(view.container.querySelector("textarea")).toBeNull();
+  });
+});

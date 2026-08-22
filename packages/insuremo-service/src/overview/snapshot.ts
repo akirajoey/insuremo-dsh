@@ -145,11 +145,13 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
     let disabled = 0;
     let activationCode: string | undefined;
     let enabledSet = new Set<string>();
+    let activationRevision: number | undefined;
     try {
       const activation = await deps.imoSkillActivation.snapshot(names);
       enabled = activation.enabled.length;
       disabled = activation.disabled.length;
       enabledSet = new Set(activation.enabled);
+      activationRevision = activation.revision;
     } catch {
       activationCode = "activation-unavailable";
     }
@@ -171,6 +173,7 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
       names: names.slice(0, MAX_SKILL_NAMES),
       entries,
       entriesTruncated: names.length > MAX_SKILL_ENTRIES,
+      ...(activationRevision === undefined ? {} : { activationRevision }),
     });
   } catch {
     section = Object.freeze({ status: "error", code: "unavailable", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false });

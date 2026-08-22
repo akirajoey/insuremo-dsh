@@ -8,6 +8,11 @@ export const zh = {
   "health.graphNotReady": "代码图谱未构建",
   "health.explainReady": "业务解释已生成",
   "health.explainNotReady": "业务解释未生成",
+  "picker.label": "选择默认认证 Profile",
+  "picker.close": "收起",
+  "picker.loading": "加载中…",
+  "picker.empty": "无可用 Profile",
+  "picker.error": "无法连接",
 } as const satisfies Record<string, string>;
 
 export type InsuremoStatusLocaleKey = keyof typeof zh;
@@ -21,4 +26,9 @@ export const en = {
   "health.graphNotReady": "Code graph not built",
   "health.explainReady": "Business explanation generated",
   "health.explainNotReady": "Business explanation not generated",
+  "picker.label": "Select default auth profile",
+  "picker.close": "Collapse",
+  "picker.loading": "Loading…",
+  "picker.empty": "No profiles available",
+  "picker.error": "Cannot connect",
 } as const satisfies Record<InsuremoStatusLocaleKey, string>;

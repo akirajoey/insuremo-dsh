@@ -43,6 +43,8 @@ export interface OverviewSkillEntry {
 }
 
 export interface OverviewSkillsSection extends OverviewSectionBase {
+  /** Activation domain revision (optimistic-toggle conflict detection). */
+  readonly activationRevision?: number;
   readonly installed: number;
   readonly valid: number;
   readonly enabled: number;

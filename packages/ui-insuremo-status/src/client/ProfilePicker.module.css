@@ -1,0 +1,49 @@
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 9px;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2, #ccc);
+  border-radius: 8px;
+  background: var(--dsw-alias-button-elevated-fill, #fafafa);
+  color: var(--dsw-alias-label-secondary, #666);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary, #d59b00);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 9px;
+}
+
+.picker select {
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.error {
+  color: #c0392b;
+  font-size: 11px;
+}
