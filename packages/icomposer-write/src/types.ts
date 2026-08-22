@@ -34,7 +34,9 @@ export type PushErrorCode =
   | "invalid-name"
   | "invalid-data"
   | "invalid-method"
-  | "invalid-release-params";
+  | "invalid-release-params"
+  | "invalid-create-params"
+  | "invalid-metadata-fields";
 
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
@@ -180,6 +182,13 @@ export interface IcomposerWriteFace {
   releaseBranches(input: { readonly workspaceId: string; readonly repo: string }, signal?: AbortSignal): Promise<Result<ReleaseBranchView>>;
   releaseApply(input: ReleaseApplyInput, signal?: AbortSignal): Promise<Result<ReleaseApplyView>>;
   releaseExecute(operationId: string, signal?: AbortSignal): Promise<ReleaseExecution>;
+  createOptions(input: { readonly workspaceId: string; readonly kind: "api" | "function" }, signal?: AbortSignal): Promise<Result<CreateOptionsView>>;
+  createPreview(input: CreatePreviewInput, signal?: AbortSignal): Promise<Result<CreatePreviewView>>;
+  createRequest(input: CreatePreviewInput, signal?: AbortSignal): Promise<Result<CreateRequestView>>;
+  createExecute(operationId: string, signal?: AbortSignal): Promise<CreateExecution>;
+  metadataPreview(input: MetadataPreviewInput, signal?: AbortSignal): Promise<Result<MetadataPreviewView>>;
+  metadataRequest(input: MetadataPreviewInput, signal?: AbortSignal): Promise<Result<MetadataRequestView>>;
+  metadataExecute(operationId: string, signal?: AbortSignal): Promise<MetadataExecution>;
 }
 
 // ---- TASK-029: test + release ----
@@ -313,4 +322,140 @@ export interface ReleaseReceipt {
 
 export type ReleaseExecution =
   | { readonly ok: true; readonly receipt: ReleaseReceipt }
+  | { readonly ok: false; readonly error: { readonly code: PushErrorCode; readonly message: string; readonly operationId: string } };
+
+// ---- TASK-030: create + metadata ----
+
+export interface CreateOptionEntry {
+  readonly code: number;
+  readonly label: string;
+  readonly canonicalInput: string;
+  readonly allowedMethods?: readonly string[];
+}
+
+export interface CreateOptionsView {
+  readonly workspaceId: string;
+  readonly kind: "api" | "function";
+  readonly status: readonly CreateOptionEntry[];
+  readonly funcScope: readonly CreateOptionEntry[];
+  readonly requestMethod: readonly CreateOptionEntry[];
+  readonly requestType: readonly CreateOptionEntry[];
+  readonly responseType: readonly CreateOptionEntry[];
+  readonly stdoutDigest: string;
+}
+
+export interface CreateApiParams {
+  readonly name: string;
+  readonly moduleId: string;
+  readonly groupId: string;
+  readonly status: string;
+  readonly requestMethod: string;
+  readonly requestType: string;
+  readonly responseType: string;
+  readonly path?: string;
+  readonly description?: string;
+  readonly requestModelId?: string;
+  readonly responseModelId?: string;
+  readonly sse?: boolean;
+  readonly integration?: string;
+}
+
+export interface CreateFunctionParams {
+  readonly name: string;
+  readonly moduleId: string;
+  readonly groupId: string;
+  readonly status: string;
+  readonly funcScope: string;
+  readonly description?: string;
+}
+
+export interface CreatePreviewInput {
+  readonly workspaceId: string;
+  readonly kind: "api" | "function";
+  readonly params: CreateApiParams | CreateFunctionParams;
+}
+
+export interface CreatePreviewView {
+  readonly workspaceId: string;
+  readonly kind: "api" | "function";
+  readonly name: string;
+  readonly valid: boolean;
+  readonly warnings: readonly string[];
+  readonly durationMs: number;
+  readonly stdoutDigest: string;
+}
+
+export interface CreateRequestView {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-create";
+  readonly assetKind: "api" | "function";
+  readonly name: string;
+  readonly paramsDigest: string;
+  readonly decision: "pending";
+}
+
+export interface CreateReceipt {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-create";
+  readonly assetKind: "api" | "function";
+  readonly name: string;
+  readonly status: "completed" | "failed";
+  readonly exitCode: number | null;
+  readonly stdoutDigest: string;
+  readonly stderrDigest: string;
+  readonly catalogVerified: boolean;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+}
+
+export type CreateExecution =
+  | { readonly ok: true; readonly receipt: CreateReceipt }
+  | { readonly ok: false; readonly error: { readonly code: PushErrorCode; readonly message: string; readonly operationId: string } };
+
+export interface MetadataFields {
+  readonly status?: string;
+  readonly description?: string;
+  readonly sse?: boolean;
+  readonly integration?: string;
+  readonly funcScope?: string;
+}
+
+export interface MetadataPreviewInput {
+  readonly workspaceId: string;
+  readonly file: string;
+  readonly fields: MetadataFields;
+}
+
+export interface MetadataPreviewView {
+  readonly workspaceId: string;
+  readonly file: string;
+  readonly valid: boolean;
+  readonly warnings: readonly string[];
+  readonly durationMs: number;
+  readonly stdoutDigest: string;
+}
+
+export interface MetadataRequestView {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-metadata-update";
+  readonly file: string;
+  readonly paramsDigest: string;
+  readonly decision: "pending";
+}
+
+export interface MetadataReceipt {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-metadata-update";
+  readonly file: string;
+  readonly fieldsApplied: readonly string[];
+  readonly status: "completed" | "failed";
+  readonly exitCode: number | null;
+  readonly stdoutDigest: string;
+  readonly stderrDigest: string;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+}
+
+export type MetadataExecution =
+  | { readonly ok: true; readonly receipt: MetadataReceipt }
   | { readonly ok: false; readonly error: { readonly code: PushErrorCode; readonly message: string; readonly operationId: string } };

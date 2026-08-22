@@ -34,6 +34,21 @@ import type {
   TestReceipt,
   TestRunInput,
   TestRunView,
+  CreateOptionEntry,
+  CreateOptionsView,
+  CreateApiParams,
+  CreateFunctionParams,
+  CreatePreviewInput,
+  CreatePreviewView,
+  CreateRequestView,
+  CreateReceipt,
+  CreateExecution,
+  MetadataFields,
+  MetadataPreviewInput,
+  MetadataPreviewView,
+  MetadataRequestView,
+  MetadataReceipt,
+  MetadataExecution,
 } from "./types.ts";
 
 export type {
@@ -70,6 +85,21 @@ export type {
   TestReceipt,
   TestRunInput,
   TestRunView,
+  CreateOptionEntry,
+  CreateOptionsView,
+  CreateApiParams,
+  CreateFunctionParams,
+  CreatePreviewInput,
+  CreatePreviewView,
+  CreateRequestView,
+  CreateReceipt,
+  CreateExecution,
+  MetadataFields,
+  MetadataPreviewInput,
+  MetadataPreviewView,
+  MetadataRequestView,
+  MetadataReceipt,
+  MetadataExecution,
 };
 export { assetJoinState } from "./join-check.ts";
 export { readTestArtifact, writeBaseDir } from "./artifacts.ts";

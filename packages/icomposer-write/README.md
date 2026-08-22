@@ -75,6 +75,28 @@ Host-only. Injects `[subprocess, workspaceBinding, imoAuth, operationLog]`.
   runs the full apply argv after external approval; message is validated to
   1–500 chars without control characters.
 
+## TASK-030: create + metadata closed loop
+
+- `createOptions({workspaceId, kind})` — read-only live option vocabularies
+  (`status`/`funcScope`/`requestMethod`/`requestType`/`responseType`, each
+  capped at 50 `{code,label,canonicalInput,allowedMethods?}` entries) parsed
+  from the real `create options api|function --json` shape. Future UI cards
+  use this to drive dynamic field enabling.
+- `createPreview` / `createRequest` + `createExecute` — dry-run preview, then
+  an approval-gated `imo-icomposer-create` operation (one-shot journal).
+  Params are narrowly validated (asset-name syntax, numeric ids, alias
+  tokens, description ≤500, API path shape). Real create runs the full argv;
+  afterwards the workspace is **re-scanned through `ctx.icomposerCatalog`**
+  and the receipt records `catalogVerified` evidence that the new asset
+  actually appeared (best-effort, never faked).
+- `metadataPreview` / `metadataRequest` + `metadataExecute` — FILE validated
+  like push (workspace-relative groovy); at least one of
+  status/description/sse/integration/funcScope is required or the request is
+  refused with `invalid-metadata-fields` (zero spawn); the applied field
+  list is receipted.
+- P2 fixes: failed artifact writes now unlink their `.tmp-*` file, and
+  `isValidBranchName` rejects `..`/`.` path segments.
+
 ## Tests
 
 `pnpm --filter @icomposer/icomposer-write run test` covers the dry-run argv

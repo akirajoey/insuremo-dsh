@@ -53,7 +53,9 @@ export type PendingEntry =
   | { readonly kind: "push"; readonly operationId: string; readonly workspaceId: string; readonly mode: "current" | "batch"; readonly files: readonly string[]; readonly checkUsages?: boolean; readonly skipCompile?: boolean; readonly paramsDigest: string }
   | { readonly kind: "resolve"; readonly operationId: string; readonly workspaceId: string; readonly mode: "current" | "batch"; readonly files: readonly string[]; readonly checkUsages?: boolean; readonly skipCompile?: boolean; readonly prefer: "prefer-local" | "prefer-server"; readonly originalOperationId: string; readonly paramsDigest: string }
   | { readonly kind: "test"; readonly operationId: string; readonly workspaceId: string; readonly assetKind: TestKind; readonly name: string; readonly data?: string; readonly method?: string; readonly overrideUnpushed: boolean; readonly joinState: AssetJoinState; readonly paramsDigest: string }
-  | { readonly kind: "release"; readonly operationId: string; readonly workspaceId: string; readonly type: "api" | "function"; readonly name: string; readonly repo: string; readonly branch: string; readonly message: string; readonly paramsDigest: string };
+  | { readonly kind: "release"; readonly operationId: string; readonly workspaceId: string; readonly type: "api" | "function"; readonly name: string; readonly repo: string; readonly branch: string; readonly message: string; readonly paramsDigest: string }
+  | { readonly kind: "create"; readonly operationId: string; readonly workspaceId: string; readonly shape: { readonly kind: "api" | "function"; readonly params: unknown }; readonly paramsDigest: string }
+  | { readonly kind: "metadata"; readonly operationId: string; readonly workspaceId: string; readonly file: string; readonly fields: { status?: string; description?: string; sse?: boolean; integration?: string; funcScope?: string }; readonly paramsDigest: string };
 
 export interface WriteOpsDeps {
   readonly ctx: Context;

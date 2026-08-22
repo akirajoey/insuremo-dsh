@@ -140,6 +140,7 @@ export function isValidRepoUrl(value: string | undefined): boolean {
 
 export function isValidBranchName(value: string | undefined): boolean {
   if (value === undefined || value.length < 1 || value.length > 128) return false;
+  if (value.split("/").some(seg => seg === "" || seg === "." || seg === "..")) return false;
   return /^[A-Za-z0-9._/-]+$/.test(value);
 }
 
@@ -191,4 +192,120 @@ export function releaseParamsDigest(input: { type: "api" | "function"; name: str
     branch: input.branch,
     message: input.message,
   }));
+}
+
+// ---- TASK-030: create + metadata ----
+
+/** Live-enum aliases (status/method/type/scope) — bounded token vocabulary. */
+export function isValidAliasToken(value: string | undefined): boolean {
+  if (value === undefined || value.length < 1 || value.length > 64) return false;
+  return /^[a-z0-9][a-z0-9_-]*$/i.test(value);
+}
+
+/** Module/group/model ids are numeric identifiers. */
+export function isValidNumericId(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  return /^[0-9]{1,19}$/.test(value);
+}
+
+export function isValidApiPath(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  if (value.length < 1 || value.length > 256) return false;
+  return value.startsWith("/") && !value.includes("..") && /^[A-Za-z0-9/_{}.-]+$/.test(value);
+}
+
+const DESCRIPTION_MAX_CHARS = 500;
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
+
+export function isValidDescription(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  if (value.length === 0 || value.length > DESCRIPTION_MAX_CHARS) return false;
+  return !CONTROL_CHARS.test(value);
+}
+
+export type CreateParamsShape =
+  | { readonly kind: "api"; readonly params: import("./types.ts").CreateApiParams }
+  | { readonly kind: "function"; readonly params: import("./types.ts").CreateFunctionParams };
+
+export function validateCreateParams(shape: CreateParamsShape): boolean {
+  const { params } = shape;
+  if (!isValidAssetName(params.name)) return false;
+  if (!isValidNumericId(params.moduleId) || !isValidNumericId(params.groupId)) return false;
+  if (!isValidAliasToken(params.status)) return false;
+  if (!isValidDescription(params.description)) return false;
+  if (shape.kind === "api") {
+    const api = shape.params;
+    if (!isValidAliasToken(api.requestMethod) || !isValidAliasToken(api.requestType) || !isValidAliasToken(api.responseType)) return false;
+    if (!isValidApiPath(api.path)) return false;
+    if (api.requestModelId !== undefined && !isValidNumericId(api.requestModelId)) return false;
+    if (api.responseModelId !== undefined && !isValidNumericId(api.responseModelId)) return false;
+    if (api.integration !== undefined && (api.integration.length < 1 || api.integration.length > 200)) return false;
+    return true;
+  }
+  return isValidAliasToken(shape.params.funcScope);
+}
+
+/** argv for `imo icomposer create api|function` (never `--insecure`). */
+export function buildCreateArgs(authProfile: string, shape: CreateParamsShape, dryRun: boolean): readonly string[] {
+  const args = ["icomposer", "create", shape.kind, "--json", "--profile", authProfile, "--name", shape.params.name, "--module-id", shape.params.moduleId, "--group-id", shape.params.groupId, "--status", shape.params.status];
+  if (shape.kind === "api") {
+    args.push("--request-method", shape.params.requestMethod, "--request-type", shape.params.requestType, "--response-type", shape.params.responseType);
+    if (shape.params.path !== undefined) args.push("--path", shape.params.path);
+    if (shape.params.description !== undefined) args.push("--description", shape.params.description);
+    if (shape.params.requestModelId !== undefined) args.push("--request-model-id", shape.params.requestModelId);
+    if (shape.params.responseModelId !== undefined) args.push("--response-model-id", shape.params.responseModelId);
+    if (shape.params.sse === true) args.push("--sse");
+    if (shape.params.integration !== undefined) args.push("--integration", shape.params.integration);
+  } else {
+    args.push("--func-scope", shape.params.funcScope);
+    if (shape.params.description !== undefined) args.push("--description", shape.params.description);
+  }
+  if (dryRun) args.push("--dry-run");
+  return args;
+}
+
+export function buildCreateOptionsArgs(authProfile: string, kind: "api" | "function"): readonly string[] {
+  return ["icomposer", "create", "options", kind, "--json", "--profile", authProfile];
+}
+
+export function validateMetadataFields(fields: import("./types.ts").MetadataFields): boolean {
+  const selected = metadataFieldsApplied(fields);
+  if (selected.length < 1) return false;
+  if (fields.status !== undefined && !isValidAliasToken(fields.status)) return false;
+  if (fields.funcScope !== undefined && !isValidAliasToken(fields.funcScope)) return false;
+  if (fields.description !== undefined && (fields.description.length > DESCRIPTION_MAX_CHARS || CONTROL_CHARS.test(fields.description))) return false;
+  if (fields.integration !== undefined && (fields.integration.length < 1 || fields.integration.length > 200)) return false;
+  return true;
+}
+
+export function metadataFieldsApplied(fields: import("./types.ts").MetadataFields): readonly string[] {
+  return [
+    ...(fields.status !== undefined ? ["status"] : []),
+    ...(fields.description !== undefined ? ["description"] : []),
+    ...(fields.sse !== undefined ? ["sse"] : []),
+    ...(fields.integration !== undefined ? ["integration"] : []),
+    ...(fields.funcScope !== undefined ? ["funcScope"] : []),
+  ];
+}
+
+export function buildMetadataArgs(authProfile: string, file: string, fields: import("./types.ts").MetadataFields, dryRun: boolean): readonly string[] {
+  const args = ["icomposer", "metadata", "--json", "--profile", authProfile];
+  if (fields.status !== undefined) args.push("--status", fields.status);
+  if (fields.description !== undefined) args.push("--description", fields.description);
+  if (fields.sse !== undefined) args.push("--sse", fields.sse === true ? "true" : "false");
+  if (fields.integration !== undefined) args.push("--integration", fields.integration);
+  if (fields.funcScope !== undefined) args.push("--func-scope", fields.funcScope);
+  if (dryRun) args.push("--dry-run");
+  args.push(file);
+  return args;
+}
+
+export function createParamsDigest(shape: CreateParamsShape): string {
+  return sha256(JSON.stringify(shape.kind === "api"
+    ? { kind: shape.kind, ...shape.params, sse: shape.params.sse === true }
+    : { kind: shape.kind, ...shape.params }));
+}
+
+export function metadataParamsDigest(file: string, fields: import("./types.ts").MetadataFields): string {
+  return sha256(JSON.stringify({ file, fields }));
 }

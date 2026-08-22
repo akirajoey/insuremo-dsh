@@ -385,3 +385,69 @@ export function parseReleaseApply(text: string, exitCode: number): { readonly ok
   const invalid = result.valid === false || result.error !== undefined;
   return { ok: true, value: { valid: exitCode === 0 && !invalid, warnings } };
 }
+
+// ---- TASK-030: create options / create / metadata parsing ----
+
+export const OPTIONS_MAX = 50;
+
+export interface CreateOptionProjection {
+  readonly code: number;
+  readonly label: string;
+  readonly canonicalInput: string;
+  readonly allowedMethods?: readonly string[];
+}
+
+export interface CreateOptionsProjection {
+  readonly kind: "api" | "function";
+  readonly status: readonly CreateOptionProjection[];
+  readonly funcScope: readonly CreateOptionProjection[];
+  readonly requestMethod: readonly CreateOptionProjection[];
+  readonly requestType: readonly CreateOptionProjection[];
+  readonly responseType: readonly CreateOptionProjection[];
+}
+
+function projectOption(entry: Record<string, unknown>): CreateOptionProjection | null {
+  const canonical = boundedString(entry.canonical_input ?? entry.canonicalInput);
+  if (canonical === undefined) return null;
+  const code = typeof entry.code === "number" && Number.isFinite(entry.code) ? Math.trunc(entry.code) : 0;
+  const label = boundedString(entry.label) ?? canonical;
+  const allowed = Array.isArray(entry.allowed_methods)
+    ? boundedStringList(entry.allowed_methods, 16)
+    : undefined;
+  return { code, label, canonicalInput: canonical, ...(allowed === undefined || allowed.length === 0 ? {} : { allowedMethods: allowed }) };
+}
+
+function optionList(value: unknown): readonly CreateOptionProjection[] {
+  if (!Array.isArray(value)) return [];
+  const out: CreateOptionProjection[] = [];
+  for (const entry of value.slice(0, OPTIONS_MAX)) {
+    if (!isRecord(entry)) continue;
+    const projected = projectOption(entry);
+    if (projected !== null) out.push(projected);
+  }
+  return out;
+}
+
+/**
+ * Allowlist projection of `imo icomposer create options api|function --json`.
+ * Each vocabulary is capped at 50 entries; unknown groups are dropped.
+ */
+export function parseCreateOptions(text: string): { readonly ok: true; readonly value: CreateOptionsProjection } | { readonly ok: false; readonly error: "not-json" | "parse-error" } {
+  if (Buffer.byteLength(text) > JSON_LIMIT_BYTES) return { ok: false, error: "parse-error" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, error: "not-json" }; }
+  if (!isRecord(parsed)) return { ok: false, error: "parse-error" };
+  const result = isRecord(parsed.result) ? parsed.result : parsed;
+  const kind = result.kind === "function" || parsed.kind === "function" ? "function" : "api";
+  return {
+    ok: true,
+    value: {
+      kind,
+      status: optionList(result.status),
+      funcScope: optionList(result.func_scope),
+      requestMethod: optionList(result.request_method),
+      requestType: optionList(result.request_type),
+      responseType: optionList(result.response_type),
+    },
+  };
+}

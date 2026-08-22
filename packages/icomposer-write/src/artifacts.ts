@@ -50,9 +50,14 @@ export async function writeTestArtifact(baseDir: string, operationId: string, ar
   };
   const path = join(dir, `test-${sanitizeFileToken(operationId)}.json`);
   const tmp = join(dir, `.tmp-${randomUUID()}`);
-  await writeFile(tmp, `${JSON.stringify(full, null, 2)}\n`, "utf8");
-  const { rename } = await import("node:fs/promises");
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, `${JSON.stringify(full, null, 2)}\n`, "utf8");
+    const { rename } = await import("node:fs/promises");
+    await rename(tmp, path);
+  } catch (error) {
+    try { await (await import("node:fs/promises")).unlink(tmp); } catch { /* best-effort cleanup */ }
+    throw error;
+  }
   return path;
 }
 

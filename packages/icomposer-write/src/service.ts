@@ -7,6 +7,7 @@ import { runPushPreview } from "./preview.ts";
 import { PushJournal } from "./journal.ts";
 import { bindingEntry, mapAuthError, mapCliError, resolveLease, type BindingEntry, type Lease } from "./runtime.ts";
 import { releaseApplyOp, releaseBranchesOp, releaseExecuteOp, releasePreviewOp, releaseReposOp, testExecuteOp, testRunOp, type OperationLogLike, type PendingEntry, type WriteOpsDeps } from "./write-ops.ts";
+import { createExecuteOp, createOptionsOp, createPreviewOp, createRequestOp, metadataExecuteOp, metadataPreviewOp, metadataRequestOp } from "./write-ops-030.ts";
 import type {
   IcomposerWriteFace,
   PushErrorCode,
@@ -70,6 +71,13 @@ export class IcomposerWriteService extends Service {
       releaseBranches: (input: { readonly workspaceId: string; readonly repo: string }, signal?: AbortSignal) => self.releaseBranches(input, signal),
       releaseApply: (input: import("./types.ts").ReleaseApplyInput, signal?: AbortSignal) => self.releaseApply(input, signal),
       releaseExecute: (operationId: string, signal?: AbortSignal) => self.releaseExecute(operationId, signal),
+      createOptions: (input: { readonly workspaceId: string; readonly kind: "api" | "function" }, signal?: AbortSignal) => self.createOptions(input, signal),
+      createPreview: (input: import("./types.ts").CreatePreviewInput, signal?: AbortSignal) => self.createPreview(input, signal),
+      createRequest: (input: import("./types.ts").CreatePreviewInput, signal?: AbortSignal) => self.createRequest(input, signal),
+      createExecute: (operationId: string, signal?: AbortSignal) => self.createExecute(operationId, signal),
+      metadataPreview: (input: import("./types.ts").MetadataPreviewInput, signal?: AbortSignal) => self.metadataPreview(input, signal),
+      metadataRequest: (input: import("./types.ts").MetadataPreviewInput, signal?: AbortSignal) => self.metadataRequest(input, signal),
+      metadataExecute: (operationId: string, signal?: AbortSignal) => self.metadataExecute(operationId, signal),
     });
     ctx.set("icomposerWrite", face);
     ctx.effect(() => () => {
@@ -252,6 +260,52 @@ export class IcomposerWriteService extends Service {
     if (this.#disposed) return { ok: false, error: { code: "service-disposed", message: "iComposer write service is disposed", operationId } };
     if (signal?.aborted) return { ok: false, error: { code: "cancelled", message: "release execution was cancelled", operationId } };
     return this.enqueue(() => releaseExecuteOp(this.#ops, operationId, signal));
+  }
+
+  // ---- TASK-030: create + metadata ----
+
+  async createOptions(input: { readonly workspaceId: string; readonly kind: "api" | "function" }, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").CreateOptionsView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
+    if (input.kind !== "api" && input.kind !== "function") return err("invalid-params");
+    return this.enqueue(() => createOptionsOp(this.#ops, input.workspaceId, input.kind, signal));
+  }
+
+  async createPreview(input: import("./types.ts").CreatePreviewInput, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").CreatePreviewView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => createPreviewOp(this.#ops, input, signal));
+  }
+
+  async createRequest(input: import("./types.ts").CreatePreviewInput, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").CreateRequestView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => createRequestOp(this.#ops, input, signal));
+  }
+
+  async createExecute(operationId: string, signal?: AbortSignal): Promise<import("./types.ts").CreateExecution> {
+    if (this.#disposed) return { ok: false, error: { code: "service-disposed", message: "iComposer write service is disposed", operationId } };
+    if (signal?.aborted) return { ok: false, error: { code: "cancelled", message: "create execution was cancelled", operationId } };
+    return this.enqueue(() => createExecuteOp(this.#ops, operationId, signal));
+  }
+
+  async metadataPreview(input: import("./types.ts").MetadataPreviewInput, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").MetadataPreviewView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => metadataPreviewOp(this.#ops, input, signal));
+  }
+
+  async metadataRequest(input: import("./types.ts").MetadataPreviewInput, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").MetadataRequestView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => metadataRequestOp(this.#ops, input, signal));
+  }
+
+  async metadataExecute(operationId: string, signal?: AbortSignal): Promise<import("./types.ts").MetadataExecution> {
+    if (this.#disposed) return { ok: false, error: { code: "service-disposed", message: "iComposer write service is disposed", operationId } };
+    if (signal?.aborted) return { ok: false, error: { code: "cancelled", message: "metadata execution was cancelled", operationId } };
+    return this.enqueue(() => metadataExecuteOp(this.#ops, operationId, signal));
   }
 
   // ---- internals ----

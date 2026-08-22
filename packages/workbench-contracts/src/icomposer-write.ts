@@ -328,3 +328,160 @@ export const releaseApplyViewSchema = z
   })
   .strict();
 export type ReleaseApplyView = z.infer<typeof releaseApplyViewSchema>;
+
+// ---- TASK-030: create + metadata ----
+
+const createOptionEntrySchema = z
+  .object({
+    code: z.number().int(),
+    label: z.string().min(1).max(200),
+    canonicalInput: z.string().min(1).max(200),
+    allowedMethods: z.array(z.string().min(1).max(32)).max(16).optional(),
+  })
+  .strict();
+export type CreateOptionEntry = z.infer<typeof createOptionEntrySchema>;
+
+const optionList = z.array(createOptionEntrySchema).max(50);
+
+export const createOptionsRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    workspaceId: z.string().min(1),
+    kind: z.enum(["api", "function"]),
+  })
+  .strict();
+export type CreateOptionsRequest = z.infer<typeof createOptionsRequestSchema>;
+
+export const createOptionsViewSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    kind: z.enum(["api", "function"]),
+    status: optionList,
+    funcScope: optionList,
+    requestMethod: optionList,
+    requestType: optionList,
+    responseType: optionList,
+    stdoutDigest: z.string().min(1),
+  })
+  .strict();
+export type CreateOptionsView = z.infer<typeof createOptionsViewSchema>;
+
+const numericId = z.string().regex(/^[0-9]{1,19}$/);
+const aliasToken = z.string().min(1).max(64);
+
+export const createPreviewRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    workspaceId: z.string().min(1),
+    kind: z.enum(["api", "function"]),
+    params: z
+      .object({
+        name: assetName,
+        moduleId: numericId,
+        groupId: numericId,
+        status: aliasToken,
+        requestMethod: aliasToken.optional(),
+        requestType: aliasToken.optional(),
+        responseType: aliasToken.optional(),
+        requestModelId: numericId.optional(),
+        responseModelId: numericId.optional(),
+        path: z.string().min(1).max(256).optional(),
+        description: z.string().min(1).max(500).optional(),
+        sse: z.boolean().optional(),
+        integration: z.string().min(1).max(200).optional(),
+        funcScope: aliasToken.optional(),
+      })
+      .strict(),
+  })
+  .strict();
+export type CreatePreviewRequest = z.infer<typeof createPreviewRequestSchema>;
+
+export const createPreviewViewSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    kind: z.enum(["api", "function"]),
+    name: assetName,
+    valid: z.boolean(),
+    warnings: z.array(z.string().min(1).max(200)).max(20),
+    durationMs: z.number().int().min(0),
+    stdoutDigest: z.string().min(1),
+  })
+  .strict();
+export type CreatePreviewView = z.infer<typeof createPreviewViewSchema>;
+
+export const createExecuteRequestSchema = z
+  .object({ requestId: requestIdSchema, schemaVersion: z.literal("0"), operationId: z.string().min(1) })
+  .strict();
+export type CreateExecuteRequest = z.infer<typeof createExecuteRequestSchema>;
+
+export const createReceiptSchema = z
+  .object({
+    operationId: z.string().min(1),
+    kind: z.literal("imo-icomposer-create"),
+    assetKind: z.enum(["api", "function"]),
+    name: assetName,
+    status: z.enum(["completed", "failed"]),
+    exitCode: z.number().int().nullable(),
+    stdoutDigest: z.string().min(1),
+    stderrDigest: z.string().min(1),
+    catalogVerified: z.boolean(),
+    startedAt: z.string().datetime(),
+    finishedAt: z.string().datetime(),
+  })
+  .strict();
+export type CreateReceipt = z.infer<typeof createReceiptSchema>;
+
+const metadataFieldsSchema = z
+  .object({
+    status: aliasToken.optional(),
+    description: z.string().max(500).optional(),
+    sse: z.boolean().optional(),
+    integration: z.string().min(1).max(200).optional(),
+    funcScope: aliasToken.optional(),
+  })
+  .strict();
+export type MetadataFields = z.infer<typeof metadataFieldsSchema>;
+
+export const metadataPreviewRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    workspaceId: z.string().min(1),
+    file: z.string().min(1).max(256),
+    fields: metadataFieldsSchema,
+  })
+  .strict();
+export type MetadataPreviewRequest = z.infer<typeof metadataPreviewRequestSchema>;
+
+export const metadataPreviewViewSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    file: z.string().min(1).max(256),
+    valid: z.boolean(),
+    warnings: z.array(z.string().min(1).max(200)).max(20),
+    durationMs: z.number().int().min(0),
+    stdoutDigest: z.string().min(1),
+  })
+  .strict();
+export type MetadataPreviewView = z.infer<typeof metadataPreviewViewSchema>;
+
+export const metadataExecuteRequestSchema = createExecuteRequestSchema;
+export type MetadataExecuteRequest = CreateExecuteRequest;
+
+export const metadataReceiptSchema = z
+  .object({
+    operationId: z.string().min(1),
+    kind: z.literal("imo-icomposer-metadata-update"),
+    file: z.string().min(1).max(256),
+    fieldsApplied: z.array(z.enum(["status", "description", "sse", "integration", "funcScope"])).min(1),
+    status: z.enum(["completed", "failed"]),
+    exitCode: z.number().int().nullable(),
+    stdoutDigest: z.string().min(1),
+    stderrDigest: z.string().min(1),
+    startedAt: z.string().datetime(),
+    finishedAt: z.string().datetime(),
+  })
+  .strict();
+export type MetadataReceipt = z.infer<typeof metadataReceiptSchema>;
