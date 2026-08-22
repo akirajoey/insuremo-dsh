@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "ici/build-job", "ici/status", "ici/cleanup-plan", "ici/cleanup-apply", "ici/explain-context", "ici/explain-deterministic", "icomposer-write/push-preview", "icomposer-write/push-request", "icomposer-write/push-execute", "icomposer-write/push-resolve", "icomposer-write/push-status", "icomposer-write/test-run", "icomposer-write/release-preview", "icomposer-write/release-repos", "icomposer-write/release-branches", "icomposer-write/release-apply", "icomposer-write/create-options", "icomposer-write/create-preview", "icomposer-write/create-execute", "icomposer-write/metadata-preview", "icomposer-write/metadata-execute", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "ici/build-job", "ici/status", "ici/cleanup-plan", "ici/cleanup-apply", "ici/explain-context", "ici/explain-deterministic", "icomposer-write/push-preview", "icomposer-write/push-request", "icomposer-write/push-execute", "icomposer-write/push-resolve", "icomposer-write/push-status", "icomposer-write/test-run", "icomposer-write/release-preview", "icomposer-write/release-repos", "icomposer-write/release-branches", "icomposer-write/release-apply", "icomposer-write/create-options", "icomposer-write/create-preview", "icomposer-write/create-execute", "icomposer-write/metadata-preview", "icomposer-write/metadata-execute", "intercom/register", "intercom/heartbeat", "intercom/unregister", "intercom/list", "intercom/send", "intercom/inbox", "intercom/read", "intercom/mark-delivered", "intercom/pending", "intercom/lease-acquire", "intercom/lease-release", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -1668,6 +1668,262 @@ const schemas = {
           finishedAt: { type: "string", format: "date-time" },
         },
         ["operationId", "kind", "file", "fieldsApplied", "status", "exitCode", "stdoutDigest", "stderrDigest", "startedAt", "finishedAt"],
+      ),
+    },
+  },
+  "intercom-register.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-register.json",
+    title: "intercom/register request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          peerName: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+          cwd: { type: "string", minLength: 1, maxLength: 512 },
+        },
+        ["requestId", "schemaVersion", "peerName", "cwd"],
+      ),
+      response: objectSchema(
+        { sessionId: { type: "string", minLength: 1, maxLength: 128 } },
+        ["sessionId"],
+      ),
+    },
+  },
+  "intercom-heartbeat.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-heartbeat.json",
+    title: "intercom/heartbeat request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        { ...requestProperties, sessionId: { type: "string", minLength: 1, maxLength: 128 } },
+        ["requestId", "schemaVersion", "sessionId"],
+      ),
+      response: objectSchema(
+        { lastSeenAt: { type: "string", format: "date-time" } },
+        ["lastSeenAt"],
+      ),
+    },
+  },
+  "intercom-unregister.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-unregister.json",
+    title: "intercom/unregister request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        { ...requestProperties, sessionId: { type: "string", minLength: 1, maxLength: 128 } },
+        ["requestId", "schemaVersion", "sessionId"],
+      ),
+      response: objectSchema(
+        { unregistered: { const: true } },
+        ["unregistered"],
+      ),
+    },
+  },
+  "intercom-list.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-list.json",
+    title: "intercom/list request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(requestProperties, ["requestId", "schemaVersion"]),
+      response: objectSchema(
+        {
+          sessions: {
+            type: "array",
+            items: objectSchema(
+              {
+                sessionId: { type: "string", minLength: 1, maxLength: 128 },
+                peerName: { type: "string", minLength: 1, maxLength: 128 },
+                cwd: { type: "string", minLength: 1, maxLength: 512 },
+                status: { enum: ["running", "idle", "waiting", "stopped"] },
+                createdAt: { type: "string", format: "date-time" },
+                lastSeenAt: { type: "string", format: "date-time" },
+                pending: { type: "integer", minimum: 0 },
+              },
+              ["sessionId", "peerName", "cwd", "status", "createdAt", "lastSeenAt", "pending"],
+            ),
+          },
+        },
+        ["sessions"],
+      ),
+    },
+  },
+  "intercom-send.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-send.json",
+    title: "intercom/send request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          fromSessionId: { type: "string", minLength: 1, maxLength: 128 },
+          toSessionId: { type: "string", minLength: 1, maxLength: 128 },
+          toPeer: { type: "string", minLength: 1, maxLength: 128 },
+          kind: { enum: ["message", "ask"] },
+          text: { type: "string", minLength: 1, maxLength: 65536 },
+        },
+        ["requestId", "schemaVersion", "fromSessionId", "text"],
+      ),
+      response: objectSchema(
+        {
+          seq: { type: "integer", minimum: 1 },
+          createdAt: { type: "string", format: "date-time" },
+        },
+        ["seq", "createdAt"],
+      ),
+    },
+  },
+  "intercom-inbox.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-inbox.json",
+    title: "intercom/inbox request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        { ...requestProperties, sessionId: { type: "string", minLength: 1, maxLength: 128 } },
+        ["requestId", "schemaVersion", "sessionId"],
+      ),
+      response: objectSchema(
+        {
+          messages: {
+            type: "array",
+            items: objectSchema(
+              {
+                seq: { type: "integer", minimum: 1 },
+                from: { type: "string", minLength: 1, maxLength: 128 },
+                to: { type: "string", minLength: 1, maxLength: 128 },
+                kind: { enum: ["message", "ask"] },
+                textDigest: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+                contentRef: { type: "string", minLength: 1, maxLength: 512 },
+                createdAt: { type: "string", format: "date-time" },
+              },
+              ["seq", "from", "to", "kind", "textDigest", "contentRef", "createdAt"],
+            ),
+          },
+        },
+        ["messages"],
+      ),
+    },
+  },
+  "intercom-read.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-read.json",
+    title: "intercom/read request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          sessionId: { type: "string", minLength: 1, maxLength: 128 },
+          seq: { type: "integer", minimum: 1 },
+        },
+        ["requestId", "schemaVersion", "sessionId", "seq"],
+      ),
+      response: objectSchema(
+        {
+          seq: { type: "integer", minimum: 1 },
+          text: { type: "string", minLength: 1, maxLength: 65536 },
+          createdAt: { type: "string", format: "date-time" },
+        },
+        ["seq", "text", "createdAt"],
+      ),
+    },
+  },
+  "intercom-mark-delivered.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-mark-delivered.json",
+    title: "intercom/mark-delivered request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          sessionId: { type: "string", minLength: 1, maxLength: 128 },
+          seqs: { type: "array", minItems: 1, maxItems: 1000, items: { type: "integer", minimum: 1 } },
+        },
+        ["requestId", "schemaVersion", "sessionId", "seqs"],
+      ),
+      response: objectSchema(
+        { marked: { type: "integer", minimum: 0 } },
+        ["marked"],
+      ),
+    },
+  },
+  "intercom-pending.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-pending.json",
+    title: "intercom/pending request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        { ...requestProperties, sessionId: { type: "string", minLength: 1, maxLength: 128 } },
+        ["requestId", "schemaVersion", "sessionId"],
+      ),
+      response: objectSchema(
+        { pending: { type: "integer", minimum: 0 } },
+        ["pending"],
+      ),
+    },
+  },
+  "intercom-lease-acquire.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-lease-acquire.json",
+    title: "intercom/lease-acquire request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          cwd: { type: "string", minLength: 1, maxLength: 512 },
+          holder: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        },
+        ["requestId", "schemaVersion", "cwd", "holder"],
+      ),
+      response: objectSchema(
+        {
+          cwd: { type: "string", minLength: 1, maxLength: 512 },
+          holder: { type: "string", minLength: 1, maxLength: 128 },
+          acquiredAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          valid: { type: "boolean" },
+        },
+        ["cwd", "holder", "acquiredAt", "expiresAt", "valid"],
+      ),
+    },
+  },
+  "intercom-lease-release.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/intercom-lease-release.json",
+    title: "intercom/lease-release request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          cwd: { type: "string", minLength: 1, maxLength: 512 },
+          holder: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        },
+        ["requestId", "schemaVersion", "cwd", "holder"],
+      ),
+      response: objectSchema(
+        { released: { const: true } },
+        ["released"],
       ),
     },
   },

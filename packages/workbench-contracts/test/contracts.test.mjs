@@ -63,6 +63,17 @@ const iciQuerySchemaFiles = [
   "icomposer-write-create-execute.schema.json",
   "icomposer-write-metadata-preview.schema.json",
   "icomposer-write-metadata-execute.schema.json",
+  "intercom-register.schema.json",
+  "intercom-heartbeat.schema.json",
+  "intercom-unregister.schema.json",
+  "intercom-list.schema.json",
+  "intercom-send.schema.json",
+  "intercom-inbox.schema.json",
+  "intercom-read.schema.json",
+  "intercom-mark-delivered.schema.json",
+  "intercom-pending.schema.json",
+  "intercom-lease-acquire.schema.json",
+  "intercom-lease-release.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -78,7 +89,7 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 60);
+  assert.equal(files.length, 71);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles, ...iciQuerySchemaFiles].sort(),

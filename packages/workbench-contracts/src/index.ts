@@ -50,6 +50,17 @@ export const COMMANDS = {
   writeCreateExecute: "icomposer-write/create-execute",
   writeMetadataPreview: "icomposer-write/metadata-preview",
   writeMetadataExecute: "icomposer-write/metadata-execute",
+  intercomRegister: "intercom/register",
+  intercomHeartbeat: "intercom/heartbeat",
+  intercomUnregister: "intercom/unregister",
+  intercomList: "intercom/list",
+  intercomSend: "intercom/send",
+  intercomInbox: "intercom/inbox",
+  intercomRead: "intercom/read",
+  intercomMarkDelivered: "intercom/mark-delivered",
+  intercomPending: "intercom/pending",
+  intercomLeaseAcquire: "intercom/lease-acquire",
+  intercomLeaseRelease: "intercom/lease-release",
   operationRecord: "operation/record",
   operationList: "operation/list",
   operationDecide: "operation/decide",
@@ -91,6 +102,7 @@ export * from "./icomposer-reference.ts";
 export * from "./icomposer-lifecycle.ts";
 export * from "./icomposer-verify.ts";
 export * from "./icomposer-write.ts";
+export * from "./workbench-intercom.ts";
 export * from "./icomposer-code-intelligence.ts";
 
 export const OPERATION_DECISIONS = {
