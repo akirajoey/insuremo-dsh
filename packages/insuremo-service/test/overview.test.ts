@@ -105,3 +105,49 @@ test("partial failure sections degrade to fixed codes and never leak secrets", a
   assert.equal(text.includes("access_token"), false);
   assert.equal(text.includes("/secret/path"), false);
 });
+
+test("overview TASK-035 extensions: skill entries/busy/defaultProfileName with allowlist bounds", async () => {
+  const manySkills = Array.from({ length: 150 }, (_, i) => ({ name: `skill-${String(i).padStart(3, "0")}`, description: `d${i}`, path: `/s/${i}` }));
+  const longDescription = "L".repeat(500);
+  const deps = fakeDeps({
+    imoSkills: {
+      list: async () => ok({ scope: "global", skills: [...manySkills, { name: "zeta", description: longDescription, path: "/z" }], stdoutDigest: "sha256:c" }),
+      validate: async () => ok({ scope: "global", inventoryComplete: true, items: [], checkedAt: "now" }),
+    } as unknown as ImoSkills,
+    imoSkillActivation: {
+      snapshot: async () => ({ initialized: true, installed: ["skill-000"], enabled: ["skill-000"], disabled: [], stale: [], revision: 7 }),
+    } as unknown as ImoSkillActivation,
+    imoUpgrade: { upgradeStatus: () => ({ running: true }) },
+  });
+  const view = await buildOverview(deps);
+  // imo busy indicator
+  assert.equal(view.imo.busy, true);
+  // auth default mirrors under both names
+  assert.equal(view.auth.defaultProfile, "dev");
+  assert.equal(view.auth.defaultProfileName, "dev");
+  // entries: ≤100, truncated flag, description clipped to 200, enabled from activation
+  assert.equal(view.skills.entries.length, 100);
+  assert.equal(view.skills.entriesTruncated, true);
+  assert.equal(view.skills.entries[0].name, "skill-000");
+  assert.equal(view.skills.entries[0].enabled, true);
+  assert.equal(view.skills.entries[0].description, "d0");
+  const zetaNotPresent = !view.skills.entries.some(entry => entry.name === "zeta");
+  assert.equal(zetaNotPresent, true);
+  // description clipping path: craft a small list with a long description
+  const deps2 = fakeDeps({
+    imoSkills: {
+      list: async () => ok({ scope: "global", skills: [{ name: "zeta", description: longDescription, path: "/z" }], stdoutDigest: "sha256:c" }),
+      validate: async () => ok({ scope: "global", inventoryComplete: true, items: [], checkedAt: "now" }),
+    } as unknown as ImoSkills,
+  });
+  const view2 = await buildOverview(deps2);
+  const zeta = view2.skills.entries.find(entry => entry.name === "zeta");
+  assert.ok(zeta !== undefined);
+  assert.equal(zeta.description.length, 200);
+  assert.ok(zeta.description.endsWith("…"));
+  assert.equal(zeta.enabled, false); // activation snapshot not covering zeta
+  // hostile fields never enter: the path field from skills list is dropped
+  const serialized = JSON.stringify(view2);
+  assert.equal(serialized.includes("/z"), false);
+  assert.equal(serialized.includes("/home/user/.agents"), false);
+});

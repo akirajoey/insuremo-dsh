@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { DefineToolFn } from "./tool-defs.ts";
+import { notBoundError } from "./ici-guidance.ts";
 import { catalogListOutputSchema, sdkQueryOutputSchema, verifyUtilsOutputSchema } from "./ici-tool-schemas.ts";
 
 interface ToolExecContext {
@@ -170,7 +171,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
   ctx.systemPrompt.section({
     name: "tool:ici_query",
     order: 150,
-    text: "ici_query runs iComposer Code Intelligence read-only graph queries over a bound workspace: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Read-only: it never writes files.",
+    text: "ici_query runs iComposer Code Intelligence read-only graph queries over a bound workspace: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Read-only: it never writes files. First use on a workspace may return workspace-not-bound with guidance: newly added iComposer projects are auto-detected (and auto-bound when a default auth profile carries env/tenant); follow the listed workspaces and ask the user to say '绑定工作区 <id> 用 profile <name>' to bind, then retry.",
   });
   ctx.systemPrompt.section({
     name: "tool:ici_search",
@@ -195,7 +196,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
           entries?: readonly { name: string; type: string; joinStatus: string }[];
           error?: { code: string };
         };
-        if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
         const c = v.counts!;
         const lines = [
           `workspace ${v.workspace_id}: ${c.total} assets (api ${c.api}, function ${c.function}, batch ${c.batch}, model ${c.model}) truncated=${v.truncated ?? false}`,
@@ -240,7 +241,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
           operations?: readonly { client: string; method: string; path: string; operationId: string }[];
           error?: { code: string };
         };
-        if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
         const lines = [
           `workspace ${v.workspace_id}: ${v.count ?? 0} operations shown of ${v.total ?? 0} truncated=${v.truncated ?? false}`,
           ...clipEntries(v.operations ?? []).map((o: { method: string; client: string; operationId: string; path: string }) => `${o.method.toUpperCase()}\t${o.client}\t${o.operationId}\t${o.path}`),
@@ -289,7 +290,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
           matches?: readonly { className: string; method?: string; description?: string }[];
           error?: { code: string };
         };
-        if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
         const header = `workspace ${v.workspace_id}: ${v.mode} ${v.count ?? 0} results truncated=${v.truncated ?? false}`;
         const body = v.mode === "list"
           ? clipEntries(v.classes ?? []).map((c: { className: string; methodCount: number }) => `${c.className}\t${c.methodCount}`)
@@ -392,7 +393,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
           paths?: readonly { apiId: string; hops: readonly string[] }[];
           error?: { code: string };
         };
-        if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
         const header = `workspace ${v.workspace_id}: ici ${v.mode} truncated=${v.truncated ?? false}${v.stale === true ? " STALE (sources changed since last build)" : ""}`;
         const body = v.mode === "api-chain"
           ? (v.lines ?? []).map(l => `${"  ".repeat(l.depth)}${l.label}`)
@@ -407,7 +408,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
       if (!ici) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: "cli-error" } };
       if (args.mode === "impact") {
         const res = await ici.queryImpact({ workspaceId: args.workspace_id, query: args.query }, exec.signal);
-        if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: res.error.code } };
+        if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
         return {
           workspace_id: args.workspace_id,
           mode: args.mode,
@@ -427,7 +428,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
         ...(args.depth === undefined ? {} : { depth: args.depth }),
         ...(args.max_nodes === undefined ? {} : { max_nodes: args.max_nodes }),
       }, exec.signal);
-      if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: res.error.code } };
+      if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
       // Flatten the tree into bounded depth/label lines for canonical output.
       const lines: IciTreeLine[] = [];
       const visit = (node: unknown, depth: number): void => {

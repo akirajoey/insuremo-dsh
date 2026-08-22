@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { DefineToolFn } from "./tool-defs.ts";
+import { notBoundError } from "./ici-guidance.ts";
 
 interface ToolExecContext {
   readonly signal: AbortSignal;
@@ -92,7 +93,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
   ctx.systemPrompt.section({
     name: "tool:ici_build",
     order: 150,
-    text: "ici_build rebuilds the iComposer Code Intelligence graph and/or embedding index for a bound workspace. Small workspaces complete inline; larger ones run as cancellable background jobs.",
+    text: "ici_build rebuilds the iComposer Code Intelligence graph and/or embedding index for a bound workspace. Small workspaces complete inline; larger ones run as cancellable background jobs. First use may return workspace-not-bound with guidance: newly added iComposer projects are auto-detected/auto-bound; follow the guidance to bind the workspace, then retry.",
   });
   ctx.systemPrompt.section({
     name: "tool:ici_explain",
@@ -145,7 +146,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         detail?: { nodeCount?: number; edgeCount?: number; builtAt?: string; total?: number; embedded?: number; reused?: number };
         error?: { code: string };
       };
-      if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+      if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
       if (v.kind === "background") {
         return [{ type: "text", text: `workspace ${v.workspace_id}: background job ${v.jobId} (${v.label}) started` }];
       }
@@ -207,7 +208,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         requiredFiles?: { nodes: boolean; edges: boolean; manifest: boolean };
         error?: { code: string };
       };
-      if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+      if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
       const rf = v.requiredFiles ?? { nodes: false, edges: false, manifest: false };
       return [{
         type: "text",
@@ -223,7 +224,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       const ici = ctx.get("iciEngine") as unknown as IciEngineJobsFace | undefined;
       if (!ici) return { workspace_id: args.workspace_id, error: { code: "cli-error" } };
       const res = await ici.diagnostics({ workspaceId: args.workspace_id });
-      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
+      if (!res.ok) return { workspace_id: args.workspace_id, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
       return {
         workspace_id: args.workspace_id,
         builtAt: res.value.builtAt ?? "never",
@@ -277,7 +278,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         businessReference?: readonly string[];
         error?: { code: string };
       };
-      if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+      if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
       return [{
         type: "text",
         text: [
@@ -292,7 +293,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       const ici = ctx.get("iciEngine") as unknown as IciEngineExplainFace | undefined;
       if (!ici) return { workspace_id: args.workspace_id, error: { code: "cli-error" } };
       const res = await ici.explainContext({ workspaceId: args.workspace_id, query: args.query });
-      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
+      if (!res.ok) return { workspace_id: args.workspace_id, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
       return {
         workspace_id: args.workspace_id,
         api: { ...res.value.api },

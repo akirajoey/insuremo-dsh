@@ -38,11 +38,14 @@ describe("InsureMO sidebar status", () => {
     await runtime.dispose();
   });
 
-  it("registers and renders the InsureMO footer badge", () => {
-    const entry = runtime.slots.entries("sidebar.footer.action")[0];
-    expect(entry?.options.id).toBe("insuremo-status");
-    expect(entry?.locale).toBe(NS);
-    expect(resolveSlotLabel(entry?.options.label)).toBe(zh.label);
+  it("registers and renders the InsureMO footer badge + workspace health strip", () => {
+    const entries = runtime.slots.entries("sidebar.footer.action");
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.options.id).toBe("insuremo-status");
+    expect(entries[1]?.options.id).toBe("insuremo-workspace-health");
+    expect(entries[0]?.locale).toBe(NS);
+    expect(resolveSlotLabel(entries[0]?.options.label)).toBe(zh.label);
+    expect(resolveSlotLabel(entries[1]?.options.label)).toBe(zh["health.strip"]);
 
     const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
     expect(view.view.getByRole("status", { name: zh.label })).toBeTruthy();
@@ -58,9 +61,29 @@ describe("InsureMO sidebar status", () => {
     expect(view.view.getByText(en.label)).toBeTruthy();
   });
 
-  it("removes the footer badge registration when disposed", async () => {
-    expect(runtime.slots.entries("sidebar.footer.action")).toHaveLength(1);
+  it("removes both footer registrations when disposed", async () => {
+    expect(runtime.slots.entries("sidebar.footer.action")).toHaveLength(2);
     await feature.dispose();
     expect(runtime.slots.entries("sidebar.footer.action")).toHaveLength(0);
   });
+});
+
+describe("WorkspaceHealth", () => {
+  it("parseWorkspaceHealthRows clamps states and drops garbage", async () => {
+    const { parseWorkspaceHealthRows } = await import("../src/client/WorkspaceHealth.tsx");
+    const rows = parseWorkspaceHealthRows({ workspaces: [
+      { workspaceId: "a", detected: true, autoBindState: "bound", graphReady: true, explainReady: true },
+      { workspaceId: "b", detected: true, autoBindState: "weird", graphReady: false, explainReady: false },
+      { workspaceId: "c" },
+      "garbage",
+    ] });
+    expect(rows).toHaveLength(3);
+    const [a, b, c] = rows as ReadonlyArray<{ detected: boolean; autoBindState: string; graphReady: boolean; explainReady: boolean }>;
+    expect([a.autoBindState, a.graphReady, a.explainReady]).toEqual(["bound", true, true]);
+    expect(b.autoBindState).toBe("none");
+    expect([c.detected, c.autoBindState]).toEqual([false, "none"]);
+    expect(parseWorkspaceHealthRows({})).toBeNull();
+    expect(parseWorkspaceHealthRows({ workspaces: "no" })).toBeNull();
+  });
+
 });

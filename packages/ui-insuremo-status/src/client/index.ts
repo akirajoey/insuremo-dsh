@@ -3,9 +3,12 @@ import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
 import { StatusBadge, type StatusBadgeProps } from "./StatusBadge.tsx";
+import { WorkspaceHealth, type WorkspaceHealthProps } from "./WorkspaceHealth.tsx";
 import { en, zh, type InsuremoStatusLocaleKey } from "./locales.ts";
 
 export type { StatusBadgeProps } from "./StatusBadge.tsx";
+export type { WorkspaceHealthProps, WorkspaceHealthRow } from "./WorkspaceHealth.tsx";
+export { WorkspaceHealth, WORKSPACES_STATUS_URL, parseWorkspaceHealthRows } from "./WorkspaceHealth.tsx";
 export type { InsuremoStatusLocaleKey } from "./locales.ts";
 
 /** Locale namespace contributed by the InsureMO sidebar status. */
@@ -32,4 +35,14 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     label: () => t("label"),
   }, StatusBadge));
+
+  // Workspace health strip: three 16px glyphs per workspace (i / graph /
+  // brain), fed by the read-only host status route (60s TTL).
+  ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
+    name: "sidebar.footer.action",
+    id: "insuremo-workspace-health",
+    order: 11,
+    locale: NS,
+    label: () => t("health.strip"),
+  }, WorkspaceHealth));
 }

@@ -2,6 +2,7 @@ import { Component, type ReactNode } from "react";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import { AuthPanel } from "./AuthPanel.tsx";
 import { DiagnosticsPanel } from "./DiagnosticsPanel.tsx";
+import { IciPanel } from "./IciPanel.tsx";
 import { OverviewPanel } from "./OverviewPanel.tsx";
 import { SkillsPanel } from "./SkillsPanel.tsx";
 import { OVERVIEW_URL, parseOverview, type ImoOverviewView } from "./overview.ts";
@@ -67,6 +68,7 @@ export class InsuremoSection extends Component<InsuremoSectionProps, LoadState> 
             <OverviewPanel t={t} imo={state.view.imo} operations={state.view.operations} />
             <AuthPanel t={t} auth={state.view.auth} />
             <SkillsPanel t={t} skills={state.view.skills} />
+            {state.view.ici !== undefined ? <IciPanel t={t} ici={state.view.ici} /> : null}
             <DiagnosticsPanel t={t} diagnostics={state.view.diagnostics} />
           </>
         ) : null}

@@ -15,6 +15,8 @@ export function apply(ctx: Context): void {
 // Public surface: only name/inject/apply + face/input/view/result/error types/constants
 export type { WorkspaceBindingServiceFace, BindingView, WorkspaceListEntry, BindInput, UnbindInput, Result, BindingErrorCode } from "./service.ts";
 export { WORKSPACE_BINDING_ERRORS } from "./service.ts";
+export { detectIcomposerProject, deriveBindIdentity } from "./detect.ts";
+export { mountAutoBind, WORKSPACE_ICOMPOSER_AUTO_BOUND_EVENT, type AutoBindModule, type AutoBindState } from "./auto-bind.ts";
 
 declare module "@deepseek-ai/cordis" {
   interface Context {

@@ -13,6 +13,9 @@ declare module "@deepseek-ai/cordis" {
     emit(name: string, payload: unknown): void;
     effect(execute: () => () => void | Promise<void>, label?: string): () => Promise<void>;
     plugin(plugin: unknown, config?: unknown): { await(): Promise<unknown>; dispose(): Promise<void> };
+    on(name: string, listener: (payload: unknown) => void): () => void;
+    off(name: string, listener: (payload: unknown) => void): void;
+    emit(name: string, payload: unknown): void;
   }
 }
 declare module "@deepseek-ai/dsh-workspace" {

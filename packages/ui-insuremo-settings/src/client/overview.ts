@@ -63,6 +63,12 @@ export interface ImoOverviewView {
     readonly status: string;
     readonly diagnostics: readonly OverviewDiagnosticView[];
   };
+  readonly ici?: {
+    readonly status: string;
+    readonly embeddingUrl: string;
+    readonly graphWorkspaces: number;
+    readonly explainWorkspaces: number;
+  };
 }
 
 export const OVERVIEW_URL = "/api/icomposer-workbench/insuremo/overview" as const;
@@ -77,6 +83,13 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
   const operations = obj(root.operations);
   const diagnostics = obj(root.diagnostics);
   if (imo === null || auth === null || skills === null || operations === null || diagnostics === null) return null;
+  const iciRaw = obj(root.ici);
+  const ici = iciRaw === null ? undefined : {
+    status: str(iciRaw.status, "warning"),
+    embeddingUrl: str(iciRaw.embeddingUrl, ""),
+    graphWorkspaces: num(iciRaw.graphWorkspaces),
+    explainWorkspaces: num(iciRaw.explainWorkspaces),
+  };
   return {
     schemaVersion: str(root.schemaVersion, "0"),
     generatedAt: str(root.generatedAt, ""),
@@ -138,6 +151,7 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
         return { id: str(d?.id, ""), severity: str(d?.severity, "info"), messageKey: str(d?.messageKey, "") };
       }),
     },
+    ...(ici === undefined ? {} : { ici }),
   };
 }
 

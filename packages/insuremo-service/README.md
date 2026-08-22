@@ -239,3 +239,22 @@ manual and non-portal requests are rejected. Receipts and action events contain
 only digests, status, exit code, timestamps, and sanitized profile/environment
 metadata. Pending action arguments are process-memory only and are lost on
 restart. No action uses `--insecure`; tests and real smoke never run auth writes.
+
+## TASK-038: workspace icons + embedding endpoint
+
+### Slot 侦察结论（工作区行图标注入点）
+
+- Harness `ProjectRowItem`（`ui-workspace/src/client/rows/Rows.tsx`）渲染工作区行：**无 children/slot 注入点**，props 全部由 `WorkspaceBrowser` 闭包提供；修改需动 Harness 源码（禁止）。
+- `sidebar.workspaces` slot 是整个浏览区（ui-workspace 独占注册，list kind 但语义为区域整体）。
+- `sidebar.footer.action` 是 **list kind**（多注册并排，按 order 排序）——`ui-insuremo-status` 已在此。
+- **所选方案（最小侵入）**：在 `ui-insuremo-status` 的 `sidebar.footer.action` 追加第二个条目（order 11）`insuremo-workspace-health`——紧凑"工作区健康条"：每 workspace 一行，名称后三个 16px 图标（i=绑定 bound 点亮/pending 半透明/非 iComposer 不显示；▦=图谱；◍=大脑/explain），zh/en 悬停 tooltip；数据来自新只读路由 `GET .../insuremo/overview/workspaces/status`（60s TTL 轮询）。未来 Harness 若暴露工作区行 slot，可平移到行内。
+
+### Embedding 端点配置
+
+`@icomposer/icomposer-code-intelligence` 构造 config 增 `embeddingUrl`（`https://` 校验；默认不变）。Settings > InsureMO 显示当前生效端点（只读 + "经认证 Profile 调用，无需单独 key"提示）；修改走 dist/bundle config：在 profile 的 `cordis.patch.yml` 配置节或安装包 config 中设置 `embeddingUrl`（Settings 页不提供编辑框，避免新增配置写攻击面）。
+
+### Host 路由与 overview 扩展
+
+- `GET .../insuremo/overview/workspaces/status` → `{workspaces:[{workspaceId,detected,autoBindState,graphReady,explainReady}]}`（≤100；binding face join ici diagnostics manifest + explain-state 文件标记；全程只读、miss 降级 false）。
+- explain 标记：ici 包首次 explainContext/explainDeterministic 成功后写 `<DSH_HOME>/ici/<hash>/explain-state.json` `{schemaVersion:1,lastExplainAt,apiName}`（原子 tmp+rename；文件即状态，不引入新域）。
+- overview response 增可选 `ici` section `{status,embeddingUrl,graphWorkspaces,explainWorkspaces}`（向后兼容）。

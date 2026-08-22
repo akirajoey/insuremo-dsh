@@ -13,6 +13,8 @@ export interface IndexDeps {
   readonly rebuild: boolean;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  /** Configurable embedding endpoint (defaults to the InsureMO portal gateway). */
+  readonly embeddingUrl?: string;
 }
 
 export interface IndexOutcome {
@@ -108,7 +110,7 @@ export async function indexEmbeddings(deps: IndexDeps): Promise<{ total: number;
       texts.push(doc.businessText);
     }
     const res = await requestEmbeddings(rt as SubprocessRuntime, {
-      url: DEFAULT_EMBEDDING_URL,
+      url: typeof deps.embeddingUrl === "string" && deps.embeddingUrl.length > 0 ? deps.embeddingUrl : DEFAULT_EMBEDDING_URL,
       token,
       texts,
       timeoutMs,
@@ -175,6 +177,8 @@ export interface SearchDeps {
   readonly graph: { nodes: Map<string, IciNode>; edges: IciEdge[] };
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  /** Configurable embedding endpoint (defaults to the InsureMO portal gateway). */
+  readonly embeddingUrl?: string;
 }
 
 /** Full in-memory cosine scoring over the JSONL cache (Rust search_api_embeddings_jsonl). */
@@ -188,7 +192,7 @@ export async function searchEmbeddings(deps: SearchDeps): Promise<SearchResult |
   if (cache.length === 0) return failure("no-index");
 
   const res = await requestEmbeddings(deps.rt as SubprocessRuntime, {
-    url: DEFAULT_EMBEDDING_URL,
+    url: typeof deps.embeddingUrl === "string" && deps.embeddingUrl.length > 0 ? deps.embeddingUrl : DEFAULT_EMBEDDING_URL,
     token: deps.token,
     texts: [deps.query],
     timeoutMs: deps.timeoutMs,

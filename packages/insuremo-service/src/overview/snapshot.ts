@@ -16,6 +16,7 @@ import type {
 
 const MAX_PROFILES = 100;
 const MAX_SKILL_NAMES = 512;
+const MAX_SKILL_ENTRIES = 100;
 const MAX_RECENT = 20;
 
 export interface OverviewDependencies {
@@ -24,6 +25,8 @@ export interface OverviewDependencies {
   readonly imoSkills: ImoSkills;
   readonly imoSkillActivation: ImoSkillActivation;
   readonly operationLog: OperationLogLike;
+  /** Optional upgrade face for the busy indicator. */
+  readonly imoUpgrade?: { upgradeStatus(): { running: boolean } };
 }
 
 /** Build the read-only allowlist overview; every section is best-effort. */
@@ -41,6 +44,8 @@ export async function buildOverview(deps: OverviewDependencies, signal?: AbortSi
     skills,
     operations,
     diagnostics,
+    // the ici section is enriched by the service layer (statuses join)
+    ici: Object.freeze({ status: "warning", embeddingUrl: "", graphWorkspaces: 0, explainWorkspaces: 0 }),
   });
 }
 
@@ -70,6 +75,7 @@ async function imoSection(deps: OverviewDependencies, signal?: AbortSignal): Pro
     } else if (check.error.code !== "cancelled") {
       code = "check-unavailable";
     }
+    const busy = deps.imoUpgrade?.upgradeStatus().running === true;
     section = Object.freeze({
       status: warning ? "warning" : "ok",
       ...(code === undefined ? {} : { code }),
@@ -77,6 +83,7 @@ async function imoSection(deps: OverviewDependencies, signal?: AbortSignal): Pro
       ...(version.ok && /^\d+\.\d+\.\d+/.test(version.value.currentVersion) ? { current: version.value.currentVersion } : {}),
       ...(target === undefined ? {} : { target }),
       updateAvailable,
+      ...(busy ? { busy } : {}),
     });
   } catch {
     section = Object.freeze({ status: "error", code: "unavailable", available: false, updateAvailable: false });
@@ -111,7 +118,7 @@ async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Pr
       status: noDefault || !def.ok ? "warning" : "ok",
       profiles,
       count: list.value.profiles.length,
-      ...(defaultProfile === undefined ? {} : { defaultProfile }),
+      ...(defaultProfile === undefined ? {} : { defaultProfile, defaultProfileName: defaultProfile }),
     });
   } catch {
     section = Object.freeze({ status: "error", code: "unavailable", profiles: [], count: 0 });
@@ -120,14 +127,14 @@ async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Pr
 }
 
 async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): Promise<OverviewSkillsSection> {
-  let section: OverviewSkillsSection = Object.freeze({ status: "error", code: "unavailable", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [] });
+  let section: OverviewSkillsSection = Object.freeze({ status: "error", code: "unavailable", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false });
   try {
     const list = await deps.imoSkills.list("global", signal);
     if (!list.ok) {
       section = Object.freeze({
         status: "error",
         code: list.error.code === "cancelled" ? "cancelled" : "unavailable",
-        installed: 0, valid: 0, enabled: 0, disabled: 0, names: [],
+        installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false,
       });
       return section;
     }
@@ -137,13 +144,22 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
     let enabled = 0;
     let disabled = 0;
     let activationCode: string | undefined;
+    let enabledSet = new Set<string>();
     try {
       const activation = await deps.imoSkillActivation.snapshot(names);
       enabled = activation.enabled.length;
       disabled = activation.disabled.length;
+      enabledSet = new Set(activation.enabled);
     } catch {
       activationCode = "activation-unavailable";
     }
+    // per-skill rows for the Settings panel (≤100, description clipped)
+    const described = new Map(list.value.skills.map(skill => [skill.name, skill.description]));
+    const entries = names.slice(0, MAX_SKILL_ENTRIES).map(name => {
+      const rawDescription = described.get(name) ?? "";
+      const description = rawDescription.length > 200 ? `${rawDescription.slice(0, 199)}…` : rawDescription;
+      return Object.freeze({ name, description, enabled: enabledSet.has(name) });
+    });
     const incomplete = validation.ok ? !validation.value.inventoryComplete : true;
     section = Object.freeze({
       status: incomplete && validation.ok ? "warning" : validation.ok ? "ok" : "error",
@@ -153,9 +169,11 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
       enabled,
       disabled,
       names: names.slice(0, MAX_SKILL_NAMES),
+      entries,
+      entriesTruncated: names.length > MAX_SKILL_ENTRIES,
     });
   } catch {
-    section = Object.freeze({ status: "error", code: "unavailable", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [] });
+    section = Object.freeze({ status: "error", code: "unavailable", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false });
   }
   return section;
 }

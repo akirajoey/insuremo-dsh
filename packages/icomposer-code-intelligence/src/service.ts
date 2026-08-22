@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
 import { embeddingLease, loadSearchDocs } from "./search-runtime.ts";
-import { getDshHome, graphBaseDir, loadSnapshot, writeAtomic, writeFileAtomic } from "./storage.ts";
+import { getDshHome, graphBaseDir, loadSnapshot, writeAtomic, writeFileAtomic, writeExplainState } from "./storage.ts";
 import { applyCleanup, buildDiagnosticsView, collectFileFacts, planCleanup } from "./maintenance.ts";
 import { buildDownstreamTrees, buildImpactPaths, candidatesOf, DEFAULT_DEPTH, DEFAULT_MAX_NODES, MAX_DEPTH, MAX_MAX_NODES, resolveFocusId, resolveQueryNodes } from "./query.ts";
 import {
@@ -94,9 +94,12 @@ export class IciEngineService extends Service {
   readonly #engineVersion = "0.1.0";
   readonly #timeoutMs: number;
 
-  constructor(ctx: Context, config: { timeoutMs?: number } = {}) {
+  readonly #embeddingUrl: string | undefined;
+
+  constructor(ctx: Context, config: { timeoutMs?: number; embeddingUrl?: string } = {}) {
     super(ctx, "iciEngine");
     this.#timeoutMs = config.timeoutMs ?? 30_000;
+    this.#embeddingUrl = typeof config.embeddingUrl === "string" && /^https:\/\//.test(config.embeddingUrl) ? config.embeddingUrl : undefined;
     const self = this;
     const face = Object.freeze({
       build: (input: { readonly workspaceId: string }, options?: BuildOptions | AbortSignal) => self.build(input, options),
@@ -291,7 +294,7 @@ export class IciEngineService extends Service {
       const bindingInfo = await this.bindingEntry(input.workspaceId);
       if (!bindingInfo.ok) return bindingInfo as Result<never>;
       const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), binding: bindingInfo.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
-        indexEmbeddings({ rt, token, cachePath, docs, rebuild: input.rebuild === true, timeoutMs: this.#timeoutMs, signal }));
+        indexEmbeddings({ rt, token, cachePath, docs, rebuild: input.rebuild === true, timeoutMs: this.#timeoutMs, signal, embeddingUrl: this.#embeddingUrl }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
         return { ok: false, error: failure.error };
@@ -327,7 +330,7 @@ export class IciEngineService extends Service {
       const bindingInfo = await this.bindingEntry(input.workspaceId);
       if (!bindingInfo.ok) return bindingInfo as Result<never>;
       const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), binding: bindingInfo.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
-        searchEmbeddings({ rt, token, cachePath, query: input.query, mode, top, graph, timeoutMs: this.#timeoutMs, signal }));
+        searchEmbeddings({ rt, token, cachePath, query: input.query, mode, top, graph, timeoutMs: this.#timeoutMs, signal, embeddingUrl: this.#embeddingUrl }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
         return { ok: false, error: failure.error };
@@ -433,6 +436,7 @@ export class IciEngineService extends Service {
       refDocNames,
       ...(stale ? { stale: true as const } : {}),
     });
+    await writeExplainState(canonicalPath, input.workspaceId, start.name).catch(() => undefined);
     return { ok: true, value: bundle };
   }
 
@@ -452,6 +456,7 @@ export class IciEngineService extends Service {
       sourceFingerprint: graph.manifest.sourceFingerprint,
       ...(stale ? { stale: true as const } : {}),
     });
+    await writeExplainState(canonicalPath, input.workspaceId, start.name).catch(() => undefined);
     const result: ExplainDeterministicResult = {
       generatedBy: "deterministic-v1",
       promptVersion: "none",

@@ -1,0 +1,57 @@
+.strip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 4px 9px;
+  box-sizing: border-box;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--dsh-alias-label-secondary, #888);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workspaceName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 4px;
+  flex: none;
+  color: var(--dsh-alias-label-tertiary, #999);
+  border: 1px solid transparent;
+}
+
+.icon[data-state="on"] {
+  color: var(--dsh-alias-state-success-primary, #2e9e5b);
+}
+
+.icon[data-state="bound"] {
+  color: var(--dsh-alias-state-success-primary, #2e9e5b);
+}
+
+.icon[data-state="pending"] {
+  opacity: 0.5;
+}
+
+.icon[data-state="off"],
+.icon[data-state="none"] {
+  opacity: 0.35;
+}

@@ -7,6 +7,7 @@ import type { ImoSkills } from "../skills.ts";
 import type { ImoSkillActivation } from "../skill-activation.ts";
 import type { OperationLogLike } from "../operation-log-face.ts";
 import { buildOverview, type OverviewDependencies } from "./snapshot.ts";
+import { buildWorkspaceStatuses, DEFAULT_EMBEDDING_ENDPOINT } from "./workspaces-status.ts";
 import type { ImoOverviewView } from "./types.ts";
 
 const MIN_TTL_MS = 0;
@@ -38,6 +39,7 @@ export class ImoOverviewService extends Service implements ImoOverview {
       imoSkills: ctx.get<ImoSkills>("imoSkills")!,
       imoSkillActivation: ctx.get<ImoSkillActivation>("imoSkillActivation")!,
       operationLog: ctx.get<OperationLogLike>("operationLog")!,
+      imoUpgrade: ctx.get<{ upgradeStatus(): { running: boolean } }>("imoUpgrade"),
     };
     this.snapshot = this.snapshot.bind(this);
     this.ctx.effect(() => () => {
@@ -54,10 +56,20 @@ export class ImoOverviewService extends Service implements ImoOverview {
     }
     const existing = this.#inflight;
     if (existing !== undefined) return existing;
-    const inflight = buildOverview(this.#dependencies, signal).then((view) => {
+    const inflight = buildOverview(this.#dependencies, signal).then(async (view) => {
+      const statuses = await buildWorkspaceStatuses(this.ctx as never).catch(() => []);
+      const enriched = Object.freeze({
+        ...view,
+        ici: Object.freeze({
+          status: "ok",
+          embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
+          graphWorkspaces: statuses.filter(entry => entry.graphReady).length,
+          explainWorkspaces: statuses.filter(entry => entry.explainReady).length,
+        }),
+      });
       this.#inflight = undefined;
-      this.#cached = { at: Date.now(), view };
-      return view;
+      this.#cached = { at: Date.now(), view: enriched };
+      return enriched;
     }, (error) => {
       this.#inflight = undefined;
       throw error;
@@ -72,11 +84,12 @@ export class ImoOverviewService extends Service implements ImoOverview {
       generatedAt: new Date().toISOString(),
       imo: Object.freeze({ status: "error", code: "cancelled", available: false, updateAvailable: false }),
       auth: Object.freeze({ status: "error", code: "cancelled", profiles: [], count: 0 }),
-      skills: Object.freeze({ status: "error", code: "cancelled", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [] }),
+      skills: Object.freeze({ status: "error", code: "cancelled", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false }),
       operations: Object.freeze({ status: "error", code: "cancelled", pending: 0, approved: 0, rejected: 0, recorded: 0, recent: [] }),
       diagnostics: Object.freeze({ status: "error", diagnostics: [Object.freeze({ id: "overview-cancelled", severity: "error", messageKey: "overview.diagnostic.cancelled" })] }),
+      ici: Object.freeze({ status: "warning", embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT, graphWorkspaces: 0, explainWorkspaces: 0 }),
     });
   }
 }
 
-export const OVERVIEW_PATH = "/api/icomposer-workbench/insuremo/overview" as const;
+export { OVERVIEW_PATH } from "./paths.ts";

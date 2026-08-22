@@ -142,6 +142,8 @@ const schemas = {
                 ],
               },
               status: { enum: ["ok", "missing-dir", "orphan", "unavailable"] },
+              detectedIcomposer: { type: "boolean" },
+              autoBindState: { enum: ["bound", "pending", "none"] },
             },
             ["workspaceId", "displayName", "canonicalPath", "binding"],
           ),
@@ -1670,6 +1672,51 @@ const schemas = {
         ["operationId", "kind", "file", "fieldsApplied", "status", "exitCode", "stdoutDigest", "stderrDigest", "startedAt", "finishedAt"],
       ),
     },
+  },
+  "insuremo-overview-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/insuremo-overview-response.json",
+    title: "insuremo overview GET response (UI bridge)",
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      schemaVersion: { const: "0" },
+      generatedAt: { type: "string", format: "date-time" },
+      ici: objectSchema(
+        {
+          status: { enum: ["ok", "warning"] },
+          embeddingUrl: { type: "string", minLength: 1 },
+          graphWorkspaces: { type: "integer", minimum: 0 },
+          explainWorkspaces: { type: "integer", minimum: 0 },
+        },
+        ["status", "embeddingUrl", "graphWorkspaces", "explainWorkspaces"],
+      ),
+    },
+    required: ["schemaVersion", "generatedAt"],
+  },
+  "insuremo-workspaces-status-response.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/insuremo-workspaces-status-response.json",
+    title: "insuremo workspaces status GET response (workspace icons)",
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      workspaces: {
+        type: "array",
+        maxItems: 100,
+        items: objectSchema(
+          {
+            workspaceId: { type: "string", minLength: 1 },
+            detected: { type: "boolean" },
+            autoBindState: { enum: ["bound", "pending", "none"] },
+            graphReady: { type: "boolean" },
+            explainReady: { type: "boolean" },
+          },
+          ["workspaceId", "detected", "autoBindState", "graphReady", "explainReady"],
+        ),
+      },
+    },
+    required: ["workspaces"],
   },
   "intercom-register.schema.json": {
     $schema: draft,

@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { DefineToolFn } from "./tool-defs.ts";
+import { notBoundError } from "./ici-guidance.ts";
 
 interface ToolExecContext {
   readonly signal: AbortSignal;
@@ -88,7 +89,7 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
           rows?: readonly { rank: number; apiName: string; score: number }[];
           error?: { code: string };
         };
-        if (v.error !== undefined) return [{ type: "text", text: errorText(v.error.code) }];
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
         const lines = [
           `workspace ${v.workspace_id}: ${v.rows?.length ?? 0} results`,
           ...(v.rows ?? []).map(r => `${r.rank}. ${r.apiName} (${r.score.toFixed(4)})`),
@@ -107,7 +108,7 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
         ...(args.mode === undefined ? {} : { mode: args.mode }),
         ...(args.top === undefined ? {} : { top: args.top }),
       }, exec.signal);
-      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
+      if (!res.ok) return { workspace_id: args.workspace_id, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
       return {
         workspace_id: args.workspace_id,
         truncated: res.value.truncated,

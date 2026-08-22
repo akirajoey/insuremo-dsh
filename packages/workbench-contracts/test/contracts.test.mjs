@@ -80,6 +80,10 @@ const iciQuerySchemaFiles = [
   "intercom-pending-asks.schema.json",
   "intercom-resolve-status.schema.json",
 ];
+const uiRouteSchemaFiles = [
+  "insuremo-overview-response.schema.json",
+  "insuremo-workspaces-status-response.schema.json",
+];
 const operationSchemaFiles = [
   "operation-record.schema.json",
   "operation-list.schema.json",
@@ -94,10 +98,10 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 76);
+  assert.equal(files.length, 78);
   assert.deepEqual(
     files,
-    [...baseSchemaFiles, ...operationSchemaFiles, ...iciQuerySchemaFiles].sort(),
+    [...baseSchemaFiles, ...operationSchemaFiles, ...iciQuerySchemaFiles, ...uiRouteSchemaFiles].sort(),
   );
 });
 
@@ -173,4 +177,20 @@ test("ici query schemas expose request and response alternatives with recursive 
 test("generated schemas use the v0 schema version", async () => {
   const schema = await readSchema("system-capabilities-request.schema.json");
   assert.deepEqual(schema.properties.schemaVersion, { const: "0" });
+});
+
+test("TASK-037: workspace list schema keeps old responses valid (optional new fields)", async () => {
+  const AjvLike = null; void AjvLike;
+  const schema = await readSchema("workspace-list-response.schema.json");
+  const item = schema.properties.workspaces.items;
+  assert.equal(item.properties.detectedIcomposer.type, "boolean");
+  assert.equal(item.properties.autoBindState.enum.join("|"), "bound|pending|none");
+  assert.equal(item.required.includes("detectedIcomposer"), false);
+  assert.equal(item.required.includes("autoBindState"), false);
+  // simulate an OLD response entry (no new fields) against the item shape:
+  // required keys unchanged, so an old payload remains structurally valid
+  const oldEntry = { workspaceId: "ws-1", displayName: "demo", canonicalPath: "/x", binding: null, status: "ok" };
+  const hasAllRequired = item.required.every(key => key in oldEntry);
+  const noExtra = Object.keys(oldEntry).every(key => key in item.properties);
+  assert.equal(hasAllRequired && noExtra, true, "old workspace entries must remain valid under the extended schema");
 });

@@ -50,6 +50,11 @@ export const zh = {
   "overview.diagnostic.skillsIncomplete": "Skills 清单不完整",
   "overview.diagnostic.operationsPending": "存在待审批操作",
   "overview.diagnostic.unknown": "诊断信息",
+  iciTitle: "代码智能",
+  iciEmbeddingEndpoint: "Embedding 端点",
+  iciEmbeddingHint: "经认证 Profile 调用，无需单独 key；修改请在 profile 的 cordis.patch.yml 或安装包 config 中配置 embeddingUrl。",
+  iciGraphWorkspaces: "已构建图谱的工作区",
+  iciExplainWorkspaces: "已生成业务解释的工作区",
 } as const;
 
 export type InsuremoLocaleKey = keyof typeof zh;
@@ -105,4 +110,9 @@ export const en = {
   "overview.diagnostic.skillsIncomplete": "The Skills inventory is incomplete",
   "overview.diagnostic.operationsPending": "Operations are pending approval",
   "overview.diagnostic.unknown": "Diagnostic information",
+  iciTitle: "Code Intelligence",
+  iciEmbeddingEndpoint: "Embedding endpoint",
+  iciEmbeddingHint: "Called through the authenticated profile — no separate key. To change it, set embeddingUrl in the profile's cordis.patch.yml or the installed bundle config.",
+  iciGraphWorkspaces: "Workspaces with a built graph",
+  iciExplainWorkspaces: "Workspaces with generated explanations",
 } as const satisfies Record<InsuremoLocaleKey, string>;

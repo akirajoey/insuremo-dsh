@@ -3,6 +3,8 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { isFullInsuremoEnvId, isAuthProfile, isTenantCode, isWriteMode, isWorkspaceId } from "./validation.ts";
 import { workspaceBindingDomain, type BindingRecord } from "./domain.ts";
+import { detectIcomposerProject } from "./detect.ts";
+import { mountAutoBind } from "./auto-bind.ts";
 
 export const WORKSPACE_BINDING_ERRORS = {
   "invalid-workspace-id": "workspace id is invalid",
@@ -48,6 +50,10 @@ export interface WorkspaceListEntry {
   readonly displayName: string;
   readonly status: "ok" | "missing-dir" | "orphan" | "unavailable";
   readonly binding: BindingView | null;
+  /** Strong-signature iComposer project detection (undefined = not probed). */
+  readonly detectedIcomposer?: boolean;
+  /** Derived auto-bind state: bound | pending (detected, unbound) | none. */
+  readonly autoBindState?: "bound" | "pending" | "none";
 }
 
 export interface BindInput {
@@ -69,6 +75,7 @@ export interface WorkspaceBindingServiceFace {
   get(workspaceId: string, signal?: AbortSignal): Promise<Result<WorkspaceListEntry>>;
   bind(input: BindInput, signal?: AbortSignal): Promise<Result<BindingView>>;
   unbind(input: UnbindInput, signal?: AbortSignal): Promise<Result<boolean>>;
+  autoBindState(workspaceId: string): Promise<Result<{ detected: boolean; state: "bound" | "pending" | "none" }>>;
 }
 
 function frozen<T extends object>(value: T): T {
@@ -104,6 +111,7 @@ export class WorkspaceBindingService extends Service implements WorkspaceBinding
       get: (id: string, signal?: AbortSignal) => self.get(id, signal),
       bind: (input: BindInput, signal?: AbortSignal) => self.bind(input, signal),
       unbind: (input: UnbindInput, signal?: AbortSignal) => self.unbind(input, signal),
+      autoBindState: (id: string) => self.autoBindState(id),
     });
     ctx.set("workspaceBinding", face);
     ctx.effect(() => () => {
@@ -111,6 +119,8 @@ export class WorkspaceBindingService extends Service implements WorkspaceBinding
       return self.disposeService();
     }, "workspaceBinding.dispose");
   }
+
+  #autoBind?: ReturnType<typeof mountAutoBind>;
 
   protected async [Service.init](): Promise<void> {
     if (this.#disposed) throw new Error("service disposed");
@@ -121,9 +131,32 @@ export class WorkspaceBindingService extends Service implements WorkspaceBinding
     } catch {
       throw new Error("storage operation failed");
     }
+    // Auto-bind listens for newly added workspaces (domain/changed puts) and
+    // is strictly best-effort: detection misses and bind failures never
+    // affect the service lifecycle.
+    try {
+      const self = this;
+      this.#autoBind = mountAutoBind(this.ctx as never, {
+        binding: () => ({
+          list: (signal?: AbortSignal) => self.list(signal) as never,
+          get: (id: string, signal?: AbortSignal) => self.get(id, signal) as never,
+          bind: (input: BindInput, signal?: AbortSignal) => self.bind(input, signal) as never,
+        }),
+      });
+    } catch { /* auto-bind unavailable */ }
     this.ctx.effect(() => async () => {
+      this.#autoBind?.dispose();
       await this.disposeDomain();
     }, "workspaceBinding.domainClose");
+  }
+
+  /** Derived auto-bind state for one workspace (detection is read-only). */
+  async autoBindState(workspaceId: string): Promise<Result<{ detected: boolean; state: "bound" | "pending" | "none" }>> {
+    if (this.#disposed) return disposed();
+    if (!isWorkspaceId(workspaceId)) return err("invalid-workspace-id");
+    if (this.#autoBind === undefined) return err("storage-error");
+    const value = await this.#autoBind.stateOf(workspaceId);
+    return { ok: true, value: frozen(value) };
   }
 
   async list(signal?: AbortSignal): Promise<Result<readonly WorkspaceListEntry[]>> {
@@ -150,7 +183,12 @@ export class WorkspaceBindingService extends Service implements WorkspaceBinding
           status = "unavailable";
         }
         const binding = record ? toView(record) : null;
-        entries.push(frozen({ workspaceId: String(ws.id), canonicalPath: ws.path, displayName: ws.title, status, binding }));
+        const detected = await detectIcomposerProject(ws.path, signal).catch(() => false);
+        entries.push(frozen({
+          workspaceId: String(ws.id), canonicalPath: ws.path, displayName: ws.title, status, binding,
+          detectedIcomposer: detected,
+          autoBindState: binding !== null ? "bound" : detected ? "pending" : "none",
+        }));
       }
       if (this.#table) {
         for (const [key, record] of (this.#table as unknown as { entries(): Iterable<[string, BindingRecord]> }).entries()) {
@@ -193,7 +231,15 @@ export class WorkspaceBindingService extends Service implements WorkspaceBinding
           status = "unavailable";
         }
         const binding = record ? toView(record) : null;
-        return { ok: true, value: frozen({ workspaceId, canonicalPath: ws.path, displayName: ws.title, status, binding }) };
+        const detected = await detectIcomposerProject(ws.path, signal).catch(() => false);
+        return {
+          ok: true,
+          value: frozen({
+            workspaceId, canonicalPath: ws.path, displayName: ws.title, status, binding,
+            detectedIcomposer: detected,
+            autoBindState: binding !== null ? "bound" : detected ? "pending" : "none",
+          }),
+        };
       }
       return {
         ok: true,
@@ -203,6 +249,7 @@ export class WorkspaceBindingService extends Service implements WorkspaceBinding
           displayName: record!.canonicalPath,
           status: "orphan" as const,
           binding: toView(record!),
+          autoBindState: "bound",
         }),
       };
     });

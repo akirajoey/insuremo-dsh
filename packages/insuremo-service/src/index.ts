@@ -6,6 +6,8 @@ import { ImoSkillsService } from "./skills.ts";
 import { ImoSkillActivationService } from "./skill-activation.ts";
 import { ImoOverviewService } from "./overview/service.ts";
 import { mountOverviewRoute } from "./overview/route.ts";
+import { mountWriteRoutes } from "./overview/write-routes.ts";
+import { mountWorkspacesStatusRoute } from "./overview/workspaces-status.ts";
 import { mountInsuremoSkillProvider } from "./skill-provider.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
 import { ImoSkillActionsService } from "./skill-actions/service.ts";
@@ -93,8 +95,10 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   ctx.plugin(ImoUpgradeService, merged as never);
   ctx.plugin(ImoSkillsService, merged);
   let actionsMounted = false;
+  let activationController: SkillActivationController | undefined;
   ctx.plugin(ImoSkillActivationService, {
-    onController: (_controller: SkillActivationController) => {
+    onController: (controller: SkillActivationController) => {
+      activationController = controller;
       if (actionsMounted) return;
       actionsMounted = true;
       ctx.plugin(ImoSkillActionsService, merged as never);
@@ -104,6 +108,8 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   ctx.plugin(ImoAuthActionsService, merged);
   ctx.plugin(ImoOverviewService, merged as never);
   ctx.effect(() => mountOverviewRoute(ctx), "insuremo-overview-route");
+  ctx.effect(() => mountWriteRoutes(ctx, { getActivationController: () => activationController }), "insuremo-write-routes");
+  ctx.effect(() => mountWorkspacesStatusRoute(ctx), "insuremo-workspaces-status-route");
   ctx.effect(() => mountInsuremoSkillProvider(ctx), "insuremo-skill-provider");
 }
 

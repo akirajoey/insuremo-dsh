@@ -19,6 +19,45 @@ export function graphBaseDir(canonicalPath: string, workspaceId: string): string
   return join(getDshHome(), "ici", workspaceHash(canonicalPath, workspaceId), "graph");
 }
 
+/** Marker file recording the last successful explain (icon data source). */
+export function explainStatePath(canonicalPath: string, workspaceId: string): string {
+  return join(graphBaseDir(canonicalPath, workspaceId), "explain-state.json");
+}
+
+export interface ExplainStateFile {
+  readonly schemaVersion: 1;
+  readonly lastExplainAt: string;
+  readonly apiName: string;
+}
+
+/** Read the explain marker; null when absent or malformed. */
+export async function readExplainState(canonicalPath: string, workspaceId: string): Promise<ExplainStateFile | null> {
+  try {
+    const text = await readFile(explainStatePath(canonicalPath, workspaceId), "utf8");
+    const parsed = JSON.parse(text) as ExplainStateFile;
+    if (parsed.schemaVersion !== 1 || typeof parsed.lastExplainAt !== "string" || typeof parsed.apiName !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the explain marker (atomic tmp+rename, bounded fields only). */
+export async function writeExplainState(canonicalPath: string, workspaceId: string, apiName: string): Promise<void> {
+  const dir = graphBaseDir(canonicalPath, workspaceId);
+  await mkdir(dir, { recursive: true });
+  const state: ExplainStateFile = { schemaVersion: 1, lastExplainAt: new Date().toISOString(), apiName: apiName.slice(0, 200) };
+  const final = explainStatePath(canonicalPath, workspaceId);
+  const tmp = join(dir, `.tmp-${Math.random().toString(36).slice(2, 8)}`);
+  try {
+    await writeFile(tmp, `${JSON.stringify(state)}\n`, "utf8");
+    await rename(tmp, final);
+  } catch (error) {
+    try { await rm(tmp, { force: true }); } catch { /* best-effort */ }
+    throw error;
+  }
+}
+
 export function currentDir(base: string): string {
   return join(base, "current");
 }
