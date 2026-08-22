@@ -96,13 +96,47 @@ iComposer Workbench 是运行在 **DeepSeek Harness** 之上的插件化工作�
 
 - Node.js `^22.19.0 || >=24.0.0`
 - pnpm `11.7.0`
-- Harness 检出位于 `../deepseek-harness` 并固定到 `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`
+- **DeepSeek Harness**（两种形态任选其一，见 3.1.1）
 - IMO CLI（`/opt/homebrew/bin/imo`，当前 0.2.17）——只读功能必需，写闭环需有效认证 Profile
 
-### 3.2 安装步骤
+#### 3.1.1 获取 `dsh` 命令（二选一）
+
+**途径 A：官方 npm 包（Harness 发布后可用）**
 
 ```sh
-# 1. 克隆并固定 Harness
+npm install -g @deepseek-ai/dsh
+dsh --help   # 开箱即有全局命令
+```
+
+**途径 B：源码检出 + 本地 link（当前可用）** —— Harness 尚未发布 npm 包，或你需要固定特定 commit 时：
+
+```sh
+# 1. 克隆 Harness 并固定到验证过的基线
+git clone <harness-url> ~/deepseek-harness
+git -C ~/deepseek-harness checkout 99f6f02fecdb7dff40c3fbc9470f5907c29f74ca
+
+# 2. 构建全部包（含 apps/cli 的 lib/bin.js——源码检出默认没有这个产物）
+cd ~/deepseek-harness
+pnpm install
+pnpm run build
+
+# 3. 把 dsh 挂到全局 PATH
+cd apps/cli
+npm link          # macOS/Linux 产出 /usr/local/bin/dsh 或 /opt/homebrew/bin/dsh
+```
+
+验证：`which dsh` 有输出、`dsh --help` 正常。
+
+> 注意：不构建直接 `npm link` 会因 `lib/bin.js` 不存在而失败；仅开发调试时可在
+> harness 根目录用 `pnpm dsh ...`（tsx 直跑源码），但它不提供全局命令。
+> Harness 升级到新 commit 后需重跑 `pnpm run build`（link 一次即可）。
+
+### 3.2 开发态安装（源码仓库）
+
+面向从源码开发/调试 Workbench 的用户（最终用户直接看 3.3）：
+
+```sh
+# 1. 克隆并固定 Harness（同 3.1.1 途径 B）
 git clone <harness-url> ../deepseek-harness
 git -C ../deepseek-harness checkout 99f6f02fecdb7dff40c3fbc9470f5907c29f74ca
 
@@ -113,7 +147,7 @@ pnpm install
 # 3. 健康检查（Harness 版本 / Node / pnpm 校验）
 pnpm check
 pnpm typecheck
-pnpm test          # 319/319 期望全绿
+pnpm test          # 325/325 期望全绿
 ```
 
 ### 3.3 标准插件安装（分发形态，面向最终用户）
@@ -406,7 +440,7 @@ operation/record · operation/list · operation/decide
 pnpm install --frozen-lockfile   # 依赖完整性
 pnpm check                       # Harness/Node/pnpm 兼容校验
 pnpm typecheck                   # 15 包
-pnpm test                        # 319/319（unit + contract + UI）
+pnpm test                        # 325/325（unit + contract + UI）
 
 # 端到端（隔离 DSH_HOME）
 cd packages/icomposer-workbench-e2e
