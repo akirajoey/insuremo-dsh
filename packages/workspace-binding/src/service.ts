@@ -134,16 +134,20 @@ export class WorkspaceBindingService extends Service implements WorkspaceBinding
     // Auto-bind listens for newly added workspaces (domain/changed puts) and
     // is strictly best-effort: detection misses and bind failures never
     // affect the service lifecycle.
-    try {
-      const self = this;
-      this.#autoBind = mountAutoBind(this.ctx as never, {
-        binding: () => ({
-          list: (signal?: AbortSignal) => self.list(signal) as never,
-          get: (id: string, signal?: AbortSignal) => self.get(id, signal) as never,
-          bind: (input: BindInput, signal?: AbortSignal) => self.bind(input, signal) as never,
-        }),
-      });
-    } catch { /* auto-bind unavailable */ }
+    // Auto-bind mounts OUTSIDE the init critical path: a listener
+    // registration must never be able to fail the service activation.
+    const self = this;
+    queueMicrotask(() => {
+      try {
+        self.#autoBind = mountAutoBind(self.ctx as never, {
+          binding: () => ({
+            list: (signal?: AbortSignal) => self.list(signal) as never,
+            get: (id: string, signal?: AbortSignal) => self.get(id, signal) as never,
+            bind: (input: BindInput, signal?: AbortSignal) => self.bind(input, signal) as never,
+          }),
+        });
+      } catch { /* auto-bind unavailable */ }
+    });
     this.ctx.effect(() => async () => {
       this.#autoBind?.dispose();
       await this.disposeDomain();

@@ -37,7 +37,9 @@ function run(args, options) {
   });
 }
 
-/** Boot smoke: start the profile, wait for the port line, watch for loader failures. */
+/** Boot smoke: start the profile, wait for the port line, then require the
+ * overview route to answer 200 — catching "boots but services deadlock"
+ * regressions that a port line alone cannot reveal. */
 function bootSmoke(home, scenario) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn("node", ["--import", "tsx", join(harnessCli, "src", "bin.ts"), "--profile", "web"], {
@@ -55,9 +57,26 @@ function bootSmoke(home, scenario) {
       child.kill("SIGKILL");
       child.on("exit", () => { error === undefined ? resolvePromise(out) : rejectPromise(error); });
     }
+    async function probeOverview(portLine) {
+      const port = Number(/127\.0\.0\.1:(\d+)/.exec(portLine)?.[1] ?? 0);
+      if (port === 0) return;
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/api/icomposer-workbench/insuremo/overview`, { headers: { Accept: "application/json" } });
+          if (response.status === 200) { finish(undefined); return; }
+          if (response.status === 404) { finish(new Error(`[${scenario}] overview route answered 404 — services did not mount`)); return; }
+        } catch { /* retry */ }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      finish(new Error(`[${scenario}] overview route never answered after boot:\n${out.slice(-1500)}`));
+    }
     child.stdout.on("data", chunk => {
       out += String(chunk);
-      if (/http:\/\/127\.0\.0\.1:\d+/.test(out)) sawPort = true;
+      if (!sawPort && /http:\/\/127\.0\.0\.1:\d+/.test(out)) {
+        sawPort = true;
+        void probeOverview(out);
+      }
       checkFailures();
     });
     child.stderr.on("data", chunk => {
@@ -73,8 +92,6 @@ function bootSmoke(home, scenario) {
         finish(new Error(`[${scenario}] loader failure during boot:\n${out.slice(-1500)}`));
         return;
       }
-      // port line seen and stable for a moment past it → declare success
-      if (sawPort) setTimeout(() => finish(undefined), 2500);
     }
     child.on("error", error => finish(error));
   });

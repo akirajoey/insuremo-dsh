@@ -1,14 +1,23 @@
 /**
  * Host aggregate entry for the distributable `@icomposer/workbench` plugin.
  *
- * Mounts the ten Workbench host packages in dependency order (operation
- * log and workspace binding first — everything else injects their services;
- * the write path mounts after code-intelligence and before intercom; the
- * interactive test plugin is intentionally not part of the product).
- * Each sub-plugin keeps its own `inject` contract; this entry's exported
- * `inject` is the union so the loader guarantees every dependency is live
- * before the first `apply` runs.
+ * The entry is a Service (not a bare function-apply): loader-mounted function
+ * plugins run their `apply` in a transient fiber whose effects are disposed
+ * once the call resolves — route registrations and child-plugin mounts made
+ * there vanish ~30ms later (observed as overview 404 with a clean boot). A
+ * Service keeps a persistent fiber: everything mounted in `[Service.init]`
+ * lives for the plugin's lifetime.
+ *
+ * Mount order (P0 fix): insuremo-service FIRST — it provides `imoAuth`
+ * (plus imoCli/imoSkills/imoOverview and the write-bridge routes) and only
+ * depends on Harness services already in the inject union. The packages that
+ * inject `imoAuth` (lifecycle/verify/code-intelligence/write) mount after it,
+ * so their sequential awaits resolve instead of deadlocking.
+ * operationLog/workspaceBinding/catalog follow (write needs operationLog,
+ * code-intelligence needs the catalog), then the remaining readers and
+ * intercom. The interactive test plugin is intentionally excluded.
  */
+import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import * as operationLog from "../../workbench-operation-log/src/index.ts";
 import * as workspaceBinding from "../../workspace-binding/src/index.ts";
@@ -43,16 +52,31 @@ export interface WorkbenchDistConfig {
   readonly insuremoService?: unknown;
 }
 
-/** Mount order: registries first, then readers, then writers, then the service. */
-export async function apply(ctx: Context, config: WorkbenchDistConfig = {}): Promise<void> {
-  await ctx.plugin(operationLog as never);
-  await ctx.plugin(workspaceBinding as never);
-  await ctx.plugin(catalog as never);
-  await ctx.plugin(reference as never);
-  await ctx.plugin(lifecycle as never, config.lifecycle);
-  await ctx.plugin(verify as never, config.verify);
-  await ctx.plugin(codeIntelligence as never);
-  await ctx.plugin(write as never, config.write);
-  await ctx.plugin(intercom as never);
-  await ctx.plugin(insuremoService as never, config.insuremoService);
+/**
+ * Aggregate mount service: the service shell first (imoAuth + faces + routes),
+ * then registries, then the imoAuth-injecting readers/writers, then intercom.
+ */
+export class WorkbenchDistService extends Service {
+  constructor(ctx: Context, config: WorkbenchDistConfig = {}) {
+    super(ctx, "@icomposer/workbench");
+    this.#config = config;
+  }
+
+  readonly #config: WorkbenchDistConfig;
+
+  protected async [Service.init](): Promise<void> {
+    const ctx = this.ctx;
+    await ctx.plugin(insuremoService as never, this.#config.insuremoService);
+    await ctx.plugin(operationLog as never);
+    await ctx.plugin(workspaceBinding as never);
+    await ctx.plugin(catalog as never);
+    await ctx.plugin(reference as never);
+    await ctx.plugin(lifecycle as never, this.#config.lifecycle);
+    await ctx.plugin(verify as never, this.#config.verify);
+    await ctx.plugin(codeIntelligence as never);
+    await ctx.plugin(write as never, this.#config.write);
+    await ctx.plugin(intercom as never);
+  }
 }
+
+export default WorkbenchDistService;

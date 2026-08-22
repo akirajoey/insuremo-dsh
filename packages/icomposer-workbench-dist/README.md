@@ -39,6 +39,14 @@ git 依赖经 pnpm 安装时会执行 `prepare` 构建;若 pnpm 拦截构建脚�
 dsh plugin --profile web add @icomposer/workbench
 ```
 
+## 已知限制（源码开发 profile）
+
+仓库的开发态 profile（`pnpm setup-profile`，14 个插件并行挂载）在真实 boot
+时存在 loader 生命周期问题：函数式 apply 入口的嵌套 Service/效果会在挂载后
+~25ms 被 loader 的 effect 清扫回收（服务名随之消失，6 个入口 pending）。分发包
+（本包，单一 Service 入口）不受影响——`verify-standard-install` 的真实 boot +
+overview 200 断言持续守护。开发调试请使用分发包安装路径。
+
 ## 安装后
 
 `dsh --profile web --dump-config` 应出现:

@@ -43,19 +43,31 @@ test("cordis.patch.yml is a single insert with the inject union", async () => {
 
 test("host entry aggregates nine packages in dependency order with union inject", async () => {
   const source = await readFile(join(distDir, "src", "index.ts"), "utf8");
-  const order = [
-    ["operation-log", 0], ["workspace-binding", 1], ["catalog", 2], ["reference", 3],
-    ["lifecycle", 4], ["verify", 5], ["code-intelligence", 6], ["write", 7], ["intercom", 8], ["insuremo-service", 9],
-  ];
-  assert.equal(order.length, 10, "aggregate must mount ten packages");
-  let last = -1;
-  for (const [name, position] of order) {
-    const idx = source.indexOf(`as ${requireAlias(name)}`);
-    assert.ok(idx >= 0, `aggregate missing import for ${name}`);
-    assert.ok(idx > last, `aggregate order broken at ${name}`);
-    last = idx;
+  // P0 fix: insuremo-service mounts FIRST (provides imoAuth), imoAuth-injecting
+  // packages (lifecycle/verify/code-intelligence/write) after it, intercom last.
+  // all ten imports present (order of imports is irrelevant; apply order is
+  // what governs service availability)
+  const names = ["insuremo-service", "operation-log", "workspace-binding", "catalog", "reference", "lifecycle", "verify", "code-intelligence", "write", "intercom"];
+  assert.equal(names.length, 10, "aggregate must mount ten packages");
+  for (const name of names) {
+    assert.ok(source.includes(`as ${requireAlias(name)}`), `aggregate missing import for ${name}`);
   }
-  // write mounts between code-intelligence and intercom (after imoAuth users, before messaging)
+  // APPLY order (P0): service first, then registries, then imoAuth injectors, intercom last
+  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "verify", "codeIntelligence", "write", "intercom"];
+  let lastApply = -1;
+  for (const alias of applyOrder) {
+    const idx = source.indexOf(`ctx.plugin(${alias} as never`);
+    assert.ok(idx >= 0, `aggregate missing apply for ${alias}`);
+    assert.ok(idx > lastApply, `aggregate apply order broken at ${alias}`);
+    lastApply = idx;
+  }
+  // apply order: insuremo-service before every imoAuth injector
+  const serviceApply = source.indexOf("ctx.plugin(insuremoService as never");
+  for (const injector of ["lifecycle", "verify", "codeIntelligence", "write"]) {
+    const injectorApply = source.indexOf(`ctx.plugin(${injector} as never`);
+    assert.ok(serviceApply >= 0 && injectorApply > serviceApply, `${injector} must mount after insuremo-service (imoAuth)`);
+  }
+  // write still after code-intelligence, intercom last
   const writeApply = source.indexOf("ctx.plugin(write as never");
   const iciApply = source.indexOf("ctx.plugin(codeIntelligence as never");
   const intercomApply = source.indexOf("ctx.plugin(intercom as never");
