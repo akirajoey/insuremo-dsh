@@ -263,6 +263,11 @@ test("metadata preview/execute: at least one field required; dry-run argv; full 
 });
 
 test("P2 regression: branch names reject '..'; artifact tmp files are cleaned on failure", async () => {
+  // isolate DSH_HOME: writeTestArtifact defaults to ~/.dsh when unset
+  const dshLeak = await mkdtemp(join(tmpdir(), "w030-dshleak-"));
+  const prevHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = dshLeak;
+  try {
   // branch tightening
   const { isValidBranchName } = await import("../src/cli.ts");
   assert.equal(isValidBranchName("main"), true);
@@ -286,6 +291,10 @@ test("P2 regression: branch names reject '..'; artifact tmp files are cleaned on
   const leftovers = (await readdir(badBase)).filter(name => name.startsWith(".tmp-"));
   assert.deepEqual(leftovers, []);
   await rm(badBase, { recursive: true, force: true });
+  } finally {
+    if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome;
+    await rm(dshLeak, { recursive: true, force: true });
+  }
 });
 
 test("gates: cancelled signal and disposed service refuse create/metadata paths", async () => {

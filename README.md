@@ -54,6 +54,30 @@ The generated files are written to
 are intentionally ignored by Git; rerun the generation command after a clean
 install.
 
+### Standard dsh plugin installation (distributable form)
+
+The Workbench also ships as a standard dsh plugin bundle
+(`packages/icomposer-workbench-dist`, package `@icomposer/workbench`). Three
+installation routes are documented in that package's README:
+
+```sh
+# 1) local offline distribution (unzip + add; no npm registry needed)
+cd icomposer-workbench-dist && dsh plugin --profile web add .
+
+# 2) GitHub path spec
+dsh plugin --profile web add github:<org>/insuremo-dsh#path:packages/icomposer-workbench-dist
+
+# 3) npm (future publication)
+dsh plugin --profile web add @icomposer/workbench
+```
+
+Release tooling: `node scripts/pack-dist.mjs` builds the self-contained zip
+(prebuilt `lib/`, no sibling sources, no node_modules) and
+`node scripts/verify-standard-install.mjs` proves the repo-path and
+unzipped-local installs end to end in isolated DSH_HOME profiles. The
+`pnpm setup-profile` flow below is the **development-mode** profile wiring
+(symlinks the source bundle); end users install the distributable instead.
+
 ## Phase 1 profile smoke
 
 The profile setup stays isolated from the real `~/.dsh`. By default it writes

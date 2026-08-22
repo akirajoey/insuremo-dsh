@@ -1,0 +1,59 @@
+{
+  "extends": "../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@deepseek-ai/cordis": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-subprocess": [
+        "packages/insuremo-service/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-jobs": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-tools": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-workspace": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-storage-domain": [
+        "packages/insuremo-service/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-storage": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-runtime/client": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-locale/client": [
+        "packages/ui-insuremo-status/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-sidebar/client": [
+        "packages/ui-insuremo-status/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-settings/client": [
+        "packages/ui-insuremo-settings/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-conversation/client": [
+        "packages/ui-workbench-jobs/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/schemastery": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-skill": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-primitives": [
+        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
+}

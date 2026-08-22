@@ -1,0 +1,76 @@
+{
+  "name": "@icomposer/workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "iComposer Workbench \u2014 InsureMO development workbench as a standard dsh plugin bundle",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "prepare": "pnpm run build",
+    "typecheck": "pnpm run build && node --check lib/index.js && node --check lib/client.js",
+    "test": "node --test test/*.test.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-client-ui-primitives": "*",
+    "@deepseek-ai/dsh-jobs": "*",
+    "@deepseek-ai/dsh-skill": "*",
+    "@deepseek-ai/dsh-storage": "*",
+    "@deepseek-ai/dsh-storage-domain": "*",
+    "@deepseek-ai/dsh-subprocess": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-workspace": "*",
+    "@deepseek-ai/schemastery": "*",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@icomposer/workbench-operation-log": "file:../workbench-operation-log",
+    "@icomposer/workspace-binding": "file:../workspace-binding",
+    "@icomposer/icomposer-catalog": "file:../icomposer-catalog",
+    "@icomposer/icomposer-reference": "file:../icomposer-reference",
+    "@icomposer/icomposer-lifecycle": "file:../icomposer-lifecycle",
+    "@icomposer/icomposer-verify": "file:../icomposer-verify",
+    "@icomposer/icomposer-code-intelligence": "file:../icomposer-code-intelligence",
+    "@icomposer/icomposer-write": "file:../icomposer-write",
+    "@icomposer/workbench-intercom": "file:../workbench-intercom",
+    "@icomposer/insuremo-service": "file:../insuremo-service",
+    "@icomposer/ui-insuremo-settings": "file:../ui-insuremo-settings",
+    "@icomposer/ui-insuremo-status": "file:../ui-insuremo-status",
+    "@icomposer/ui-workbench-jobs": "file:../ui-workbench-jobs",
+    "@types/node": "^22.20.0",
+    "react": "^18.2.0",
+    "tsdown": "^0.12.5",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  }
+}

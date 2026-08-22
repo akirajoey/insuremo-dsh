@@ -5,6 +5,9 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Development-mode profile wiring: symlinks the SOURCE bundle into an isolated
+// profile. End users install the distributable via `dsh plugin ... add`
+// instead — see packages/icomposer-workbench-dist/README.md.
 const sourceProfile = resolve(repositoryRoot, "profiles/icomposer-web");
 const configuredHome = process.env.DSH_HOME?.trim();
 const dshHome = resolve(configuredHome || resolve(repositoryRoot, ".dsh-home"));

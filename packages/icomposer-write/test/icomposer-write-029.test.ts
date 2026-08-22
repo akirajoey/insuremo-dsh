@@ -84,6 +84,10 @@ async function makeFixture(opts: { groovy: string; metaMd5?: string } = { groovy
 }
 
 async function harness(opts: { root: string; io?: ReturnType<typeof fakeSubprocess>; dshHome?: string }) {
+  // Isolate DSH_HOME for the harness lifetime: faces that persist under the
+  // default home (test evidence artifacts) must never touch the real ~/.dsh.
+  const ownedDsh = process.env.DSH_HOME === undefined;
+  if (ownedDsh) process.env.DSH_HOME = await mkdtemp(join(tmpdir(), "w029-dsh-"));
   const ctx = new Context();
   const io = opts.io ?? fakeSubprocess();
   ctx.provide("subprocess", io as never);
@@ -109,6 +113,11 @@ async function harness(opts: { root: string; io?: ReturnType<typeof fakeSubproce
       await fiber.dispose();
       unregisterOpLog();
       await rm(directory, { recursive: true, force: true });
+      if (ownedDsh) {
+        const leakedHome = process.env.DSH_HOME;
+        delete process.env.DSH_HOME;
+        if (leakedHome !== undefined) await rm(leakedHome, { recursive: true, force: true });
+      }
     },
   };
 }
