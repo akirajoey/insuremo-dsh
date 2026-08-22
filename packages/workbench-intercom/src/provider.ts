@@ -14,16 +14,17 @@ import {
   writeLease,
   writeMessageText,
 } from "./store.ts";
-import type {
-  InboxEntry,
-  IntercomContext,
-  IntercomErrorCode,
-  MessageKind,
-  MessageRecord,
-  Result,
-  SessionRecord,
-  SessionStatus,
-  SessionView,
+import {
+  ASK_TIMEOUT_MAX_MS,
+  type InboxEntry,
+  type IntercomContext,
+  type IntercomErrorCode,
+  type MessageKind,
+  type MessageRecord,
+  type Result,
+  type SessionRecord,
+  type SessionStatus,
+  type SessionView,
 } from "./types.ts";
 
 const PEER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -35,7 +36,7 @@ function err(code: IntercomErrorCode, message: string = code): Result<never> {
 }
 
 function isKind(value: unknown): value is MessageKind {
-  return value === "message" || value === "ask";
+  return value === "message" || value === "ask" || value === "reply" || value === "cancel";
 }
 
 /**
@@ -161,7 +162,7 @@ export class IntercomProvider {
     if (this.#disposed) return err("disposed");
     if (signal?.aborted) return err("invalid-params", "cancelled");
     if (typeof input?.fromSessionId !== "string" || !SESSION_ID_RE.test(input.fromSessionId)) return err("invalid-session-id");
-    if (input.kind !== undefined && !isKind(input.kind)) return err("invalid-params", "kind must be message or ask");
+    if (input.kind !== undefined && !isKind(input.kind)) return err("invalid-params", "kind must be message, ask, reply, or cancel");
     if (!isValidText(input?.text)) return err("invalid-text", "text must be 1-64KB without NUL bytes");
     if ((input.toSessionId === undefined) === (input.toPeer === undefined)) {
       return err("invalid-params", "exactly one of toSessionId or toPeer is required");
@@ -169,44 +170,114 @@ export class IntercomProvider {
     if (input.toSessionId !== undefined && !SESSION_ID_RE.test(input.toSessionId)) return err("invalid-session-id");
     try {
       return await this.enqueue(async () => {
-        const from = this.#sessions.get(input.fromSessionId);
-        if (from === undefined) return err("session-not-found");
-        if (from.status === "stopped") return err("session-not-found", "sender session is stopped");
-        let toIdRaw: string | undefined = input.toSessionId;
+        const from = this.#liveSession(input.fromSessionId);
+        if (!from.ok) return from;
+        const toIdRaw: string | undefined = input.toSessionId;
         if (toIdRaw === undefined) {
           const matches = [...this.#sessions.entries()].filter(([, record]) => record.peerName === input.toPeer);
           if (matches.length === 0) return err("peer-not-found");
           if (matches.length > 1) return err("peer-not-found", "peer name is ambiguous; use toSessionId");
-          toIdRaw = matches[0][1].sessionId;
+          return this.#deliver(input.fromSessionId, (matches[0][1] as SessionRecord).sessionId, input.text, "message", {});
         }
-        const toId: string = toIdRaw as string;
-        const to = this.#sessions.get(toId);
-        if (to === undefined) return err("session-not-found", "target session does not exist");
-        if (to.status === "stopped") return err("session-not-found", "target session is stopped");
-        // CAS on the domain global, inside this serialized chain slot.
-        const currentSeq = this.#globalGet?.().nextDeliverySeq ?? 1;
-        const seq = currentSeq;
-        if (this.#globalSet !== undefined) await this.#globalSet({ nextDeliverySeq: seq + 1 });
-        const now = new Date().toISOString();
-        const record: MessageRecord = {
-          seq,
-          sessionId: toId,
-          direction: "inbound",
-          kind: input.kind ?? "message",
-          from: input.fromSessionId,
-          to: toId,
-          textDigest: digestText(input.text),
-          contentRef: messagePath(seq),
-          createdAt: now,
-          schemaVersion: "0",
-        };
-        await this.#messages.put(messageKey(seq), record);
-        await writeMessageText(seq, input.text);
-        return { ok: true, value: { seq, createdAt: now } };
+        return this.#deliver(input.fromSessionId, toIdRaw, input.text, "message", {});
       });
     } catch {
       return err("storage-error");
     }
+  }
+
+  // ---- TASK-032: ask / reply / cancel ----
+
+  async ask(input: { fromSessionId: string; toSessionId: string; text: string; timeoutMs?: number }, signal?: AbortSignal): Promise<Result<{ seq: number; createdAt: string; askStatus: "pending" }>> {
+    if (this.#disposed) return err("disposed");
+    if (signal?.aborted) return err("invalid-params", "cancelled");
+    if (typeof input?.fromSessionId !== "string" || !SESSION_ID_RE.test(input.fromSessionId)) return err("invalid-session-id");
+    if (typeof input?.toSessionId !== "string" || !SESSION_ID_RE.test(input.toSessionId)) return err("invalid-session-id");
+    if (!isValidText(input?.text)) return err("invalid-text", "text must be 1-64KB without NUL bytes");
+    if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > ASK_TIMEOUT_MAX_MS)) {
+      return err("invalid-params", `timeoutMs must be 1-${ASK_TIMEOUT_MAX_MS}`);
+    }
+    try {
+      return await this.enqueue(async () => {
+        const from = this.#liveSession(input.fromSessionId);
+        if (!from.ok) return from;
+        const delivered = await this.#deliver(input.fromSessionId, input.toSessionId, input.text, "ask", { askStatus: "pending", askedAt: new Date().toISOString(), markReceiverWaiting: true });
+        if (!delivered.ok) return delivered;
+        return { ok: true, value: { seq: delivered.value.seq, createdAt: delivered.value.createdAt, askStatus: "pending" as const } };
+      });
+    } catch {
+      return err("storage-error");
+    }
+  }
+
+  async reply(input: { fromSessionId: string; toSeq: number; text: string }, signal?: AbortSignal): Promise<Result<{ seq: number; createdAt: string; replyToSeq: number; restored: boolean }>> {
+    if (this.#disposed) return err("disposed");
+    if (signal?.aborted) return err("invalid-params", "cancelled");
+    if (typeof input?.fromSessionId !== "string" || !SESSION_ID_RE.test(input.fromSessionId)) return err("invalid-session-id");
+    if (typeof input?.toSeq !== "number" || !Number.isInteger(input.toSeq) || input.toSeq < 1) return err("invalid-seq");
+    if (!isValidText(input?.text)) return err("invalid-text", "text must be 1-64KB without NUL bytes");
+    try {
+      return await this.enqueue(async () => {
+        const replier = this.#liveSession(input.fromSessionId);
+        if (!replier.ok) return replier;
+        const askRecord = this.#messages.get(messageKey(input.toSeq));
+        if (askRecord === undefined || askRecord.kind !== "ask") return err("ask-not-found");
+        if (askRecord.to !== input.fromSessionId) return err("denied", "only the asked session may reply");
+        if (askRecord.askStatus === "replied") return err("invalid-state", "ask is already replied");
+        if (askRecord.askStatus === "cancelled") return err("invalid-state", "ask is cancelled");
+        const delivered = await this.#deliver(input.fromSessionId, askRecord.from, input.text, "reply", { replyToSeq: input.toSeq });
+        if (!delivered.ok) return delivered;
+        await this.#messages.put(messageKey(input.toSeq), { ...askRecord, askStatus: "replied", resolvedAt: new Date().toISOString() });
+        // release the waiting mark on the replier (simplification: restored flag)
+        const restored = await this.#releaseWaiting(input.fromSessionId);
+        return { ok: true, value: { seq: delivered.value.seq, createdAt: delivered.value.createdAt, replyToSeq: input.toSeq, restored } };
+      });
+    } catch {
+      return err("storage-error");
+    }
+  }
+
+  async cancel(input: { fromSessionId: string; seq: number }, signal?: AbortSignal): Promise<Result<{ seq: number; cancelled: true; released: boolean }>> {
+    if (this.#disposed) return err("disposed");
+    if (signal?.aborted) return err("invalid-params", "cancelled");
+    if (typeof input?.fromSessionId !== "string" || !SESSION_ID_RE.test(input.fromSessionId)) return err("invalid-session-id");
+    if (typeof input?.seq !== "number" || !Number.isInteger(input.seq) || input.seq < 1) return err("invalid-seq");
+    try {
+      return await this.enqueue(async () => {
+        const asker = this.#liveSession(input.fromSessionId);
+        if (!asker.ok) return asker;
+        const askRecord = this.#messages.get(messageKey(input.seq));
+        if (askRecord === undefined || askRecord.kind !== "ask") return err("ask-not-found");
+        if (askRecord.from !== input.fromSessionId) return err("denied", "only the asker may cancel");
+        if (askRecord.askStatus === "replied") return err("invalid-state", "ask is already replied");
+        if (askRecord.askStatus === "cancelled") return err("invalid-state", "ask is already cancelled");
+        await this.#messages.put(messageKey(input.seq), { ...askRecord, askStatus: "cancelled", resolvedAt: new Date().toISOString() });
+        const released = await this.#releaseWaiting(askRecord.to);
+        return { ok: true, value: { seq: input.seq, cancelled: true as const, released } };
+      });
+    } catch {
+      return err("storage-error");
+    }
+  }
+
+  async pendingAsks(input: { sessionId: string }, signal?: AbortSignal): Promise<Result<readonly InboxEntry[]>> {
+    if (this.#disposed) return err("disposed");
+    if (signal?.aborted) return err("invalid-params", "cancelled");
+    if (typeof input?.sessionId !== "string" || !SESSION_ID_RE.test(input.sessionId)) return err("invalid-session-id");
+    return { ok: true, value: this.#pendingAsksFor(input.sessionId) };
+  }
+
+  async resolveStatus(input: { sessionId: string }, signal?: AbortSignal): Promise<Result<{ status: SessionStatus; waitingFor: readonly number[] }>> {
+    if (this.#disposed) return err("disposed");
+    if (signal?.aborted) return err("invalid-params", "cancelled");
+    if (typeof input?.sessionId !== "string" || !SESSION_ID_RE.test(input.sessionId)) return err("invalid-session-id");
+    const session = this.#sessions.get(input.sessionId);
+    if (session === undefined) return err("session-not-found");
+    const waitingFor = this.#pendingAsksFor(input.sessionId).map(entry => entry.seq);
+    // Derived fresh from the domain: a session is waiting iff pending asks
+    // exist addressed to it (the stored flag is advisory only).
+    const derived: SessionStatus = session.status === "stopped" ? "stopped" : waitingFor.length > 0 ? "waiting" : session.status === "waiting" ? "idle" : session.status;
+    return { ok: true, value: { status: derived, waitingFor } };
   }
 
   async inbox(input: { sessionId: string }, signal?: AbortSignal): Promise<Result<readonly InboxEntry[]>> {
@@ -224,6 +295,8 @@ export class IntercomProvider {
         textDigest: record.textDigest,
         contentRef: record.contentRef,
         createdAt: record.createdAt,
+        ...(record.askStatus === undefined ? {} : { askStatus: record.askStatus }),
+        ...(record.replyToSeq === undefined ? {} : { replyToSeq: record.replyToSeq }),
       });
     }
     entries.sort((a, b) => a.seq - b.seq);
@@ -315,6 +388,81 @@ export class IntercomProvider {
     } catch {
       return err("storage-error");
     }
+  }
+
+  /** Live (non-stopped) session lookup or a structured error. */
+  #liveSession(sessionId: string): Result<SessionRecord> {
+    const record = this.#sessions.get(sessionId);
+    if (record === undefined) return err("session-not-found");
+    if (record.status === "stopped") return err("session-not-found", "session is stopped");
+    return { ok: true, value: record };
+  }
+
+  /** Core delivery: seq CAS + record + body file (+ ask/waiting extras). */
+  async #deliver(
+    fromSessionId: string,
+    toSessionId: string,
+    text: string,
+    kind: MessageKind,
+    extras: { askStatus?: "pending" | "replied" | "cancelled"; askedAt?: string; replyToSeq?: number; markReceiverWaiting?: boolean },
+  ): Promise<Result<{ seq: number; createdAt: string }>> {
+    const to = this.#sessions.get(toSessionId);
+    if (to === undefined) return err("session-not-found", "target session does not exist");
+    if (to.status === "stopped") return err("session-not-found", "target session is stopped");
+    const currentSeq = this.#globalGet?.().nextDeliverySeq ?? 1;
+    const seq = currentSeq;
+    if (this.#globalSet !== undefined) await this.#globalSet({ nextDeliverySeq: seq + 1 });
+    const now = new Date().toISOString();
+    const record: MessageRecord = {
+      seq,
+      sessionId: toSessionId,
+      direction: "inbound",
+      kind,
+      from: fromSessionId,
+      to: toSessionId,
+      textDigest: digestText(text),
+      contentRef: messagePath(seq),
+      createdAt: now,
+      ...(extras.askStatus === undefined ? {} : { askStatus: extras.askStatus }),
+      ...(extras.askedAt === undefined ? {} : { askedAt: extras.askedAt }),
+      ...(extras.replyToSeq === undefined ? {} : { replyToSeq: extras.replyToSeq }),
+      schemaVersion: "0",
+    };
+    await this.#messages.put(messageKey(seq), record);
+    await writeMessageText(seq, text);
+    if (extras.markReceiverWaiting === true && to.status !== "waiting") {
+      await this.#sessions.put(toSessionId, { ...to, status: "waiting", lastSeenAt: to.lastSeenAt });
+    }
+    return { ok: true, value: { seq, createdAt: now } };
+  }
+
+  /** Clear a receiver's waiting mark when its last pending ask resolves. */
+  async #releaseWaiting(sessionId: string): Promise<boolean> {
+    if (this.#pendingAsksFor(sessionId).length > 0) return false;
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined || session.status !== "waiting") return false;
+    await this.#sessions.put(sessionId, { ...session, status: "idle" });
+    return true;
+  }
+
+  /** Pending asks addressed to one session, derived fresh from the domain. */
+  #pendingAsksFor(sessionId: string): InboxEntry[] {
+    const entries: InboxEntry[] = [];
+    for (const [, record] of this.#messages.entries()) {
+      if (record.kind !== "ask" || record.to !== sessionId || record.askStatus !== "pending") continue;
+      entries.push({
+        seq: record.seq,
+        from: record.from,
+        to: record.to,
+        kind: record.kind,
+        textDigest: record.textDigest,
+        contentRef: record.contentRef,
+        createdAt: record.createdAt,
+        askStatus: "pending",
+      });
+    }
+    entries.sort((a, b) => a.seq - b.seq);
+    return entries;
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {

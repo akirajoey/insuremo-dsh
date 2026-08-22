@@ -74,6 +74,11 @@ const iciQuerySchemaFiles = [
   "intercom-pending.schema.json",
   "intercom-lease-acquire.schema.json",
   "intercom-lease-release.schema.json",
+  "intercom-ask.schema.json",
+  "intercom-reply.schema.json",
+  "intercom-cancel.schema.json",
+  "intercom-pending-asks.schema.json",
+  "intercom-resolve-status.schema.json",
 ];
 const operationSchemaFiles = [
   "operation-record.schema.json",
@@ -89,7 +94,7 @@ test("generation produces the v0 contract schema documents", async () => {
   const files = (await readdir(new URL("../dist/", import.meta.url)))
     .filter((file) => file.endsWith(".schema.json"))
     .sort();
-  assert.equal(files.length, 71);
+  assert.equal(files.length, 76);
   assert.deepEqual(
     files,
     [...baseSchemaFiles, ...operationSchemaFiles, ...iciQuerySchemaFiles].sort(),

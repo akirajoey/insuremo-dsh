@@ -93,3 +93,77 @@ export const intercomLeaseViewSchema = z
   })
   .strict();
 export type IntercomLeaseView = z.infer<typeof intercomLeaseViewSchema>;
+
+// ---- TASK-032: ask / reply / cancel / pending-asks / resolve-status ----
+
+export const ASK_TIMEOUT_MAX_MS = 600_000;
+
+export const intercomAskRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    fromSessionId: sessionIdSchema,
+    toSessionId: sessionIdSchema,
+    text: z.string().min(1).max(65536),
+    timeoutMs: z.number().int().min(1).max(ASK_TIMEOUT_MAX_MS).optional(),
+  })
+  .strict();
+export type IntercomAskRequest = z.infer<typeof intercomAskRequestSchema>;
+
+export const intercomAskResponseSchema = z
+  .object({
+    seq: z.number().int().min(1),
+    createdAt: timestampSchema,
+    askStatus: z.literal("pending"),
+  })
+  .strict();
+
+export const intercomReplyRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    fromSessionId: sessionIdSchema,
+    toSeq: z.number().int().min(1),
+    text: z.string().min(1).max(65536),
+  })
+  .strict();
+export type IntercomReplyRequest = z.infer<typeof intercomReplyRequestSchema>;
+
+export const intercomReplyResponseSchema = z
+  .object({
+    seq: z.number().int().min(1),
+    createdAt: timestampSchema,
+    replyToSeq: z.number().int().min(1),
+    restored: z.boolean(),
+  })
+  .strict();
+
+export const intercomCancelRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    fromSessionId: sessionIdSchema,
+    seq: z.number().int().min(1),
+  })
+  .strict();
+export type IntercomCancelRequest = z.infer<typeof intercomCancelRequestSchema>;
+
+export const intercomPendingAskEntrySchema = z
+  .object({
+    seq: z.number().int().min(1),
+    from: sessionIdSchema,
+    to: sessionIdSchema,
+    askStatus: z.literal("pending"),
+    textDigest: digestSchema,
+    contentRef: z.string().min(1).max(512),
+    createdAt: timestampSchema,
+  })
+  .strict();
+export type IntercomPendingAskEntry = z.infer<typeof intercomPendingAskEntrySchema>;
+
+export const intercomResolveStatusResponseSchema = z
+  .object({
+    status: z.enum(["running", "idle", "waiting", "stopped"]),
+    waitingFor: z.array(z.number().int().min(1)),
+  })
+  .strict();

@@ -16,6 +16,8 @@ export type IntercomErrorCode =
   | "session-not-found"
   | "peer-not-found"
   | "message-not-found"
+  | "ask-not-found"
+  | "invalid-state"
   | "denied"
   | "storage-error"
   | "disposed";
@@ -26,7 +28,8 @@ export type Result<T> =
 
 export type SessionStatus = "running" | "idle" | "waiting" | "stopped";
 export type MessageDirection = "inbound" | "outbound";
-export type MessageKind = "message" | "ask";
+export type MessageKind = "message" | "ask" | "reply" | "cancel";
+export type AskStatus = "pending" | "replied" | "cancelled";
 
 const timestampSchema = z.string().datetime({ offset: true });
 const digestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -49,13 +52,19 @@ export const messageRecordSchema = z
     seq: z.number().int().min(1),
     sessionId: z.string().min(1).max(128),
     direction: z.enum(["inbound", "outbound"]),
-    kind: z.enum(["message", "ask"]),
+    kind: z.enum(["message", "ask", "reply", "cancel"]),
     from: z.string().min(1).max(128),
     to: z.string().min(1).max(128),
     textDigest: digestSchema,
     contentRef: z.string().min(1).max(512),
     createdAt: timestampSchema,
     deliveredAt: timestampSchema.optional(),
+    /** Ask-lifecycle fields (present on kind=ask; empty/absent otherwise). */
+    askStatus: z.enum(["pending", "replied", "cancelled"]).optional(),
+    askedAt: timestampSchema.optional(),
+    resolvedAt: timestampSchema.optional(),
+    /** Set on kind=reply / kind=cancel: the seq of the ask being handled. */
+    replyToSeq: z.number().int().min(1).optional(),
     schemaVersion: z.literal(INTERCOM_SCHEMA_VERSION),
   })
   .strict();
@@ -82,6 +91,8 @@ export interface InboxEntry {
   readonly textDigest: string;
   readonly contentRef: string;
   readonly createdAt: string;
+  readonly askStatus?: AskStatus;
+  readonly replyToSeq?: number;
 }
 
 export interface LeaseView {
@@ -92,12 +103,19 @@ export interface LeaseView {
   readonly valid: boolean;
 }
 
+export const ASK_TIMEOUT_MAX_MS = 600_000;
+
 export interface IntercomFace {
   register(input: { readonly peerName: string; readonly cwd: string }, signal?: AbortSignal): Promise<Result<{ readonly sessionId: string }>>;
   heartbeat(input: { readonly sessionId: string }, signal?: AbortSignal): Promise<Result<{ readonly lastSeenAt: string }>>;
   unregister(input: { readonly sessionId: string }, signal?: AbortSignal): Promise<Result<true>>;
   listSessions(signal?: AbortSignal): Promise<Result<readonly SessionView[]>>;
   send(input: { readonly fromSessionId: string; readonly toSessionId?: string; readonly toPeer?: string; readonly text: string; readonly kind?: MessageKind }, signal?: AbortSignal): Promise<Result<{ readonly seq: number; readonly createdAt: string }>>;
+  ask(input: { readonly fromSessionId: string; readonly toSessionId: string; readonly text: string; readonly timeoutMs?: number }, signal?: AbortSignal): Promise<Result<{ readonly seq: number; readonly createdAt: string; readonly askStatus: "pending" }>>;
+  reply(input: { readonly fromSessionId: string; readonly toSeq: number; readonly text: string }, signal?: AbortSignal): Promise<Result<{ readonly seq: number; readonly createdAt: string; readonly replyToSeq: number; readonly restored: boolean }>>;
+  cancel(input: { readonly fromSessionId: string; readonly seq: number }, signal?: AbortSignal): Promise<Result<{ readonly seq: number; readonly cancelled: true; readonly released: boolean }>>;
+  pendingAsks(input: { readonly sessionId: string }, signal?: AbortSignal): Promise<Result<readonly InboxEntry[]>>;
+  resolveStatus(input: { readonly sessionId: string }, signal?: AbortSignal): Promise<Result<{ readonly status: SessionStatus; readonly waitingFor: readonly number[] }>>;
   inbox(input: { readonly sessionId: string }, signal?: AbortSignal): Promise<Result<readonly InboxEntry[]>>;
   read(input: { readonly sessionId: string; readonly seq: number }, signal?: AbortSignal): Promise<Result<{ readonly seq: number; readonly text: string; readonly createdAt: string }>>;
   markDelivered(input: { readonly sessionId: string; readonly seqs: readonly number[] }, signal?: AbortSignal): Promise<Result<{ readonly marked: number }>>;

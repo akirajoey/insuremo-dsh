@@ -40,6 +40,34 @@ Host-only. Injects `[storageDomain]`.
   per plan §7); an expired lease can be taken over; only the holder may
   release.
 
+## TASK-032: ask / reply / cancel
+
+Message `kind` extends to `message | ask | reply | cancel`; ask records
+carry `{askStatus: pending|replied|cancelled, askedAt, resolvedAt?}` and
+reply/cancel records carry `replyToSeq`.
+
+- `ask({fromSessionId, toSessionId, text, timeoutMs?≤600000})` — send
+  semantics + `kind=ask, askStatus=pending`; the receiving session's derived
+  status becomes `waiting`.
+- `reply({fromSessionId, toSeq, text})` — `toSeq` must be a pending ask
+  addressed to `fromSessionId` (anyone else: `denied`); writes a
+  `kind=reply` message with `replyToSeq`, flips the ask to
+  `replied/resolvedAt`, and releases the responder's waiting mark
+  (`restored:true` when it was the last pending ask — a simplification this
+  card; full original-status restoration derives from heartbeats later).
+  Concurrent replies to one ask: exactly one wins (write-chain CAS), the
+  rest get `invalid-state`.
+- `cancel({fromSessionId, seq})` — only the asker may cancel their own
+  pending ask (`denied` otherwise; `invalid-state` once replied/cancelled);
+  releases the receiver's waiting mark.
+- `pendingAsks({sessionId})` — asks addressed to me that are still pending
+  (digest+ref only).
+- `resolveStatus({sessionId})` — `{status, waitingFor}` derived fresh from
+  the domain on every call (no in-memory caching): a live session with
+  pending asks is `waiting`, and the stored flag is advisory only.
+- Inbox includes ask/reply entries (with `askStatus`/`replyToSeq`);
+  `markDelivered` never changes an ask's status — delivery ≠ answer.
+
 ## Safety properties
 
 - Message bodies never enter the domain (digest+ref only) — verified by
