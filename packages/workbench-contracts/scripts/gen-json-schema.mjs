@@ -90,7 +90,7 @@ const schemas = {
           type: "array",
           items: objectSchema(
             {
-              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "ici/build-job", "ici/status", "ici/cleanup-plan", "ici/cleanup-apply", "ici/explain-context", "ici/explain-deterministic", "icomposer-write/push-preview", "icomposer-write/push-request", "icomposer-write/push-execute", "icomposer-write/push-resolve", "icomposer-write/push-status", "operation/record", "operation/list", "operation/decide"] },
+              command: { enum: ["system/capabilities", "workspace/list", "workspace/inspect", "workspace/bind", "workspace/unbind", "icomposer/list-assets", "icomposer/sdk-list", "icomposer/sdk-query", "icomposer/util-list", "icomposer/util-query", "icomposer/init-preview", "icomposer/reload-preview", "icomposer/verify-utils", "icomposer/utils-list", "icomposer/utils-search", "ici/build", "ici/query-api", "ici/query-impact", "ici/search-index", "ici/search", "ici/build-job", "ici/status", "ici/cleanup-plan", "ici/cleanup-apply", "ici/explain-context", "ici/explain-deterministic", "icomposer-write/push-preview", "icomposer-write/push-request", "icomposer-write/push-execute", "icomposer-write/push-resolve", "icomposer-write/push-status", "icomposer-write/test-run", "icomposer-write/release-preview", "icomposer-write/release-repos", "icomposer-write/release-branches", "icomposer-write/release-apply", "operation/record", "operation/list", "operation/decide"] },
               description: { type: "string", minLength: 1 },
             },
             ["command"],
@@ -1331,6 +1331,158 @@ const schemas = {
           reason: { type: "string", minLength: 1 },
         },
         ["operationId", "kind", "decision", "paramsDigest", "executed", "conflictFiles"],
+      ),
+    },
+  },
+  "icomposer-write-test-run.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-write-test-run.json",
+    title: "icomposer-write/test-run request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          kind: { enum: ["api", "function"] },
+          name: { type: "string", minLength: 1, maxLength: 200 },
+          data: { type: "string", maxLength: 65536 },
+          method: { type: "string", minLength: 1, maxLength: 128 },
+          overrideUnpushed: { type: "boolean" },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "kind", "name"],
+      ),
+      response: objectSchema(
+        {
+          operationId: { type: "string", minLength: 1 },
+          kind: { const: "imo-icomposer-test" },
+          assetKind: { enum: ["api", "function"] },
+          name: { type: "string", minLength: 1, maxLength: 200 },
+          paramsDigest: { type: "string", minLength: 1 },
+          decision: { const: "pending" },
+          joinState: { enum: ["clean", "local-modified", "no-server-md5", "source-missing", "metadata-missing"] },
+          overrideUnpushed: { type: "boolean" },
+        },
+        ["operationId", "kind", "assetKind", "name", "paramsDigest", "decision", "joinState", "overrideUnpushed"],
+      ),
+    },
+  },
+  "icomposer-write-release-preview.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-write-release-preview.json",
+    title: "icomposer-write/release-preview request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          type: { enum: ["api", "function"] },
+          name: { type: "string", minLength: 1, maxLength: 200 },
+          repo: { type: "string", minLength: 1, maxLength: 512 },
+          branch: { type: "string", minLength: 1, maxLength: 128 },
+          message: { type: "string", minLength: 1, maxLength: 500 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "type", "name", "repo", "branch", "message"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          type: { enum: ["api", "function"] },
+          name: { type: "string", minLength: 1, maxLength: 200 },
+          valid: { type: "boolean" },
+          warnings: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 200 } },
+          durationMs: { type: "integer", minimum: 0 },
+          stdoutDigest: { type: "string", minLength: 1 },
+        },
+        ["workspaceId", "type", "name", "valid", "warnings", "durationMs", "stdoutDigest"],
+      ),
+    },
+  },
+  "icomposer-write-release-repos.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-write-release-repos.json",
+    title: "icomposer-write/release-repos request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        { ...requestProperties, workspaceId: { type: "string", minLength: 1 } },
+        ["requestId", "schemaVersion", "workspaceId"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          repos: { type: "array", maxItems: 200, items: { type: "string", minLength: 1, maxLength: 512 } },
+          count: { type: "integer", minimum: 0 },
+          truncated: { type: "boolean" },
+          stdoutDigest: { type: "string", minLength: 1 },
+        },
+        ["workspaceId", "repos", "count", "truncated", "stdoutDigest"],
+      ),
+    },
+  },
+  "icomposer-write-release-branches.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-write-release-branches.json",
+    title: "icomposer-write/release-branches request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          repo: { type: "string", minLength: 1, maxLength: 512 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "repo"],
+      ),
+      response: objectSchema(
+        {
+          workspaceId: { type: "string", minLength: 1 },
+          repo: { type: "string", minLength: 1, maxLength: 512 },
+          branches: { type: "array", maxItems: 200, items: { type: "string", minLength: 1, maxLength: 128 } },
+          count: { type: "integer", minimum: 0 },
+          truncated: { type: "boolean" },
+          stdoutDigest: { type: "string", minLength: 1 },
+        },
+        ["workspaceId", "repo", "branches", "count", "truncated", "stdoutDigest"],
+      ),
+    },
+  },
+  "icomposer-write-release-apply.schema.json": {
+    $schema: draft,
+    $id: "https://icomposer.workbench/schemas/icomposer-write-release-apply.json",
+    title: "icomposer-write/release-apply request or response",
+    type: "object",
+    oneOf: [{ $ref: "#/$defs/request" }, { $ref: "#/$defs/response" }],
+    $defs: {
+      request: objectSchema(
+        {
+          ...requestProperties,
+          workspaceId: { type: "string", minLength: 1 },
+          type: { enum: ["api", "function"] },
+          name: { type: "string", minLength: 1, maxLength: 200 },
+          repo: { type: "string", minLength: 1, maxLength: 512 },
+          branch: { type: "string", minLength: 1, maxLength: 128 },
+          message: { type: "string", minLength: 1, maxLength: 500 },
+        },
+        ["requestId", "schemaVersion", "workspaceId", "type", "name", "repo", "branch", "message"],
+      ),
+      response: objectSchema(
+        {
+          operationId: { type: "string", minLength: 1 },
+          kind: { const: "imo-icomposer-release" },
+          type: { enum: ["api", "function"] },
+          name: { type: "string", minLength: 1, maxLength: 200 },
+          repo: { type: "string", minLength: 1, maxLength: 512 },
+          branch: { type: "string", minLength: 1, maxLength: 128 },
+          paramsDigest: { type: "string", minLength: 1 },
+          decision: { const: "pending" },
+        },
+        ["operationId", "kind", "type", "name", "repo", "branch", "paramsDigest", "decision"],
       ),
     },
   },

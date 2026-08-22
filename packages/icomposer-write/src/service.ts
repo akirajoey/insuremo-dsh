@@ -1,10 +1,12 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
-import { buildPushArgs, err, isValidAuthProfile, isValidChoice, isValidEnvironmentId, isValidFiles, pushParamsDigest, resolveParamsDigest } from "./cli.ts";
+import { buildPushArgs, err, isValidChoice, isValidFiles, pushParamsDigest, resolveParamsDigest } from "./cli.ts";
 import { capture } from "./capture.ts";
 import { pushResultDigest, parsePushOutput, stdoutHasConflict } from "./parse.ts";
 import { runPushPreview } from "./preview.ts";
 import { PushJournal } from "./journal.ts";
+import { bindingEntry, mapAuthError, mapCliError, resolveLease, type BindingEntry, type Lease } from "./runtime.ts";
+import { releaseApplyOp, releaseBranchesOp, releaseExecuteOp, releasePreviewOp, releaseReposOp, testExecuteOp, testRunOp, type OperationLogLike, type PendingEntry, type WriteOpsDeps } from "./write-ops.ts";
 import type {
   IcomposerWriteFace,
   PushErrorCode,
@@ -23,43 +25,11 @@ import type {
   Result,
 } from "./types.ts";
 
-const PASSTHROUGH = new Set<PushErrorCode>([
-  "workspace-not-found",
-  "invalid-workspace-id",
-  "service-disposed",
-  "cancelled",
-]);
+type OperationLogRecord = ReturnType<OperationLogLike["list"]>[number];
 
-type BindingEntry = { binding: { authProfile: string; environmentId: string } | null; canonicalPath: string };
-type OperationLogRecord = {
-  id: string; kind: string; decision: "pending" | "approved" | "rejected";
-  paramsDigest?: string; resultDigest?: string; reason?: string;
-};
-type OperationLogLike = {
-  append(input: { requestId: string; kind: string; paramsDigest: string; artifactRefs: readonly string[] }): Promise<OperationLogRecord>;
-  list(): readonly OperationLogRecord[];
-  decide(id: string, approved: boolean, by: string, reason?: string): Promise<OperationLogRecord>;
-  recordResult(id: string, input: { resultDigest: string; artifactRefs: readonly string[] }): Promise<OperationLogRecord>;
-};
-type Lease = { use<T>(cb: (s: { accessToken: string }) => Promise<T> | T): Promise<T> };
-type AuthLease = {
-  prepare(request: { profile?: string; env?: string }, signal?: AbortSignal): Promise<{
-    ok: boolean; value?: Lease; error?: { code?: string };
-  }>;
-};
-
-interface PendingPush {
-  readonly kind: "push" | "resolve";
-  readonly operationId: string;
-  readonly workspaceId: string;
-  readonly mode: PushMode;
-  readonly files: readonly string[];
-  readonly checkUsages?: boolean;
-  readonly skipCompile?: boolean;
-  readonly prefer?: "prefer-local" | "prefer-server";
-  readonly originalOperationId?: string;
-  readonly paramsDigest: string;
-  readonly preview?: PushPreviewView;
+type PushOrResolvePending = Extract<PendingEntry, { kind: "push" | "resolve" }>;
+function isPushOrResolvePending(pending: PendingEntry): pending is PushOrResolvePending {
+  return pending.kind === "push" || pending.kind === "resolve";
 }
 
 function execFailure(code: PushErrorCode, message: string, operationId: string): PushExecution {
@@ -76,7 +46,7 @@ export class IcomposerWriteService extends Service {
   readonly #command: string;
   readonly #timeoutMs: number;
   #operationLog: OperationLogLike;
-  #pending = new Map<string, PendingPush>();
+  #pending = new Map<string, PendingEntry>();
   #journal = new PushJournal();
 
   constructor(ctx: Context, config: { command?: string; timeoutMs?: number } = {}) {
@@ -93,6 +63,13 @@ export class IcomposerWriteService extends Service {
       pushExecute: (operationId: string, signal?: AbortSignal) => self.pushExecute(operationId, signal),
       pushResolve: (input: PushResolveInput, signal?: AbortSignal) => self.pushResolve(input, signal),
       pushStatus: (operationId: string) => self.pushStatus(operationId),
+      testRun: (input: import("./types.ts").TestRunInput, signal?: AbortSignal) => self.testRun(input, signal),
+      testExecute: (operationId: string, signal?: AbortSignal) => self.testExecute(operationId, signal),
+      releasePreview: (input: import("./types.ts").ReleasePreviewInput, signal?: AbortSignal) => self.releasePreview(input, signal),
+      releaseRepos: (input: { readonly workspaceId: string }, signal?: AbortSignal) => self.releaseRepos(input, signal),
+      releaseBranches: (input: { readonly workspaceId: string; readonly repo: string }, signal?: AbortSignal) => self.releaseBranches(input, signal),
+      releaseApply: (input: import("./types.ts").ReleaseApplyInput, signal?: AbortSignal) => self.releaseApply(input, signal),
+      releaseExecute: (operationId: string, signal?: AbortSignal) => self.releaseExecute(operationId, signal),
     });
     ctx.set("icomposerWrite", face);
     ctx.effect(() => () => {
@@ -133,7 +110,7 @@ export class IcomposerWriteService extends Service {
       }
       this.#pending.set(record.id, {
         kind: "push", operationId: record.id, workspaceId: input.workspaceId, mode, files: [...input.files],
-        checkUsages: input.checkUsages === true, skipCompile: input.skipCompile === true, paramsDigest, preview: preview.value,
+        checkUsages: input.checkUsages === true, skipCompile: input.skipCompile === true, paramsDigest,
       });
       return { ok: true, value: { operationId: record.id, kind: "imo-icomposer-push", mode, files: [...input.files], paramsDigest, decision: "pending", preview: preview.value } };
     });
@@ -164,7 +141,9 @@ export class IcomposerWriteService extends Service {
     if (pending === undefined) return execFailure("missing-pending-input", "push parameters are unavailable; re-request the push", operationId);
     const expected = pending.kind === "push"
       ? pushParamsDigest({ mode: pending.mode, files: pending.files, checkUsages: pending.checkUsages, skipCompile: pending.skipCompile })
-      : resolveParamsDigest({ choice: pending.prefer ?? "cancel", originalOperationId: pending.originalOperationId ?? "" });
+      : pending.kind === "resolve"
+        ? resolveParamsDigest({ choice: pending.prefer, originalOperationId: pending.originalOperationId })
+        : ""; // test/release entries never match a push record's digest
     if (record.paramsDigest !== expected || record.paramsDigest !== pending.paramsDigest) {
       return execFailure("operation-params-mismatch", "push operation parameters do not match", operationId);
     }
@@ -213,27 +192,79 @@ export class IcomposerWriteService extends Service {
       executed,
       ...(status === undefined ? {} : { status }),
       conflictFiles: status === "conflict" && j?.receipt?.conflictFiles !== undefined ? [...j.receipt.conflictFiles] : [],
-      ...(p?.prefer === undefined ? {} : { prefer: p.prefer }),
-      ...(p?.originalOperationId === undefined ? {} : { originalOperationId: p.originalOperationId }),
+      ...(p?.kind === "resolve" ? { prefer: p.prefer, originalOperationId: p.originalOperationId } : {}),
       ...(record.reason === undefined ? {} : { reason: record.reason }),
     };
     return { ok: true, value: view };
   }
 
+  // ---- TASK-029: test + release ----
+
+  get #ops(): WriteOpsDeps {
+    return {
+      ctx: this.ctx,
+      command: this.#command,
+      timeoutMs: this.#timeoutMs,
+      journal: this.#journal,
+      operationLog: this.#operationLog,
+      pending: this.#pending,
+      running: () => this.#running,
+    };
+  }
+
+  async testRun(input: import("./types.ts").TestRunInput, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").TestRunView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => testRunOp(this.#ops, input, signal));
+  }
+
+  async testExecute(operationId: string, signal?: AbortSignal): Promise<import("./types.ts").TestExecution> {
+    if (this.#disposed) return { ok: false, error: { code: "service-disposed", message: "iComposer write service is disposed", operationId } };
+    if (signal?.aborted) return { ok: false, error: { code: "cancelled", message: "test execution was cancelled", operationId } };
+    return this.enqueue(() => testExecuteOp(this.#ops, operationId, signal));
+  }
+
+  async releasePreview(input: import("./types.ts").ReleasePreviewInput, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").ReleasePreviewView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => releasePreviewOp(this.#ops, input, signal));
+  }
+
+  async releaseRepos(input: { readonly workspaceId: string }, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").ReleaseRepoView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => releaseReposOp(this.#ops, input.workspaceId, signal));
+  }
+
+  async releaseBranches(input: { readonly workspaceId: string; readonly repo: string }, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").ReleaseBranchView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => releaseBranchesOp(this.#ops, input.workspaceId, input.repo, signal));
+  }
+
+  async releaseApply(input: import("./types.ts").ReleaseApplyInput, signal?: AbortSignal): Promise<import("./types.ts").Result<import("./types.ts").ReleaseApplyView>> {
+    if (this.#disposed) return err("service-disposed");
+    if (signal?.aborted) return err("cancelled");
+    return this.enqueue(() => releaseApplyOp(this.#ops, input, signal));
+  }
+
+  async releaseExecute(operationId: string, signal?: AbortSignal): Promise<import("./types.ts").ReleaseExecution> {
+    if (this.#disposed) return { ok: false, error: { code: "service-disposed", message: "iComposer write service is disposed", operationId } };
+    if (signal?.aborted) return { ok: false, error: { code: "cancelled", message: "release execution was cancelled", operationId } };
+    return this.enqueue(() => releaseExecuteOp(this.#ops, operationId, signal));
+  }
+
   // ---- internals ----
 
   private async previewFlow(mode: PushMode, workspaceId: string, files: readonly string[], signal?: AbortSignal): Promise<Result<PushPreviewView>> {
-    const binding = await this.bindingEntry(workspaceId, signal);
+    const binding = await bindingEntry(this.ctx, workspaceId, signal);
     if (!binding.ok) return binding;
     const { binding: bound, canonicalPath } = binding.value;
     if (!bound) return err("workspace-not-bound");
-    if (!isValidAuthProfile(bound.authProfile) || !isValidEnvironmentId(bound.environmentId)) return err("cli-error");
-    const auth = this.ctx.get("imoAuth" as never) as unknown as AuthLease | undefined;
-    if (!auth) return err("cli-error");
-    const leaseResult = await auth.prepare({ profile: bound.authProfile, env: bound.environmentId }, signal);
-    if (!leaseResult.ok) return err(this.mapAuthError(leaseResult.error));
+    const leaseRes = await resolveLease(this.ctx, bound, signal);
+    if (!leaseRes.ok) return err(leaseRes.error.code);
     try {
-      return await leaseResult.value!.use(async () => {
+      return await leaseRes.value.use(async () => {
         const ran = await runPushPreview(
           { subprocess: this.ctx.subprocess, command: this.#command, timeoutMs: this.#timeoutMs, canonicalPath, authProfile: bound.authProfile, workspaceId },
           mode, files, signal,
@@ -250,7 +281,9 @@ export class IcomposerWriteService extends Service {
     }
   }
 
-  private async resolvePending(input: PushResolveInput, original: PendingPush, signal?: AbortSignal): Promise<PushResolveResult> {
+  private async resolvePending(input: PushResolveInput, originalRaw: PendingEntry, signal?: AbortSignal): Promise<PushResolveResult> {
+    if (!isPushOrResolvePending(originalRaw)) return { ok: false, error: { code: "invalid-params", message: "only push operations can be resolved" } };
+    const original = originalRaw;
     if (signal?.aborted) return { ok: false, error: { code: "cancelled", message: "push resolution was cancelled" } };
     const paramsDigest = resolveParamsDigest({ choice: input.choice, originalOperationId: input.operationId });
     let record: OperationLogRecord;
@@ -263,7 +296,7 @@ export class IcomposerWriteService extends Service {
     }
     if (input.choice === "cancel") {
       try {
-        await this.#operationLog.decide(record.id, false, input.by, "cancel");
+        await (this.#operationLog as { decide(id: string, approved: boolean, by: string, reason?: string): Promise<OperationLogRecord> }).decide(record.id, false, input.by, "cancel");
       } catch {
         return { ok: false, error: { code: "record-failed", message: "could not finalize cancellation", operationId: record.id } };
       }
@@ -277,7 +310,9 @@ export class IcomposerWriteService extends Service {
     return { ok: true, value: { operationId: record.id, kind: "imo-icomposer-push-resolve", choice: prefer, decision: "pending", originalOperationId: input.operationId, paramsDigest, mode: original.mode, files: [...original.files] } };
   }
 
-  private async executePending(operationId: string, pending: PendingPush, signal?: AbortSignal): Promise<PushExecution> {
+  private async executePending(operationId: string, pendingRaw: PendingEntry, signal?: AbortSignal): Promise<PushExecution> {
+    if (!isPushOrResolvePending(pendingRaw)) return execFailure("missing-pending-input", "push parameters are unavailable; re-request the push", operationId);
+    const pending = pendingRaw;
     if (!this.#journal.prepare(operationId)) return execFailure("busy", "another push attempt is already running", operationId);
     if (signal?.aborted) {
       this.#journal.markOutcomeUnknown(operationId);
@@ -288,7 +323,7 @@ export class IcomposerWriteService extends Service {
       this.#journal.markOutcomeUnknown(operationId);
       return execFailure("invalid-workspace-id", "workspace id is invalid", operationId);
     }
-    const binding = await this.bindingEntry(pending.workspaceId, signal);
+    const binding = await bindingEntry(this.ctx, pending.workspaceId, signal);
     if (!binding.ok) {
       this.#journal.markOutcomeUnknown(operationId);
       return execFailure(binding.error.code as PushErrorCode, binding.error.message, operationId);
@@ -298,40 +333,31 @@ export class IcomposerWriteService extends Service {
       this.#journal.markOutcomeUnknown(operationId);
       return execFailure("workspace-not-bound", "workspace is not bound", operationId);
     }
-    if (!isValidAuthProfile(bound.authProfile) || !isValidEnvironmentId(bound.environmentId)) {
+    const leaseRes = await resolveLease(this.ctx, bound, signal);
+    if (!leaseRes.ok) {
       this.#journal.markOutcomeUnknown(operationId);
-      return execFailure("cli-error", "invalid binding profile", operationId);
-    }
-    const auth = this.ctx.get("imoAuth" as never) as unknown as AuthLease | undefined;
-    if (!auth) {
-      this.#journal.markOutcomeUnknown(operationId);
-      return execFailure("cli-error", "auth service is unavailable", operationId);
-    }
-    const leaseResult = await auth.prepare({ profile: bound.authProfile, env: bound.environmentId }, signal);
-    if (!leaseResult.ok) {
-      this.#journal.markOutcomeUnknown(operationId);
-      return execFailure(this.mapAuthError(leaseResult.error), this.mapAuthMessage(leaseResult.error), operationId);
+      return execFailure(leaseRes.error.code, leaseRes.error.message, operationId);
     }
     try {
-      return await this.runLeased(operationId, pending, canonicalPath, bound.authProfile, leaseResult.value, signal);
+      return await this.runLeased(operationId, pending, canonicalPath, bound.authProfile, leaseRes.value, signal);
     } catch {
       this.#journal.markOutcomeUnknown(operationId);
       return execFailure("execution-outcome-unknown", "push outcome could not be determined; it will never be re-run", operationId);
     }
   }
 
-  private async runLeased(operationId: string, pending: PendingPush, canonicalPath: string, authProfile: string, lease: Lease | undefined, signal?: AbortSignal): Promise<PushExecution> {
+  private async runLeased(operationId: string, pending: PushOrResolvePending, canonicalPath: string, authProfile: string, lease: Lease | undefined, signal?: AbortSignal): Promise<PushExecution> {
     return lease!.use(async () => {
       const run = await capture(this.ctx.subprocess, {
         command: this.#command,
-        args: buildPushArgs(pending.mode, authProfile, pending.files, { dryRun: false, checkUsages: pending.checkUsages, skipCompile: pending.skipCompile, prefer: pending.prefer }),
+        args: buildPushArgs(pending.mode, authProfile, pending.files, { dryRun: false, checkUsages: pending.checkUsages, skipCompile: pending.skipCompile, prefer: pending.kind === "resolve" ? pending.prefer : undefined }),
         cwd: canonicalPath,
         timeoutMs: this.#timeoutMs,
         signal,
       });
       if (!run.ok) {
         this.#journal.markOutcomeUnknown(operationId);
-        return execFailure(this.mapCliError(run.error.code), "push outcome could not be determined; it will never be re-run", operationId);
+        return execFailure(mapCliError(run.error.code), "push outcome could not be determined; it will never be re-run", operationId);
       }
       const { exitCode, signal: runSignal, stdout, stdoutDigest, stderr, stderrDigest } = run.value;
       const conflict = stdoutHasConflict(stdout) || stdoutHasConflict(stderr) || (() => { const parsed = parsePushOutput(stdout, pending.files, pending.files[0]); return parsed.ok && parsed.value.conflict; })();
@@ -346,7 +372,7 @@ export class IcomposerWriteService extends Service {
         requestedFlags: {
           ...(pending.checkUsages === true ? { checkUsages: true } : {}),
           ...(pending.skipCompile === true ? { skipCompile: true } : {}),
-          ...(pending.prefer === undefined ? {} : { prefer: pending.prefer }),
+          ...(pending.kind === "resolve" ? { prefer: pending.prefer } : {}),
         },
         status,
         exitCode,
@@ -374,43 +400,6 @@ export class IcomposerWriteService extends Service {
       return { ok: true, receipt, evidencePending: true } as unknown as PushExecution;
     }
     return { ok: true, receipt };
-  }
-
-  private async bindingEntry(workspaceId: string, signal?: AbortSignal): Promise<Result<{ binding: BindingEntry["binding"]; canonicalPath: string }>> {
-    const bindingSvc = this.ctx.get("workspaceBinding" as never) as unknown as {
-      get(id: string, signal?: AbortSignal): Promise<{ ok: boolean; value?: BindingEntry; error?: { code?: unknown } }>;
-    } | undefined;
-    if (!bindingSvc) return err("cli-error");
-    const res = await bindingSvc.get(workspaceId, signal);
-    if (!res.ok) {
-      const raw = (res.error as { code?: unknown } | undefined)?.code;
-      const code = typeof raw === "string" ? (raw as PushErrorCode) : undefined;
-      if (code === "workspace-not-found") return err("workspace-not-found", "workspace does not exist");
-      if (code && PASSTHROUGH.has(code)) return err(code);
-      return err("cli-error");
-    }
-    const value = res.value;
-    if (!value) return err("workspace-not-found");
-    return { ok: true, value: { binding: value.binding, canonicalPath: value.canonicalPath } };
-  }
-
-  private mapAuthError(error: { code?: string } | undefined): PushErrorCode {
-    if (!error || typeof error.code !== "string") return "cli-error";
-    const code = error.code as PushErrorCode;
-    if (code === "invalid-auth" || code === "forbidden" || code === "prepare-invalidated" || code === "lease-revoked") return code;
-    if (code === "timeout" || code === "cancelled" || code === "service-disposed") return code;
-    return "cli-error";
-  }
-
-  private mapAuthMessage(error: { code?: string } | undefined): string {
-    return error && typeof error.code === "string" ? error.code : "auth failure";
-  }
-
-  private mapCliError(code: string): PushErrorCode {
-    if (code === "timeout") return "timeout";
-    if (code === "cancelled") return "cancelled";
-    if (code === "not-found" || code === "spawn-failed") return "command-failed";
-    return "cli-error";
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {

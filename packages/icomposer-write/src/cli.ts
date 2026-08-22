@@ -101,3 +101,94 @@ export function resolveParamsDigest(input: {
 export function err(code: PushErrorCode, message: string = code): Result<never> {
   return { ok: false, error: { code, message } };
 }
+
+// ---- TASK-029: test + release ----
+
+/** Asset names are argv tokens: bounded, no whitespace/control chars. */
+export function isValidAssetName(value: string | undefined): boolean {
+  if (value === undefined || value.length < 1 || value.length > 200) return false;
+  return /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(value);
+}
+
+/** Function method name. */
+export function isValidMethod(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  return /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value);
+}
+
+const DATA_LIMIT_BYTES = 64 * 1024;
+
+/** `--data` accepts an inline JSON object/array or a workspace-relative .json path. */
+export function isValidDataPayload(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  if (value.length === 0 || Buffer.byteLength(value) > DATA_LIMIT_BYTES) return false;
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try { JSON.parse(trimmed); return true; } catch { return false; }
+  }
+  // workspace-relative path form
+  if (trimmed.startsWith("/") || trimmed.includes("\\") || trimmed.includes("..")) return false;
+  if (!trimmed.endsWith(".json")) return false;
+  return trimmed.split("/").every(seg => /^[A-Za-z0-9._-]+$/.test(seg) && seg.length > 0);
+}
+
+/** Git repo URL (https/ssh forms) — bounded, no control chars. */
+export function isValidRepoUrl(value: string | undefined): boolean {
+  if (value === undefined || value.length < 1 || value.length > 512) return false;
+  return /^[A-Za-z0-9:@/._~#?=&+-]+$/.test(value);
+}
+
+export function isValidBranchName(value: string | undefined): boolean {
+  if (value === undefined || value.length < 1 || value.length > 128) return false;
+  return /^[A-Za-z0-9._/-]+$/.test(value);
+}
+
+export const MESSAGE_MAX_CHARS = 500;
+
+export function isValidReleaseMessage(value: string | undefined): boolean {
+  if (value === undefined || value.length < 1 || value.length > MESSAGE_MAX_CHARS) return false;
+  // strip control characters except tab/newline
+  return !/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value);
+}
+
+/** argv for `imo icomposer test api|function <NAME>` (never `--insecure`). */
+export function buildTestArgs(authProfile: string, input: { kind: "api" | "function"; name: string; data?: string; method?: string }): readonly string[] {
+  const args = ["icomposer", "test", input.kind, "--json", "--profile", authProfile];
+  if (input.method !== undefined) args.push("--method", input.method);
+  if (input.data !== undefined) args.push("--data", input.data);
+  args.push(input.name);
+  return args;
+}
+
+/** argv for `imo icomposer release apply` (full repo/branch/message). */
+export function buildReleaseArgs(authProfile: string, input: { type: "api" | "function"; name: string; repo: string; branch: string; message: string; dryRun?: boolean }): readonly string[] {
+  const args = ["icomposer", "release", "apply", "--json", "--profile", authProfile, "--type", input.type, "--name", input.name, "--repo", input.repo, "--branch", input.branch, "-m", input.message];
+  if (input.dryRun === true) args.push("--dry-run");
+  return args;
+}
+
+export function buildReleaseListArgs(authProfile: string, kind: "repo" | "branch", repo?: string): readonly string[] {
+  const args = ["icomposer", "release", kind, "list", "--json", "--profile", authProfile];
+  if (kind === "branch" && repo !== undefined) args.push("--repo", repo);
+  return args;
+}
+
+export function testParamsDigest(input: { kind: "api" | "function"; name: string; data?: string; method?: string; overrideUnpushed?: boolean }): string {
+  return sha256(JSON.stringify({
+    kind: input.kind,
+    name: input.name,
+    data: input.data ?? null,
+    method: input.method ?? null,
+    overrideUnpushed: input.overrideUnpushed === true,
+  }));
+}
+
+export function releaseParamsDigest(input: { type: "api" | "function"; name: string; repo: string; branch: string; message: string }): string {
+  return sha256(JSON.stringify({
+    type: input.type,
+    name: input.name,
+    repo: input.repo,
+    branch: input.branch,
+    message: input.message,
+  }));
+}

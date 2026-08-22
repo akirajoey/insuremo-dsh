@@ -50,6 +50,31 @@ Host-only. Injects `[subprocess, workspaceBinding, imoAuth, operationLog]`.
   messages; hostile CLI output is dropped, only digests and bounded
   allowlist fields survive.
 
+## TASK-029: test evidence + release closed loop
+
+- `testRun({workspaceId, kind, name, data?, method?, overrideUnpushed?})` —
+  appends a pending `imo-icomposer-test` operation (paramsDigest hashes the
+  canonical params including the override flag) and projects the local join
+  state for the target asset. `testExecute(operationId)` is the approval-gated
+  execution: the **local unpushed guard** re-checks the metadata-md5 join at
+  execute time and blocks `local-modified` assets with the fixed code
+  `local-unpushed-changes` (zero spawn) unless the request carried
+  `overrideUnpushed:true` — the choice is receipted on the immutable
+  `TestReceipt`. Evidence is persisted as an allowlisted artifact at
+  `<DSH_HOME>/write/<hash>/artifacts/test-<operationId>.json` (elapsed,
+  httpStatus, request/response sha256 digests, traceId, testUrl, savedAt) and
+  `recordResult` carries the artifact ref. One-shot journal semantics match
+  push: retries are pure evidence reads.
+- `releasePreview` — read-only `release apply --dry-run --json` preview.
+- `releaseRepos` / `releaseBranches` — read-only repo/branch listings
+  (object-map and array output shapes both supported).
+- `releaseApply({workspaceId, type, name, repo, branch, message})` — appends
+  a pending `imo-icomposer-release` operation (independent from push receipts
+  — kinds never mix; `pushExecute` refuses release operations and
+  `releaseExecute` refuses push operations). `releaseExecute(operationId)`
+  runs the full apply argv after external approval; message is validated to
+  1–500 chars without control characters.
+
 ## Tests
 
 `pnpm --filter @icomposer/icomposer-write run test` covers the dry-run argv

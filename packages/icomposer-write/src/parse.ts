@@ -240,3 +240,148 @@ export function pushResultDigest(receipt: { readonly operationId: string; readon
     finishedAt: receipt.finishedAt,
   }));
 }
+
+// ---- TASK-029: test + release parsing ----
+
+function sha256Text(value: string): string {
+  // reuse capture.digest for the canonical sha256 form
+  return digest(value);
+}
+
+export interface TestEvidenceProjection {
+  readonly elapsedMs: number;
+  readonly httpStatus: number | null;
+  readonly requestDigest: string;
+  readonly responseDigest: string;
+  readonly traceId: string;
+  readonly testUrl: string;
+  readonly savedAt: string;
+}
+
+function toMillis(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.trunc(value);
+  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Math.max(0, Math.trunc(Number(value)));
+  return 0;
+}
+
+function nestedRecord(parsed: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> | null {
+  for (const key of keys) {
+    const value = parsed[key];
+    if (isRecord(value)) return value;
+  }
+  return null;
+}
+
+/**
+ * Allowlist projection of `imo icomposer test api|function … --json` stdout.
+ * Raw request/response bodies are digested immediately (sha256) — payloads
+ * never survive as text. Bounded identifiers only.
+ */
+export function parseTestOutput(text: string): { readonly ok: true; readonly value: TestEvidenceProjection } | { readonly ok: false; readonly error: "not-json" | "parse-error" } {
+  if (Buffer.byteLength(text) > JSON_LIMIT_BYTES) return { ok: false, error: "parse-error" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, error: "not-json" }; }
+  if (!isRecord(parsed)) return { ok: false, error: "parse-error" };
+  const result = isRecord(parsed.result) ? parsed.result : parsed;
+  const inner = nestedRecord(result, ["test", "sample", "data"]) ?? result;
+  const elapsedMs = toMillis(inner.elapsed_ms ?? inner.elapsedMs ?? result.elapsed_ms ?? result.elapsedMs);
+  const rawStatus = inner.http_status ?? inner.httpStatus ?? inner.status_code ?? result.status_code ?? result.http_status;
+  const httpStatus = typeof rawStatus === "number" && Number.isFinite(rawStatus) ? Math.trunc(rawStatus) : null;
+  const requestRaw = JSON.stringify(inner.request ?? inner.payload ?? result.payload ?? result.request ?? null);
+  const responseRaw = JSON.stringify(inner.response ?? inner.body ?? result.response ?? null);
+  return {
+    ok: true,
+    value: {
+      elapsedMs,
+      httpStatus,
+      requestDigest: requestRaw === "null" ? "" : sha256Text(requestRaw),
+      responseDigest: responseRaw === "null" ? "" : sha256Text(responseRaw),
+      traceId: boundedString(inner.trace_id ?? inner.traceId ?? result.trace_id ?? result.traceId) ?? "",
+      testUrl: boundedString(inner.test_url ?? inner.testUrl ?? result.test_url) ?? "",
+      savedAt: boundedString(inner.saved_at ?? inner.savedAt ?? result.saved_at) ?? "",
+    },
+  };
+}
+
+export interface ReleaseRepoProjection {
+  readonly repos: readonly string[];
+  readonly truncated: boolean;
+}
+
+export interface ReleaseBranchProjection {
+  readonly branches: readonly string[];
+  readonly truncated: boolean;
+}
+
+function stringListFrom(value: unknown, max: number): { items: string[]; truncated: boolean } {
+  // object map form (observed: `{"repos": {"name": "url", ...}}`) — project the url values
+  if (isRecord(value) && !Array.isArray(value)) {
+    const items: string[] = [];
+    for (const entryValue of Object.values(value)) {
+      if (items.length >= max) break;
+      if (typeof entryValue === "string") {
+        const v = boundedString(entryValue);
+        if (v !== undefined) items.push(v);
+      } else if (isRecord(entryValue)) {
+        const v = pickString(entryValue, ["repository_url", "repo_url", "url"]);
+        if (v !== undefined) items.push(v);
+      }
+    }
+    return { items, truncated: Object.keys(value).length > max };
+  }
+  const raw = Array.isArray(value) ? value : [];
+  const items: string[] = [];
+  for (const entry of raw.slice(0, max)) {
+    if (typeof entry === "string") { const v = boundedString(entry); if (v !== undefined) items.push(v); continue; }
+    if (isRecord(entry)) {
+      const v = pickString(entry, ["repository_url", "repo_url", "url", "name", "repo"]);
+      if (v !== undefined) items.push(v);
+      else {
+        const b = pickString(entry, ["branch", "branch_name", "name"]);
+        if (b !== undefined) items.push(b);
+      }
+    }
+  }
+  return { items, truncated: raw.length > max };
+}
+
+export function parseReleaseRepos(text: string): { readonly ok: true; readonly value: ReleaseRepoProjection } | { readonly ok: false; readonly error: "not-json" | "parse-error" } {
+  if (Buffer.byteLength(text) > JSON_LIMIT_BYTES) return { ok: false, error: "parse-error" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, error: "not-json" }; }
+  if (!isRecord(parsed)) return { ok: false, error: "parse-error" };
+  const result = isRecord(parsed.result) ? parsed.result : parsed;
+  const raw = result.repos ?? result.repositories ?? result.items ?? result.data ?? result;
+  const { items, truncated } = stringListFrom(raw, RESULTS_MAX);
+  return { ok: true, value: { repos: items, truncated } };
+}
+
+export function parseReleaseBranches(text: string): { readonly ok: true; readonly value: ReleaseBranchProjection } | { readonly ok: false; readonly error: "not-json" | "parse-error" } {
+  if (Buffer.byteLength(text) > JSON_LIMIT_BYTES) return { ok: false, error: "parse-error" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, error: "not-json" }; }
+  if (!isRecord(parsed)) return { ok: false, error: "parse-error" };
+  const result = isRecord(parsed.result) ? parsed.result : parsed;
+  const raw = result.branches ?? result.items ?? result.data ?? result;
+  const { items, truncated } = stringListFrom(raw, RESULTS_MAX);
+  return { ok: true, value: { branches: items, truncated } };
+}
+
+export interface ReleaseApplyProjection {
+  readonly valid: boolean;
+  readonly warnings: readonly string[];
+}
+
+export function parseReleaseApply(text: string, exitCode: number): { readonly ok: true; readonly value: ReleaseApplyProjection } | { readonly ok: false; readonly error: "not-json" | "parse-error" } {
+  if (Buffer.byteLength(text) > JSON_LIMIT_BYTES) return { ok: false, error: "parse-error" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, error: "not-json" }; }
+  if (!isRecord(parsed)) return { ok: false, error: "parse-error" };
+  const result = isRecord(parsed.result) ? parsed.result : parsed;
+  const warnings = [
+    ...boundedStringList(result.warnings, WARNINGS_MAX),
+    ...boundedStringList(result.metadata_warnings, WARNINGS_MAX),
+  ].slice(0, WARNINGS_MAX);
+  const invalid = result.valid === false || result.error !== undefined;
+  return { ok: true, value: { valid: exitCode === 0 && !invalid, warnings } };
+}

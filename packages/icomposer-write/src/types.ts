@@ -29,7 +29,12 @@ export type PushErrorCode =
   | "busy"
   | "record-failed"
   | "execution-outcome-unknown"
-  | "conflict-resolution-required";
+  | "conflict-resolution-required"
+  | "local-unpushed-changes"
+  | "invalid-name"
+  | "invalid-data"
+  | "invalid-method"
+  | "invalid-release-params";
 
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
@@ -168,4 +173,144 @@ export interface IcomposerWriteFace {
   pushExecute(operationId: string, signal?: AbortSignal): Promise<PushExecution>;
   pushResolve(input: PushResolveInput, signal?: AbortSignal): Promise<PushResolveResult>;
   pushStatus(operationId: string): Promise<Result<PushStatusView>>;
+  testRun(input: TestRunInput, signal?: AbortSignal): Promise<Result<TestRunView>>;
+  testExecute(operationId: string, signal?: AbortSignal): Promise<TestExecution>;
+  releasePreview(input: ReleasePreviewInput, signal?: AbortSignal): Promise<Result<ReleasePreviewView>>;
+  releaseRepos(input: { readonly workspaceId: string }, signal?: AbortSignal): Promise<Result<ReleaseRepoView>>;
+  releaseBranches(input: { readonly workspaceId: string; readonly repo: string }, signal?: AbortSignal): Promise<Result<ReleaseBranchView>>;
+  releaseApply(input: ReleaseApplyInput, signal?: AbortSignal): Promise<Result<ReleaseApplyView>>;
+  releaseExecute(operationId: string, signal?: AbortSignal): Promise<ReleaseExecution>;
 }
+
+// ---- TASK-029: test + release ----
+
+export type TestKind = "api" | "function";
+
+export interface TestRunInput {
+  readonly workspaceId: string;
+  readonly kind: TestKind;
+  readonly name: string;
+  readonly data?: string;
+  readonly method?: string;
+  /** Explicitly acknowledge testing server state despite local unpushed changes. */
+  readonly overrideUnpushed?: boolean;
+}
+
+export type AssetJoinState = "clean" | "local-modified" | "no-server-md5" | "source-missing" | "metadata-missing";
+
+export interface TestRunView {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-test";
+  readonly assetKind: TestKind;
+  readonly name: string;
+  readonly paramsDigest: string;
+  readonly decision: "pending";
+  readonly joinState: AssetJoinState;
+  readonly overrideUnpushed: boolean;
+}
+
+export interface TestEvidence {
+  readonly elapsedMs: number;
+  readonly httpStatus: number | null;
+  readonly requestDigest: string;
+  readonly responseDigest: string;
+  readonly traceId: string;
+  readonly testUrl: string;
+  readonly savedAt: string;
+}
+
+export interface TestReceipt {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-test";
+  readonly assetKind: TestKind;
+  readonly name: string;
+  readonly overrideUnpushed: boolean;
+  readonly joinState: AssetJoinState;
+  readonly status: "completed" | "failed";
+  readonly exitCode: number | null;
+  readonly stdoutDigest: string;
+  readonly stderrDigest: string;
+  readonly evidence: TestEvidence;
+  readonly artifactPath: string;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+}
+
+export type TestExecution =
+  | { readonly ok: true; readonly receipt: TestReceipt }
+  | { readonly ok: false; readonly error: { readonly code: PushErrorCode; readonly message: string; readonly operationId: string } };
+
+export interface ReleasePreviewInput {
+  readonly workspaceId: string;
+  readonly type: "api" | "function";
+  readonly name: string;
+  readonly repo: string;
+  readonly branch: string;
+  readonly message: string;
+}
+
+export interface ReleasePreviewView {
+  readonly workspaceId: string;
+  readonly type: "api" | "function";
+  readonly name: string;
+  readonly valid: boolean;
+  readonly warnings: readonly string[];
+  readonly durationMs: number;
+  readonly stdoutDigest: string;
+}
+
+export interface ReleaseRepoView {
+  readonly workspaceId: string;
+  readonly repos: readonly string[];
+  readonly count: number;
+  readonly truncated: boolean;
+  readonly stdoutDigest: string;
+}
+
+export interface ReleaseBranchView {
+  readonly workspaceId: string;
+  readonly repo: string;
+  readonly branches: readonly string[];
+  readonly count: number;
+  readonly truncated: boolean;
+  readonly stdoutDigest: string;
+}
+
+export interface ReleaseApplyInput {
+  readonly workspaceId: string;
+  readonly type: "api" | "function";
+  readonly name: string;
+  readonly repo: string;
+  readonly branch: string;
+  readonly message: string;
+}
+
+export interface ReleaseApplyView {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-release";
+  readonly type: "api" | "function";
+  readonly name: string;
+  readonly repo: string;
+  readonly branch: string;
+  readonly paramsDigest: string;
+  readonly decision: "pending";
+}
+
+export interface ReleaseReceipt {
+  readonly operationId: string;
+  readonly kind: "imo-icomposer-release";
+  readonly type: "api" | "function";
+  readonly name: string;
+  readonly repo: string;
+  readonly branch: string;
+  readonly status: "completed" | "failed";
+  readonly exitCode: number | null;
+  readonly stdoutDigest: string;
+  readonly stderrDigest: string;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+}
+
+export type ReleaseExecution =
+  | { readonly ok: true; readonly receipt: ReleaseReceipt }
+  | { readonly ok: false; readonly error: { readonly code: PushErrorCode; readonly message: string; readonly operationId: string } };

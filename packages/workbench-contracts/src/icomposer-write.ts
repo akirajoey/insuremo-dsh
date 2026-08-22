@@ -214,3 +214,117 @@ export const pushExecutionSchema = z.union([
   }).strict(),
 ]);
 export type PushExecution = z.infer<typeof pushExecutionSchema>;
+
+// ---- TASK-029: test + release ----
+
+const assetName = z.string().min(1).max(200);
+
+export const testRunRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    workspaceId: z.string().min(1),
+    kind: z.enum(["api", "function"]),
+    name: assetName,
+    data: z.string().max(65536).optional(),
+    method: z.string().min(1).max(128).optional(),
+    overrideUnpushed: z.boolean().optional(),
+  })
+  .strict();
+export type TestRunRequest = z.infer<typeof testRunRequestSchema>;
+
+export const testRunViewSchema = z
+  .object({
+    operationId: z.string().min(1),
+    kind: z.literal("imo-icomposer-test"),
+    assetKind: z.enum(["api", "function"]),
+    name: assetName,
+    paramsDigest: z.string().min(1),
+    decision: z.literal("pending"),
+    joinState: z.enum(["clean", "local-modified", "no-server-md5", "source-missing", "metadata-missing"]),
+    overrideUnpushed: z.boolean(),
+  })
+  .strict();
+export type TestRunView = z.infer<typeof testRunViewSchema>;
+
+export const releasePreviewRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    workspaceId: z.string().min(1),
+    type: z.enum(["api", "function"]),
+    name: assetName,
+    repo: z.string().min(1).max(512),
+    branch: z.string().min(1).max(128),
+    message: z.string().min(1).max(500),
+  })
+  .strict();
+export type ReleasePreviewRequest = z.infer<typeof releasePreviewRequestSchema>;
+
+export const releasePreviewViewSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    type: z.enum(["api", "function"]),
+    name: assetName,
+    valid: z.boolean(),
+    warnings: z.array(z.string().min(1).max(200)).max(20),
+    durationMs: z.number().int().min(0),
+    stdoutDigest: z.string().min(1),
+  })
+  .strict();
+export type ReleasePreviewView = z.infer<typeof releasePreviewViewSchema>;
+
+export const releaseReposRequestSchema = z
+  .object({ requestId: requestIdSchema, schemaVersion: z.literal("0"), workspaceId: z.string().min(1) })
+  .strict();
+export type ReleaseReposRequest = z.infer<typeof releaseReposRequestSchema>;
+
+export const releaseRepoViewSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    repos: z.array(z.string().min(1).max(512)).max(200),
+    count: z.number().int().min(0),
+    truncated: z.boolean(),
+    stdoutDigest: z.string().min(1),
+  })
+  .strict();
+export type ReleaseRepoView = z.infer<typeof releaseRepoViewSchema>;
+
+export const releaseBranchesRequestSchema = z
+  .object({
+    requestId: requestIdSchema,
+    schemaVersion: z.literal("0"),
+    workspaceId: z.string().min(1),
+    repo: z.string().min(1).max(512),
+  })
+  .strict();
+export type ReleaseBranchesRequest = z.infer<typeof releaseBranchesRequestSchema>;
+
+export const releaseBranchViewSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    repo: z.string().min(1).max(512),
+    branches: z.array(z.string().min(1).max(128)).max(200),
+    count: z.number().int().min(0),
+    truncated: z.boolean(),
+    stdoutDigest: z.string().min(1),
+  })
+  .strict();
+export type ReleaseBranchView = z.infer<typeof releaseBranchViewSchema>;
+
+export const releaseApplyRequestSchema = releasePreviewRequestSchema;
+export type ReleaseApplyRequest = ReleasePreviewRequest;
+
+export const releaseApplyViewSchema = z
+  .object({
+    operationId: z.string().min(1),
+    kind: z.literal("imo-icomposer-release"),
+    type: z.enum(["api", "function"]),
+    name: assetName,
+    repo: z.string().min(1).max(512),
+    branch: z.string().min(1).max(128),
+    paramsDigest: z.string().min(1),
+    decision: z.literal("pending"),
+  })
+  .strict();
+export type ReleaseApplyView = z.infer<typeof releaseApplyViewSchema>;
