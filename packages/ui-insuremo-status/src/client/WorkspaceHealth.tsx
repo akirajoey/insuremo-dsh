@@ -86,10 +86,10 @@ export class WorkspaceHealth extends Component<WorkspaceHealthProps, { rows: rea
             <span className={css.workspaceName} title={row.workspaceId}>{row.workspaceId}</span>
             {row.detected ? (
               <span
-                className={css.icon}
+                className={`${css.icon} ${row.autoBindState === "pending" ? css.iconPending : ""}`}
                 data-state={row.autoBindState}
-                title={row.autoBindState === "bound" ? t("health.iComposerBound") : t("health.iComposerPending")}
-                aria-label={t("health.iComposerBound")}
+                title={row.autoBindState === "bound" ? t("health.iComposerBound") : t("health.iComposerPendingHint")}
+                aria-label={row.autoBindState === "bound" ? t("health.iComposerBound") : t("health.iComposerPending")}
               >i</span>
             ) : null}
             <span

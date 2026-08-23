@@ -208,3 +208,18 @@ describe("InsureMO Plugins card (TASK-039)", () => {
     expect(runtime.slots.entries("settings.plugin.item")).toHaveLength(0);
   });
 });
+
+describe("theme variable regression (TASK-040)", () => {
+  it("InsuremoCard.module.css uses real design-platform variables with no literal fallbacks", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const css = readFileSync(resolve(process.cwd(), "src/client/InsuremoCard.module.css"), "utf8");
+    expect(css).toContain("var(--dsw-alias-bg-layer-3)");
+    expect(css).toContain("var(--dsw-alias-border-l2)");
+    expect(css).toContain("var(--dsw-alias-label-primary)");
+    expect(css).toContain("var(--dsw-alias-label-tertiary)");
+    expect(css).toContain("var(--dsw-alias-state-error-primary)");
+    expect(css).not.toContain("surface-elevated");
+    expect(css).not.toMatch(/var\(--dsw-[^)]+,\s*#/);
+  });
+});

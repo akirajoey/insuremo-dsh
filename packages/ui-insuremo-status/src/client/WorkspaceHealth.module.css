@@ -7,7 +7,7 @@
   box-sizing: border-box;
   font-size: 11px;
   line-height: 14px;
-  color: var(--dsh-alias-label-secondary, #888);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .row {
@@ -35,16 +35,16 @@
   line-height: 16px;
   border-radius: 4px;
   flex: none;
-  color: var(--dsh-alias-label-tertiary, #999);
+  color: var(--dsw-alias-label-tertiary);
   border: 1px solid transparent;
 }
 
 .icon[data-state="on"] {
-  color: var(--dsh-alias-state-success-primary, #2e9e5b);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .icon[data-state="bound"] {
-  color: var(--dsh-alias-state-success-primary, #2e9e5b);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .icon[data-state="pending"] {
@@ -54,4 +54,12 @@
 .icon[data-state="off"],
 .icon[data-state="none"] {
   opacity: 0.35;
+}
+
+/* Pending iComposer: hollow glyph + dashed ring so a half-lit "i" stays
+   legible against any theme background while reading as "awaiting". */
+.iconPending {
+  color: var(--dsw-alias-label-secondary);
+  opacity: 1;
+  border: 1px dashed var(--dsw-alias-label-tertiary);
 }

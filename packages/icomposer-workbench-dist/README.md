@@ -74,3 +74,8 @@ overview 200 断言持续守护。开发调试请使用分发包安装路径。
   verify → code-intelligence → intercom → insuremo-service)。
 - `lib/client.js` —— 客户端聚合闭包工厂(设置节 + 状态徽标 + 任务节点)。
 - `cordis.patch.yml` —— 单行插件层声明。
+
+## 主题与缓存（TASK-040）
+
+- 卡片/徽标样式全部使用 Harness 设计系统变量（`--dsw-alias-bg-layer-3/border-l2/label-*/state-*`），深浅主题自适应；不使用任何字面量 fallback。
+- 浏览器 bundle 为固定文件名 `lib/client.js`，但插件清单以 `?rev=<内容哈希>` 引用（boot manifest 每次构建内容变化即换 rev 参数），浏览器缓存自动失效。若升级包后 UI 未变，确认 `dsh plugin add` 重新安装且重启 Host 进程即可，无需手动清缓存。

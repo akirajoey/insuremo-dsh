@@ -1,12 +1,18 @@
+/* InsureMO Plugins card — design-platform variables only (TASK-040):
+   card surface bg-layer-3, borders border-l2, labels primary/secondary/
+   tertiary, error state-error-primary. No fallback literals: the theme
+   always defines these aliases, and a literal fallback would resurface the
+   light-mode-only white card in dark themes. */
+
 .card {
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 14px 16px;
-  border: 1px solid var(--dsw-alias-border-l2, #d0d0d0);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 10px;
-  background: var(--dsw-alias-surface-elevated, #fff);
-  color: var(--dsw-alias-label-primary, #222);
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
   font-size: 13px;
 }
 
@@ -14,6 +20,7 @@
   margin: 0;
   font-size: 15px;
   font-weight: 600;
+  color: var(--dsw-alias-label-primary);
 }
 
 .region {
@@ -26,7 +33,7 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--dsw-alias-label-secondary, #555);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .list {
@@ -46,26 +53,30 @@
 }
 
 .meta {
-  color: var(--dsw-alias-label-tertiary, #888);
+  color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
 }
 
 .hint {
-  color: var(--dsw-alias-label-tertiary, #888);
+  color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   margin: 0;
 }
 
 .error {
-  color: #c0392b;
+  color: var(--dsw-alias-state-error-primary);
   font-size: 12px;
 }
 
 .small {
   border: 0;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary, #999);
+  color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
   font-size: 13px;
   padding: 0 2px;
+}
+
+.small:hover {
+  color: var(--dsw-alias-state-error-primary);
 }

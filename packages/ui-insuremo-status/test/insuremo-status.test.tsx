@@ -195,3 +195,26 @@ describe("ProfilePicker (TASK-036)", () => {
     expect(view.view.getByRole("combobox")).toBeTruthy();
   });
 });
+
+describe("theme variable regression (TASK-040)", () => {
+  it("status CSS files use real design-platform variables — no --dsh typos, no literal fallbacks, no raw hex error colors", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    for (const file of ["StatusBadge.module.css", "WorkspaceHealth.module.css", "ProfilePicker.module.css"]) {
+      const css = readFileSync(resolve(process.cwd(), `src/client/${file}`), "utf8");
+      expect(css).not.toContain("--dsh-alias");
+      expect(css).not.toMatch(/var\(--dsw-[^)]+,\s*#/);
+    }
+    const health = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.module.css"), "utf8");
+    expect(health).toContain("var(--dsw-alias-state-success-primary)");
+    expect(health).toContain("var(--dsw-alias-label-secondary)");
+    expect(health).toContain("iconPending");
+    const picker = readFileSync(resolve(process.cwd(), "src/client/ProfilePicker.module.css"), "utf8");
+    expect(picker).toContain("var(--dsw-alias-state-error-primary)");
+  });
+
+  it("pending iComposer hint locale exists in both languages", async () => {
+    expect(zh["health.iComposerPendingHint"]).toContain("绑定");
+    expect(en["health.iComposerPendingHint"]).toContain("bind workspace");
+  });
+});

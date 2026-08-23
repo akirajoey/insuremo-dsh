@@ -7,10 +7,10 @@
   min-height: 32px;
   padding: 6px 9px;
   overflow: hidden;
-  border: 1px solid var(--dsw-alias-border-l2, #ccc);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
-  background: var(--dsw-alias-button-elevated-fill, #fafafa);
-  color: var(--dsw-alias-label-secondary, #666);
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 18px;
   cursor: pointer;
@@ -21,7 +21,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--dsw-alias-state-warn-primary, #d59b00);
+  background: var(--dsw-alias-state-warn-primary);
 }
 
 .label {
@@ -44,6 +44,6 @@
 }
 
 .error {
-  color: #c0392b;
+  color: var(--dsw-alias-state-error-primary);
   font-size: 11px;
 }
