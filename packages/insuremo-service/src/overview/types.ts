@@ -22,6 +22,8 @@ export interface OverviewAuthProfile {
   readonly name: string;
   readonly env?: string;
   readonly tenantCode?: string;
+  /** Login account (fast channel tooltip). */
+  readonly account?: string;
   readonly isDefault: boolean;
   readonly valid?: boolean;
 }

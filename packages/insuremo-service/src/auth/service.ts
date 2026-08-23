@@ -30,11 +30,13 @@ import {
   type ImoAuthLease,
   type ImoAuthPrepareRequest,
   type ImoAuthProfileList,
+  type ImoAuthProfilesFast,
   type ImoAuthProfileView,
   type ImoAuthResult,
   type ImoAuthSecret,
   type ImoAuthValidation,
 } from "./types.ts";
+import { LIST_CACHE_TTL_MS, readProfileStore, authCancelled } from "./profile-store.ts";
 
 interface PendingAuthPrepare {
   readonly profile: string | null;
@@ -133,6 +135,8 @@ export class ImoAuthService extends Service implements ImoAuth {
 
   private readonly config: ImoConfig;
   #cache = new Map<string, AuthCacheEntry>();
+  #listCache: { readonly at: number; readonly value: ImoAuthResult<ImoAuthProfileList> } | undefined;
+  #listInflight: Promise<ImoAuthResult<ImoAuthProfileList>> | undefined;
   #inflight = new Map<string, PendingAuthPrepare>();
   #pendingMeta = new Map<string, { profile: string | null; env: string | null }>();
   #generations = new Map<string, number>();
@@ -145,6 +149,8 @@ export class ImoAuthService extends Service implements ImoAuth {
     // Cordis exposes service methods through a shadow proxy; bind methods that
     // access ECMAScript private slots back to the owning service instance.
     this.listProfiles = this.listProfiles.bind(this);
+    this.listProfilesCached = this.listProfilesCached.bind(this);
+    this.profilesFast = this.profilesFast.bind(this);
     this.defaultProfile = this.defaultProfile.bind(this);
     this.validate = this.validate.bind(this);
     this.prepare = this.prepare.bind(this);
@@ -189,6 +195,54 @@ export class ImoAuthService extends Service implements ImoAuth {
       return authParseError(this.config.command, "default profile", run.value.stdoutDigest, run.value.stderrDigest);
     }
     return { ok: true, value: { profileName, stdoutDigest: run.value.stdoutDigest } };
+  }
+
+  /**
+   * Cached profile list (TASK-041): 60s TTL in-memory; a CLI failure serves
+   * the last good result instead of an empty list so the UI never renders a
+   * misleading "None". `profilesFast` prefers this as its fallback.
+   */
+  async listProfilesCached(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>> {
+    const now = Date.now();
+    if (this.#listCache !== undefined && now - this.#listCache.at <= LIST_CACHE_TTL_MS) {
+      return this.#listCache.value;
+    }
+    if (this.#listInflight !== undefined) return this.#listInflight;
+    const inflight = this.listProfiles(signal).then((result) => {
+      this.#listInflight = undefined;
+      if (result.ok) this.#listCache = { at: Date.now(), value: result };
+      return result;
+    }, (error) => {
+      this.#listInflight = undefined;
+      throw error;
+    });
+    this.#listInflight = inflight;
+    return inflight;
+  }
+
+  /**
+   * Millisecond profile snapshot straight from the imo CLI's plaintext store
+   * (TASK-041). Only descriptive fields are read — access tokens are never
+   * loaded. Falls back to the cached CLI list (stale=true) when the file is
+   * absent, unreadable, or malformed; a read failure with no cache at all
+   * degrades to the cached CLI path.
+   */
+  async profilesFast(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfilesFast>> {
+    const read = await readProfileStore();
+    if (read !== undefined) {
+      return { ok: true, value: { profiles: read.profiles, defaultProfile: read.defaultProfile, stale: false } };
+    }
+    if (signal?.aborted) return authCancelled(this.config.command);
+    const cached = await this.listProfilesCached(signal);
+    if (cached.ok) {
+      const def = await this.defaultProfile(signal);
+      const profiles = cached.value.profiles.map((profile) => {
+        const isDefault = def.ok ? def.value.profileName === profile.profileName : profile.isDefault === true;
+        return isDefault === (profile.isDefault === true) ? profile : { ...profile, isDefault };
+      });
+      return { ok: true, value: { profiles, defaultProfile: def.ok ? def.value.profileName : null, stale: true } };
+    }
+    return cached;
   }
 
   async validate(profile?: string, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthValidation>> {

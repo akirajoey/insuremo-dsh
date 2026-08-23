@@ -109,6 +109,7 @@ async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Pr
       name: profile.profileName,
       ...(profile.env === undefined ? {} : { env: profile.env }),
       ...(profile.tenantCode === undefined ? {} : { tenantCode: profile.tenantCode }),
+      ...(profile.accountName === undefined ? {} : { account: profile.accountName }),
       isDefault: profile.isDefault === true,
       ...(profile.valid === undefined ? {} : { valid: profile.valid }),
     }));

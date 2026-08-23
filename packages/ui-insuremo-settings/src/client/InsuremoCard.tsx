@@ -15,47 +15,50 @@ type LoadState =
   | { readonly status: "error" };
 
 /**
- * The InsureMO card inside the Plugins settings tab (TASK-039): four
- * regions — IMO CLI (one-click upgrade), Auth (default-profile switch),
- * Skills (toggles + update-all + install/remove), Code Intelligence
- * (embedding endpoint display). All actions run directly through the
- * write bridge (no approval chain); errors render inline.
+ * The InsureMO card inside the Plugins settings tab (TASK-041): collapsed by
+ * default to a one-line summary (CLI version · default profile · skills
+ * count); expanding reveals the IMO CLI / Skills / Code Intelligence regions.
+ * The Auth region was removed — the sidebar ProfilePicker owns profile
+ * switching. Data loads through the fast channel (`?fast=1`); the Refresh
+ * button builds the full CLI-backed view.
  */
-export class InsuremoCard extends Component<InsuremoCardProps, LoadState> {
-  override state: LoadState = { status: "loading" };
+export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { expanded: boolean }> {
+  override state: LoadState & { expanded: boolean } = { status: "loading", expanded: false };
   #controller: AbortController | undefined;
 
   override componentDidMount(): void {
-    void this.load();
+    void this.load("fast");
   }
 
   override componentWillUnmount(): void {
     this.#controller?.abort();
   }
 
-  private async load(): Promise<void> {
+  /** Silent refresh for post-action reloads: keeps regions mounted so child
+   * state (upgrade success lines, per-skill errors) is not destroyed. */
+  private async silentReload(): Promise<void> {
+    try {
+      const response = await fetch(`${OVERVIEW_URL}?fast=0`, { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const view = parseOverview(await response.json());
+      if (view !== null) this.setState(prev => ({ ...prev, status: "ready", view }));
+    } catch { /* keep previous */ }
+  }
+
+  private async load(channel: "fast" | "full"): Promise<void> {
     this.#controller?.abort();
     const controller = new AbortController();
     this.#controller = controller;
-    this.setState({ status: "loading" });
+    if (channel === "full") this.setState({ status: "loading" });
     try {
-      const response = await fetch(OVERVIEW_URL, { signal: controller.signal, headers: { Accept: "application/json" } });
+      const response = await fetch(`${OVERVIEW_URL}?fast=${channel === "fast" ? "1" : "0"}`, { signal: controller.signal, headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error(`overview fetch failed: ${response.status}`);
       const view = parseOverview(await response.json());
       if (view === null) throw new Error("overview payload was not recognized");
-      if (!controller.signal.aborted) this.setState({ status: "ready", view });
+      if (!controller.signal.aborted) this.setState(prev => ({ ...prev, status: "ready", view }));
     } catch {
-      if (!controller.signal.aborted) this.setState({ status: "error" });
+      if (!controller.signal.aborted && this.state.status !== "ready") this.setState({ status: "error" });
     }
-  }
-
-  private async reload(): Promise<void> {
-    try {
-      const response = await fetch(OVERVIEW_URL, { headers: { Accept: "application/json" } });
-      if (!response.ok) return;
-      const view = parseOverview(await response.json());
-      if (view !== null) this.setState({ status: "ready", view });
-    } catch { /* keep previous */ }
   }
 
   private t(key: InsuremoLocaleKey): string {
@@ -67,19 +70,36 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState> {
     const t = this.t.bind(this);
     return (
       <section className={css.card} aria-labelledby="insuremo-card-title">
-        <h3 id="insuremo-card-title">{t("title")}</h3>
-        {state.status === "loading" ? <p>{t("loading")}</p> : null}
-        {state.status === "error" ? <p>{t("error")}</p> : null}
+        <div className={css.headerRow}>
+          <h3 id="insuremo-card-title">{t("title")}</h3>
+          <button type="button" className={css.small} aria-expanded={state.expanded} onClick={() => this.setState(prev => ({ ...prev, expanded: !prev.expanded }))}>
+            {state.expanded ? t("collapse") : t("expand")}
+          </button>
+        </div>
+        {state.status === "loading" ? (
+          <p className={css.hint} data-skeleton="1" aria-busy="true">{t("loading")}</p>
+        ) : null}
+        {state.status === "error" ? <p className={css.error}>{t("error")}</p> : null}
         {state.status === "ready" ? (
           <>
-            <ImoRegion t={t} imo={state.view.imo} onChanged={() => void this.reload()} />
-            <AuthRegion t={t} auth={state.view.auth} onChanged={() => void this.reload()} />
-            <SkillsRegion t={t} skills={state.view.skills} onChanged={() => void this.reload()} />
-            {state.view.ici !== undefined ? <IciRegion t={t} ici={state.view.ici} /> : null}
+            <p className={css.summary} data-summary="1">
+              <code>{state.view.imo.available ? (state.view.imo.current ?? "—") : t("imoUnavailable")}</code>
+              {" · "}
+              {state.view.auth.defaultProfile ?? "—"}
+              {" · "}
+              {`${t("skillsTitle")} ${state.view.skills.enabled}/${state.view.skills.installed}`}
+            </p>
+            {state.expanded ? (
+              <>
+                <ImoRegion t={t} imo={state.view.imo} onChanged={() => void this.silentReload()} />
+                <SkillsRegion t={t} skills={state.view.skills} onChanged={() => void this.silentReload()} />
+                {state.view.ici !== undefined ? <IciRegion t={t} ici={state.view.ici} /> : null}
+              </>
+            ) : null}
           </>
         ) : null}
         <p>
-          <button type="button" onClick={() => void this.load()} aria-label={t("refresh")}>{t("refresh")}</button>
+          <button type="button" onClick={() => void this.load("full")} aria-label={t("refresh")}>{t("refresh")}</button>
         </p>
       </section>
     );
@@ -138,65 +158,17 @@ class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"
   }
 }
 
-class AuthRegion extends Component<{ t: Translate; auth: ImoOverviewView["auth"]; onChanged: () => void }, { error?: string; busy: boolean }> {
-  override state: { error?: string; busy: boolean } = { busy: false };
-
-  private async setDefault(name: string): Promise<void> {
-    this.setState({ busy: true, error: undefined });
-    const outcome = await postAction<{ status: string }>("default-profile", { profile: name });
-    this.setState({ busy: false });
-    if (outcome.ok) this.props.onChanged();
-    else {
-      const network = outcome.error.code === "network";
-      this.setState({ error: network ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}` });
-    }
-  }
-
-  override render(): ReactNode {
-    const { t, auth } = this.props;
-    return (
-      <div className={css.region}>
-        <h4>{t("authTitle")}</h4>
-        {auth.profiles.length === 0 ? (
-          <p>{t("authNone")} · <code>imo auth login</code></p>
-        ) : (
-          <ul className={css.list}>
-            {auth.profiles.map(profile => (
-              <li key={profile.name}>
-                <label>
-                  <input
-                    type="radio"
-                    name="insuremo-default-profile"
-                    checked={profile.isDefault}
-                    disabled={this.state.busy}
-                    onChange={() => void this.setDefault(profile.name)}
-                    aria-label={`${t("authSetDefault")}: ${profile.name}`}
-                  />
-                  <code>{profile.name}</code>
-                </label>
-                <span className={css.meta}>{profile.env ?? "—"} / {profile.tenantCode ?? "—"}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {this.state.error !== undefined ? <p role="alert" className={css.error}>{this.state.error}</p> : null}
-        <p className={css.hint}>{t("authCliHint")}</p>
-      </div>
-    );
-  }
-}
-
 class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void }, { rows: Readonly<Record<string, { error?: string; retry?: boolean }>>; updatingAll: boolean }> {
   override state: { rows: Readonly<Record<string, { error?: string; retry?: boolean }>>; updatingAll: boolean } = { rows: {}, updatingAll: false };
 
+  /**
+   * Last-write-wins (TASK-041): no expectedRevision is sent — the server
+   * commits against its own latest revision and returns the new one, which
+   * removes the revision-conflict storms when the card holds a stale view.
+   */
   private async toggle(name: string, next: boolean): Promise<void> {
-    const expectedRevision = this.props.skills.activationRevision;
     this.setState(prev => ({ rows: { ...prev.rows, [name]: {} } }));
-    const outcome = await postAction<{ revision: number }>("skill-activation", {
-      name,
-      enabled: next,
-      ...(expectedRevision === undefined ? {} : { expectedRevision }),
-    });
+    const outcome = await postAction<{ revision: number }>("skill-activation", { name, enabled: next });
     if (outcome.ok) this.props.onChanged();
     else {
       const conflict = outcome.error.code === "revision-conflict";
@@ -227,6 +199,7 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
   override render(): ReactNode {
     const { t, skills } = this.props;
     const entries = skills.entries ?? [];
+    const cold = skills.code === "fast-uncached";
     return (
       <div className={css.region}>
         <h4>{t("skillsTitle")}</h4>
@@ -235,7 +208,9 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
             {this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")}
           </button>
         </p>
-        {entries.length === 0 ? (
+        {cold ? (
+          <p className={css.hint} data-skeleton="1" aria-busy="true">{t("skillsLoadingSlow")}</p>
+        ) : entries.length === 0 ? (
           <p>{t("skillsNone")} · <code>imo skills install</code></p>
         ) : (
           <ul className={css.list}>

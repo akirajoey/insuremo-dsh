@@ -100,8 +100,8 @@ describe("ProfilePicker (TASK-036)", () => {
   const overviewPayload = {
     auth: {
       profiles: [
-        { name: "portal:microsite", env: "portal", isDefault: true, valid: true },
-        { name: "portal:mo-re", env: "portal", valid: true },
+        { name: "portal:microsite", env: "aws_sg_insuremo_portal", tenantCode: "microsite", account: "user@example.com", isDefault: true, valid: true },
+        { name: "portal:mo-re", env: "aws_sg_insuremo_portal", tenantCode: "mo-re", account: "user@example.com", valid: true },
       ],
       defaultProfileName: "portal:microsite",
     },
@@ -130,18 +130,26 @@ describe("ProfilePicker (TASK-036)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("expands on click, lists profiles with default marked, busy during load", async () => {
+  it("expands into text rows (no select chrome), tooltip carries env/account/tenant, fast channel URL", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(overviewPayload));
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
-    (await view.view.findByRole("button", { name: zh.label })).click();
-    const select = await view.view.findByRole("combobox", { name: zh["picker.label"] });
-    expect(select).toBeTruthy();
-    await vi.waitFor(() => {
-      expect((select as HTMLSelectElement).options.length).toBe(2);
-      expect((select as HTMLSelectElement).options[0].textContent).toContain("portal:microsite");
-      expect((select as HTMLSelectElement).options[0].textContent).toContain("✓");
+    (await view.view.findByRole("button", { name: new RegExp(zh.label) })).click();
+    // text-row listbox, not a native select
+    const listbox = await view.view.findByRole("listbox", { name: zh["picker.label"] });
+    expect(listbox).toBeTruthy();
+    const rows = await vi.waitFor(() => {
+      const found = view.view.getAllByRole("option");
+      expect(found.length).toBe(2);
+      return found as HTMLElement[];
     });
+    expect(rows[0].textContent).toContain("portal:microsite");
+    expect(rows[0].textContent).toContain("✓");
+    expect(rows[0].getAttribute("aria-selected")).toBe("true");
+    // tooltip = env · tenant · account
+    expect(rows[1].title).toBe("aws_sg_insuremo_portal · mo-re · user@example.com");
+    // fast channel
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/overview?fast=1"), expect.anything());
   });
 
   it("selecting a profile POSTs the action envelope and collapses with the new default", async () => {
@@ -162,11 +170,14 @@ describe("ProfilePicker (TASK-036)", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
-    (await view.view.findByRole("button", { name: zh.label })).click();
-    const select = (await view.view.findByRole("combobox", { name: zh["picker.label"] })) as HTMLSelectElement;
-    await vi.waitFor(() => { expect(select.options.length).toBe(2); });
-    select.value = "portal:mo-re";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    (await view.view.findByRole("button", { name: new RegExp(zh.label) })).click();
+    const row = await vi.waitFor(() => {
+      const options = view.view.getAllByRole("option");
+      const target = options.find(el => el.textContent?.includes("portal:mo-re"));
+      expect(target).toBeTruthy();
+      return target as HTMLElement;
+    });
+    row.click();
     await vi.waitFor(() => {
       const actionCall = fetchMock.mock.calls.find(call => String(call[0]).includes("/actions/default-profile"));
       expect(actionCall).toBeTruthy();
@@ -186,13 +197,16 @@ describe("ProfilePicker (TASK-036)", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
-    (await view.view.findByRole("button", { name: zh.label })).click();
-    const select = (await view.view.findByRole("combobox", { name: zh["picker.label"] })) as HTMLSelectElement;
-    await vi.waitFor(() => { expect(select.options.length).toBe(2); });
-    select.value = "portal:mo-re";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    (await view.view.findByRole("button", { name: new RegExp(zh.label) })).click();
+    const row = await vi.waitFor(() => {
+      const options = view.view.getAllByRole("option");
+      const target = options.find(el => el.textContent?.includes("portal:mo-re"));
+      expect(target).toBeTruthy();
+      return target as HTMLElement;
+    });
+    row.click();
     expect(await view.view.findByRole("alert")).toBeTruthy();
-    expect(view.view.getByRole("combobox")).toBeTruthy();
+    expect(view.view.getByRole("listbox")).toBeTruthy();
   });
 });
 

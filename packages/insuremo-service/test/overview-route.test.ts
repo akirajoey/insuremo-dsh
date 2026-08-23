@@ -21,10 +21,12 @@ async function fixture() {
   const fiber = ctx.plugin(WebServer, { host: "127.0.0.1", port: 0 });
   await fiber.await();
   const snapshot = async () => FIXTURE_VIEW;
-  ctx.provide("imoOverview", { snapshot } as never);
+  const snapshotFast = async () => ({ ...FIXTURE_VIEW, generatedAt: "2026-01-02T00:00:00.000Z" });
+  const calls: string[] = [];
+  ctx.provide("imoOverview", { snapshot: async (...args: unknown[]) => { calls.push(`full:${args.length}`); return snapshot(...args as []); }, snapshotFast: async (...args: unknown[]) => { calls.push(`fast:${args.length}`); return snapshotFast(...args as []); } } as never);
   const disposable = mountOverviewRoute(ctx);
   const port = (ctx.get("webServer") as unknown as { port: number }).port;
-  return { ctx, port, disposable, snapshot };
+  return { ctx, port, disposable, snapshot, calls };
 }
 
 test("overview GET returns bounded JSON with safe headers", async () => {
@@ -56,6 +58,22 @@ test("overview rejects non-GET with Allow and 404s after the route is disposed",
     fx.disposable();
     const after = await fetch(`http://127.0.0.1:${fx.port}${OVERVIEW_PATH}`);
     assert.equal(after.status, 404);
+  } finally {
+    await fx.ctx.fiber.dispose();
+  }
+});
+
+test("overview route splits fast/full channels (TASK-041): ?fast=1 → snapshotFast, default/other → snapshot", async () => {
+  const fx = await fixture();
+  try {
+    const fast = await fetch(`http://127.0.0.1:${fx.port}${OVERVIEW_PATH}?fast=1`);
+    assert.equal(fast.status, 200);
+    const fastBody = await fast.json() as { generatedAt?: string };
+    assert.equal(fastBody.generatedAt, "2026-01-02T00:00:00.000Z");
+    const full = await fetch(`http://127.0.0.1:${fx.port}${OVERVIEW_PATH}`);
+    const fullBody = await full.json() as { generatedAt?: string };
+    assert.equal(fullBody.generatedAt, "2026-01-01T00:00:00.000Z");
+    assert.deepEqual(fx.calls, ["fast:1", "full:1"]);
   } finally {
     await fx.ctx.fiber.dispose();
   }

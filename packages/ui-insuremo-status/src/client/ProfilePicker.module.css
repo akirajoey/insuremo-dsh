@@ -1,19 +1,28 @@
+/* ProfilePicker (TASK-041): plain text rows matching sidebar session rows —
+   no native select chrome, no card border. Design-platform variables only. */
+
 .trigger {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   box-sizing: border-box;
   width: 100%;
-  min-height: 32px;
-  padding: 6px 9px;
+  min-height: 28px;
+  padding: 4px 9px;
   overflow: hidden;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  background: var(--dsw-alias-button-elevated-fill);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 18px;
+  text-align: left;
   cursor: pointer;
+}
+
+.trigger:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 .dot {
@@ -34,16 +43,92 @@
 .picker {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 4px 9px;
+  gap: 2px;
+  padding: 2px 0;
 }
 
-.picker select {
+.pickerHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 9px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
   font-size: 12px;
-  padding: 4px 6px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.closeMark {
+  margin-left: auto;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 9px 3px 22px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 17px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.row[data-default="1"] {
+  color: var(--dsw-alias-label-primary);
+}
+
+.rowName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMark {
+  flex: none;
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.hint {
+  margin: 0;
+  padding: 2px 9px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
 }
 
 .error {
   color: var(--dsw-alias-state-error-primary);
   font-size: 11px;
+  padding: 2px 9px;
 }

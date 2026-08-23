@@ -10,6 +10,8 @@ export type WorkspaceHealthProps = PropsRuntime<"sidebar.footer.action">
 /** One workspace row of the icon data (mirrors the host route payload). */
 export interface WorkspaceHealthRow {
   readonly workspaceId: string;
+  /** Display title (registry title; falls back to the id). */
+  readonly displayName: string;
   readonly detected: boolean;
   readonly autoBindState: "bound" | "pending" | "none";
   readonly graphReady: boolean;
@@ -30,6 +32,7 @@ export function parseWorkspaceHealthRows(value: unknown): readonly WorkspaceHeal
     const state = row.autoBindState === "bound" || row.autoBindState === "pending" ? row.autoBindState : "none";
     rows.push({
       workspaceId: row.workspaceId,
+      displayName: typeof row.displayName === "string" && row.displayName.length > 0 ? row.displayName : row.workspaceId,
       detected: row.detected === true,
       autoBindState: state,
       graphReady: row.graphReady === true,
@@ -83,7 +86,7 @@ export class WorkspaceHealth extends Component<WorkspaceHealthProps, { rows: rea
       <div className={css.strip} role="status" aria-label={t("health.strip")}>
         {rows.map(row => (
           <div key={row.workspaceId} className={css.row} data-workspace={row.workspaceId}>
-            <span className={css.workspaceName} title={row.workspaceId}>{row.workspaceId}</span>
+            <span className={css.workspaceName} title={row.displayName === row.workspaceId ? row.workspaceId : `${row.displayName} (${row.workspaceId})`}>{row.displayName}</span>
             {row.detected ? (
               <span
                 className={`${css.icon} ${row.autoBindState === "pending" ? css.iconPending : ""}`}

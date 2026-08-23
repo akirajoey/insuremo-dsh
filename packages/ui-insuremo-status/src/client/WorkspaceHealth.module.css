@@ -58,7 +58,7 @@
 
 /* Pending iComposer: hollow glyph + dashed ring so a half-lit "i" stays
    legible against any theme background while reading as "awaiting". */
-.iconPending {
+.icon.iconPending {
   color: var(--dsw-alias-label-secondary);
   opacity: 1;
   border: 1px dashed var(--dsw-alias-label-tertiary);

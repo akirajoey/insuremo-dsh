@@ -12,6 +12,8 @@ export const WORKSPACES_STATUS_PATH = `${OVERVIEW_PATH}/workspaces/status` as co
 
 export interface WorkspaceStatusEntry {
   readonly workspaceId: string;
+  /** Workspace display title (registry title; falls back to the id). */
+  readonly displayName: string;
   /** iComposer project detected (strong signatures). */
   readonly detected: boolean;
   /** bound | pending (detected, unbound) | none. */
@@ -25,6 +27,7 @@ export interface WorkspaceStatusEntry {
 interface WorkspaceBindingListEntryLike {
   readonly workspaceId: string;
   readonly canonicalPath: string;
+  readonly displayName?: string;
   readonly detectedIcomposer?: boolean;
   readonly autoBindState?: "bound" | "pending" | "none";
 }
@@ -92,6 +95,7 @@ export async function buildWorkspaceStatuses(ctx: Context): Promise<readonly Wor
     } catch { /* degrade to false */ }
     entries.push(Object.freeze({
       workspaceId: row.workspaceId,
+      displayName: row.displayName && row.displayName.length > 0 ? row.displayName : row.workspaceId,
       detected: row.detectedIcomposer === true,
       autoBindState: row.autoBindState ?? "none",
       graphReady,

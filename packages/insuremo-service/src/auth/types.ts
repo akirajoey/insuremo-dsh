@@ -141,9 +141,24 @@ export class ImoAuthLeaseRevokedError extends Error {
   }
 }
 
+/** Fast snapshot derived from the imo CLI's plaintext profile store
+ * (TASK-041): millisecond file read, no subprocess, no token material —
+ * only the allowlisted descriptive fields. */
+export interface ImoAuthProfilesFast {
+  readonly profiles: readonly ImoAuthProfileView[];
+  readonly defaultProfile: string | null;
+  readonly stale: boolean;
+}
+
 /** The sole authentication surface for later remote tools. */
 export interface ImoAuth {
   listProfiles(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>>;
+  /** 60s-TTL cached listProfiles; on CLI failure serves the last good list
+   * with stale=true instead of an empty error. */
+  listProfilesCached(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>>;
+  /** Direct read of the imo profile store (no subprocess). Degrades to the
+   * cached CLI list (stale=true) when the file is missing/unreadable. */
+  profilesFast(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfilesFast>>;
   defaultProfile(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthDefaultProfile>>;
   validate(profile?: string, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthValidation>>;
   prepare(request?: ImoAuthPrepareRequest, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthLease>>;

@@ -29,9 +29,16 @@ export function mountOverviewRoute(ctx: Context): () => void {
       const onClose = (): void => controller.abort();
       res.on("close", onClose);
       const overview = ctx.get<ImoOverview>("imoOverview");
+      // Fast/full channel split (TASK-041): `?fast=1` answers in milliseconds
+      // (profile-store read + cached projections, no subprocess); `?full=1`
+      // or no parameter builds the complete CLI-backed view.
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const fast = url.searchParams.get("fast") === "1";
       const respond = async (): Promise<void> => {
         try {
-          const view = overview === undefined ? undefined : await overview.snapshot(controller.signal);
+          const view = overview === undefined ? undefined
+            : fast ? await overview.snapshotFast(controller.signal)
+            : await overview.snapshot(controller.signal);
           if (res.destroyed || res.writableEnded) return;
           const body = view === undefined ? "{}" : JSON.stringify(view);
           const bounded = body.length > MAX_BODY_BYTES ? body.slice(0, MAX_BODY_BYTES) : body;

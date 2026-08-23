@@ -239,6 +239,11 @@ test("skill-activation direct: happy path + conflict mapping + controller seam",
     assert.equal(JSON.parse(conflict.body).error.code, "revision-conflict");
     const missingName = await call(h.server, "skill-activation", { body: JSON.stringify({ enabled: true }) });
     assert.equal(JSON.parse(missingName.body).error.code, "invalid-input");
+    // TASK-041 last-write-wins: no expectedRevision → commits without CAS and
+    // returns the fresh revision (route passes undefined through).
+    const noCas = await call(h.server, "skill-activation", { body: JSON.stringify({ name: "imo-audit-helper", enabled: false }) });
+    const noCasPayload = JSON.parse(noCas.body);
+    assert.deepEqual(noCasPayload, { ok: true, result: { name: "imo-audit-helper", enabled: false, revision: 7 } });
   } finally { await h.dispose(); }
 });
 

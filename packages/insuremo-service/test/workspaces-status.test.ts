@@ -75,7 +75,7 @@ test("statuses: four-quadrant aggregation (bound×graph×explain joins)", async 
   await writeFile(join(dsh, "ici", hashA, "explain-state.json"), JSON.stringify({ schemaVersion: 1, lastExplainAt: "now", apiName: "X" }), "utf8");
 
   const rows: readonly Row[] = [
-    { workspaceId: "ws-a", canonicalPath: "/ic-a", detectedIcomposer: true, autoBindState: "bound" },
+    { workspaceId: "ws-a", canonicalPath: "/ic-a", displayName: "ws-a-title", detectedIcomposer: true, autoBindState: "bound" },
     { workspaceId: "ws-b", canonicalPath: "/ic-b", detectedIcomposer: true, autoBindState: "pending" },
     { workspaceId: "ws-c", canonicalPath: "/plain-c", detectedIcomposer: false, autoBindState: "none" },
   ];
@@ -88,9 +88,9 @@ test("statuses: four-quadrant aggregation (bound×graph×explain joins)", async 
   try {
     const statuses = await buildWorkspaceStatuses(h.ctx as never);
     const by = new Map(statuses.map(entry => [entry.workspaceId, entry]));
-    assert.deepEqual(by.get("ws-a"), { workspaceId: "ws-a", detected: true, autoBindState: "bound", graphReady: true, explainReady: true });
-    assert.deepEqual(by.get("ws-b"), { workspaceId: "ws-b", detected: true, autoBindState: "pending", graphReady: false, explainReady: false });
-    assert.deepEqual(by.get("ws-c"), { workspaceId: "ws-c", detected: false, autoBindState: "none", graphReady: false, explainReady: false });
+    assert.deepEqual(by.get("ws-a"), { workspaceId: "ws-a", displayName: "ws-a-title", detected: true, autoBindState: "bound", graphReady: true, explainReady: true });
+    assert.deepEqual(by.get("ws-b"), { workspaceId: "ws-b", displayName: "ws-b", detected: true, autoBindState: "pending", graphReady: false, explainReady: false });
+    assert.deepEqual(by.get("ws-c"), { workspaceId: "ws-c", displayName: "ws-c", detected: false, autoBindState: "none", graphReady: false, explainReady: false });
   } finally { await h.dispose(); await rm(dsh, { recursive: true, force: true }); }
 });
 
