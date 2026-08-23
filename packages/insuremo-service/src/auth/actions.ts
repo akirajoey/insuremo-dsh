@@ -44,19 +44,48 @@ import type {
 } from "./action-types.ts";
 
 /** Approval-gated portal login, remote-profile, and default-profile actions. */
+/**
+ * Instance state kept OUTSIDE the class body (TASK-036-2b): cordis Service
+ * hands callers a proxy/derived `self`, and cross-object method calls bind
+ * `this` to that proxy — native `#private` fields then throw
+ * "Cannot read private member". A module-level WeakMap keyed by the original
+ * instance survives both instance and proxy receivers.
+ */
+interface AuthActionsState {
+  pending: Map<string, PendingAction>;
+  environmentIdsBySource: Map<string, Set<string>>;
+  environmentGenerations: Map<string, number>;
+  running: { operationId: string; kind: ImoAuthActionKind } | null;
+  disposed: boolean;
+}
+/**
+ * Single active state slot: this service is a per-host singleton (one fiber,
+ * one instance), so one module-level state object is identity-stable across
+ * both the constructed instance and any cordis proxy receiver. A second
+ * construction (remount) replaces the slot wholesale, which is exactly the
+ * reset a fresh mount wants.
+ */
+let authActionsStateSlot: AuthActionsState | undefined;
+function authActionsStateFor(_receiver: unknown): AuthActionsState {
+  if (authActionsStateSlot === undefined) throw new Error("auth actions state uninitialized");
+  return authActionsStateSlot;
+}
+
 export class ImoAuthActionsService extends Service implements ImoAuthActions {
   static inject = ["imoAuth", "operationLog", "subprocess"];
   static Config = Config;
 
   private readonly config: ImoConfig;
-  #pending = new Map<string, PendingAction>();
-  #environmentIdsBySource = new Map<string, Set<string>>();
-  #environmentGenerations = new Map<string, number>();
-  #running: { operationId: string; kind: ImoAuthActionKind } | null = null;
-  #disposed = false;
 
   constructor(ctx: Context, config: Partial<ImoConfig> = {}) {
     super(ctx, "imoAuthActions");
+    authActionsStateSlot = {
+      pending: new Map<string, PendingAction>(),
+      environmentIdsBySource: new Map<string, Set<string>>(),
+      environmentGenerations: new Map<string, number>(),
+      running: null,
+      disposed: false,
+    };
     this.config = resolveConfig(config);
     this.listEnvironmentIds = this.listEnvironmentIds.bind(this);
     this.resolveEnvironmentHint = this.resolveEnvironmentHint.bind(this);
@@ -69,11 +98,11 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
     this.executeAction = this.executeAction.bind(this);
     this.actionStatus = this.actionStatus.bind(this);
     this.ctx.effect(() => () => {
-      this.#disposed = true;
-      this.#pending.clear();
-      this.#environmentIdsBySource.clear();
-      this.#environmentGenerations.clear();
-      this.#running = null;
+      authActionsStateFor(this).disposed = true;
+      authActionsStateFor(this).pending.clear();
+      authActionsStateFor(this).environmentIdsBySource.clear();
+      authActionsStateFor(this).environmentGenerations.clear();
+      authActionsStateFor(this).running = null;
     }, "imoAuthActions.state");
   }
 
@@ -90,8 +119,8 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
       signal,
     );
     if (!result.ok) return { ok: false, error: mapEnvironmentError(result.error) };
-    if (this.#environmentGenerations.get(key) === generation) {
-      this.#environmentIdsBySource.set(key, new Set(result.value.environmentIds));
+    if (authActionsStateFor(this).environmentGenerations.get(key) === generation) {
+      authActionsStateFor(this).environmentIdsBySource.set(key, new Set(result.value.environmentIds));
     }
     return result;
   }
@@ -113,15 +142,15 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
       signal,
     );
     if (!result.ok) return { ok: false, error: mapEnvironmentError(result.error) };
-    if (this.#environmentGenerations.get(key) === generation) {
-      this.#environmentIdsBySource.set(key, new Set(result.value.environmentIds));
+    if (authActionsStateFor(this).environmentGenerations.get(key) === generation) {
+      authActionsStateFor(this).environmentIdsBySource.set(key, new Set(result.value.environmentIds));
     }
     return result;
   }
 
   async requestPortalLogin(input: PortalLoginRequest = {}, signal?: AbortSignal): Promise<ImoAuthActionResult<ImoAuthActionRequest>> {
     if (signal?.aborted) return failure("cancelled", "auth action request was cancelled");
-    if (this.#disposed) return failure("action-state-lost", "auth action service is disposed");
+    if (authActionsStateFor(this).disposed) return failure("action-state-lost", "auth action service is disposed");
     if (input === null || typeof input !== "object") return failure("invalid-input", "portal login parameters are invalid");
     const normalized = normalizePortalLogin(input);
     if (!normalized.ok) return normalized;
@@ -134,11 +163,11 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
 
   async requestRemote(input: RemoteProfileRequest, signal?: AbortSignal): Promise<ImoAuthActionResult<ImoAuthActionRequest>> {
     if (signal?.aborted) return failure("cancelled", "auth action request was cancelled");
-    if (this.#disposed) return failure("action-state-lost", "auth action service is disposed");
+    if (authActionsStateFor(this).disposed) return failure("action-state-lost", "auth action service is disposed");
     if (input === null || typeof input !== "object") return failure("invalid-input", "remote profile parameters are invalid");
     const environmentId = input.environmentId ?? input.env;
     const sourceProfile = input.sourceProfile ?? input.profile;
-    const resolved = this.#environmentIdsBySource.get(sourceKey(sourceProfile))?.has(environmentId ?? "") === true;
+    const resolved = authActionsStateFor(this).environmentIdsBySource.get(sourceKey(sourceProfile))?.has(environmentId ?? "") === true;
     const normalized = normalizeRemote(input, resolved);
     if (!normalized.ok) return normalized;
     return this.append(IMO_AUTH_REMOTE_KIND, normalized.value, signal);
@@ -150,7 +179,7 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
 
   async requestDefaultSwitch(input: DefaultProfileSwitchRequest, signal?: AbortSignal): Promise<ImoAuthActionResult<ImoAuthActionRequest>> {
     if (signal?.aborted) return failure("cancelled", "auth action request was cancelled");
-    if (this.#disposed) return failure("action-state-lost", "auth action service is disposed");
+    if (authActionsStateFor(this).disposed) return failure("action-state-lost", "auth action service is disposed");
     if (input === null || typeof input !== "object") return failure("invalid-input", "default profile parameters are invalid");
     const normalized = normalizeDefault(input);
     if (!normalized.ok) return normalized;
@@ -168,17 +197,17 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
    */
   async runDirectDefaultSwitch(input: DefaultProfileSwitchRequest, signal?: AbortSignal): Promise<ImoAuthActionExecution> {
     if (signal?.aborted) return { ok: false, error: failure("cancelled", "auth action was cancelled", "").error };
-    if (this.#disposed) return { ok: false, error: failure("action-state-lost", "auth action service is disposed", "").error };
+    if (authActionsStateFor(this).disposed) return { ok: false, error: failure("action-state-lost", "auth action service is disposed", "").error };
     if (input === null || typeof input !== "object") return { ok: false, error: failure("invalid-input", "default profile parameters are invalid", "").error };
     const normalized = normalizeDefault(input);
     if (!normalized.ok) return { ok: false, error: normalized.error };
-    if (this.#running !== null) return { ok: false, error: failure("busy", "another auth action is already running", "").error };
+    if (authActionsStateFor(this).running !== null) return { ok: false, error: failure("busy", "another auth action is already running", "").error };
     const operationId = `direct:${IMO_AUTH_DEFAULT_KIND}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-    this.#running = { operationId, kind: IMO_AUTH_DEFAULT_KIND };
+    authActionsStateFor(this).running = { operationId, kind: IMO_AUTH_DEFAULT_KIND };
     try {
-      return await this.executeDefaultProfile(operationId, normalized.value, signal);
+      return await this.executeDefaultProfile(operationId, normalized.value, signal, true);
     } finally {
-      this.#running = null;
+      authActionsStateFor(this).running = null;
     }
   }
 
@@ -187,14 +216,15 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
   }
 
   actionStatus(): ImoAuthActionStatus {
-    return this.#running === null
+    const current = authActionsStateFor(this).running;
+    return current === null
       ? { running: false }
-      : { running: true, current: { ...this.#running } };
+      : { running: true, current: { operationId: current.operationId, kind: current.kind } };
   }
 
   private beginEnvironmentQuery(key: string): number {
-    const generation = (this.#environmentGenerations.get(key) ?? 0) + 1;
-    this.#environmentGenerations.set(key, generation);
+    const generation = (authActionsStateFor(this).environmentGenerations.get(key) ?? 0) + 1;
+    authActionsStateFor(this).environmentGenerations.set(key, generation);
     return generation;
   }
 
@@ -211,7 +241,7 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
       paramsDigest,
       artifactRefs: [],
     });
-    this.#pending.set(record.id, { kind, input } as PendingAction);
+    authActionsStateFor(this).pending.set(record.id, { kind, input } as PendingAction);
     return { ok: true, value: { operationId: record.id, kind, paramsDigest } };
   }
 
@@ -232,20 +262,20 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
     if (record === undefined) return { ok: false, error: failure("missing-operation", "auth action operation does not exist", operationId).error };
     if (record.decision !== "approved") return { ok: false, error: failure("not-approved", "only approved auth actions may run", operationId).error };
     if (record.resultDigest !== undefined) return { ok: false, error: failure("already-executed", "auth action operation already has a result", operationId).error };
-    if (this.#disposed) return { ok: false, error: failure("action-state-lost", "auth action service is disposed", operationId).error };
-    const pending = this.#pending.get(operationId);
+    if (authActionsStateFor(this).disposed) return { ok: false, error: failure("action-state-lost", "auth action service is disposed", operationId).error };
+    const pending = authActionsStateFor(this).pending.get(operationId);
     if (pending === undefined) return { ok: false, error: failure("missing-pending-input", "auth action parameters are unavailable; re-request the action", operationId).error };
     if (record.kind !== pending.kind || (expected !== undefined && pending.kind !== expected) || record.paramsDigest !== canonicalActionParamsDigest(pending.kind, pending.input)) {
       return { ok: false, error: failure("operation-params-mismatch", "auth action operation parameters do not match", operationId).error };
     }
-    if (this.#running !== null) return { ok: false, error: failure("busy", "another auth action is already running", operationId).error };
-    this.#running = { operationId, kind: pending.kind };
+    if (authActionsStateFor(this).running !== null) return { ok: false, error: failure("busy", "another auth action is already running", operationId).error };
+    authActionsStateFor(this).running = { operationId, kind: pending.kind };
     try {
       if (pending.kind === IMO_AUTH_LOGIN_KIND) return await this.executeLogin(operationId, pending.input, signal);
       if (pending.kind === IMO_AUTH_REMOTE_KIND) return await this.executeRemoteProfile(operationId, pending.input, signal);
       return await this.executeDefaultProfile(operationId, pending.input, signal);
     } finally {
-      this.#running = null;
+      authActionsStateFor(this).running = null;
     }
   }
 
@@ -305,12 +335,15 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
     });
   }
 
-  private async executeDefaultProfile(operationId: string, input: NormalizedDefault, signal?: AbortSignal): Promise<ImoAuthActionExecution> {
+  private async executeDefaultProfile(operationId: string, input: NormalizedDefault, signal?: AbortSignal, direct = false): Promise<ImoAuthActionExecution> {
+    const finish = (receipt: ReceiptInput): Promise<ImoAuthActionExecution> => direct ? this.finishDirectReceipt(receipt) : this.finishReceipt(receipt);
     const startedAt = new Date().toISOString();
     const profiles = await this.ctx.imoAuth.listProfiles(signal);
-    if (!profiles.ok) return this.finishAuthError(operationId, IMO_AUTH_DEFAULT_KIND, profiles.error, startedAt, profiles.error.stdoutDigest ?? digest(""), profiles.error.stderrDigest ?? digest(""), input.profile);
+    if (!profiles.ok) return direct
+      ? this.finishDirectReceipt({ operationId, kind: IMO_AUTH_DEFAULT_KIND, status: "failed", exitCode: profiles.error.exitCode ?? null, stdoutDigest: profiles.error.stdoutDigest ?? digest(""), stderrDigest: profiles.error.stderrDigest ?? digest(""), startedAt, profileName: input.profile, httpStatus: profiles.error.httpStatus })
+      : this.finishAuthError(operationId, IMO_AUTH_DEFAULT_KIND, profiles.error, startedAt, profiles.error.stdoutDigest ?? digest(""), profiles.error.stderrDigest ?? digest(""), input.profile);
     if (!profiles.value.profiles.some((profile) => profile.profileName === input.profile)) {
-      return this.finishReceipt({
+      return finish({
         operationId,
         kind: IMO_AUTH_DEFAULT_KIND,
         status: "failed",
@@ -326,9 +359,14 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
       ...(input.scope === undefined ? [] : ["--scope", input.scope]),
     ] as const;
     const run = await runCapture(this.ctx.subprocess, { command: this.config.command, args, timeoutMs: this.config.timeoutMs, signal });
-    if (!run.ok) return this.finishRun(operationId, IMO_AUTH_DEFAULT_KIND, run.error, startedAt, input);
+    if (!run.ok) {
+      if (direct) {
+        return this.finishDirectReceipt({ operationId, kind: IMO_AUTH_DEFAULT_KIND, status: "failed", exitCode: run.error.exitCode ?? null, stdoutDigest: run.error.stdoutDigest ?? digest(""), stderrDigest: run.error.stderrDigest ?? digest(""), startedAt, profileName: input.profile, httpStatus: run.error.httpStatus });
+      }
+      return this.finishRun(operationId, IMO_AUTH_DEFAULT_KIND, run.error, startedAt, input);
+    }
     this.ctx.imoAuth.invalidate({ profile: input.profile, reason: "profile-changed" });
-    return this.finishReceipt({
+    return finish({
       operationId,
       kind: IMO_AUTH_DEFAULT_KIND,
       status: "completed",
@@ -387,8 +425,27 @@ export class ImoAuthActionsService extends Service implements ImoAuthActions {
     return finalizeAction({
       recordResult: (id, result) => this.ctx.operationLog.recordResult(id, result),
       emit: (event, payload) => this.ctx.emit(event, payload),
-      removePending: (id) => { this.#pending.delete(id); },
+      removePending: (id) => { authActionsStateFor(this).pending.delete(id); },
     }, input);
+  }
+
+  /** Direct settlement (TASK-036-2b): receipt only — no durable record. */
+  private finishDirectReceipt(input: ReceiptInput): Promise<ImoAuthActionExecution> {
+    const receipt = {
+      operationId: input.operationId,
+      kind: input.kind,
+      status: input.status,
+      exitCode: input.exitCode,
+      stdoutDigest: input.stdoutDigest,
+      stderrDigest: input.stderrDigest,
+      startedAt: input.startedAt,
+      finishedAt: new Date().toISOString(),
+      ...(input.profileName === undefined ? {} : { profileName: input.profileName }),
+      ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
+      ...(input.targetProfile === undefined ? {} : { targetProfile: input.targetProfile }),
+      ...(input.httpStatus === undefined ? {} : { httpStatus: input.httpStatus }),
+    };
+    return Promise.resolve({ ok: true, receipt } as ImoAuthActionExecution);
   }
 }
 

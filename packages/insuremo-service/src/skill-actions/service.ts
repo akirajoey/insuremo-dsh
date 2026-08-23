@@ -39,6 +39,24 @@ const EMPTY_DIGEST = digest("");
 const EMPTY_DIFF = Object.freeze({ added: [], removed: [], updated: [] });
 
 /** Approval-gated global IMO Skills install/update/remove/activation actions. */
+/**
+ * Instance state outside the class body (TASK-036-2b): cordis Service hands
+ * callers a proxy receiver where native `#private` fields throw. The service
+ * is a per-host singleton; one module-level slot is identity-stable across
+ * instance and proxy receivers, and a remount resets it wholesale.
+ */
+interface SkillActionsState {
+  pending: Map<string, PendingSkillAction>;
+  journal: ExecutionJournal;
+  running: { operationId: string; kind: PendingSkillAction["kind"] } | null;
+  disposed: boolean;
+}
+let skillActionsStateSlot: SkillActionsState | undefined;
+function skillActionsStateFor(_receiver: unknown): SkillActionsState {
+  if (skillActionsStateSlot === undefined) throw new Error("skill actions state uninitialized");
+  return skillActionsStateSlot;
+}
+
 export class ImoSkillActionsService extends Service implements ImoSkillActions {
   static inject = ["imoSkills", "imoSkillActivation", "operationLog", "subprocess"];
   static Config = Config;
@@ -48,10 +66,6 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
   #activation: ImoSkillActivation;
   #controller: SkillActivationController | undefined;
   #operationLog: OperationLogLike;
-  #pending = new Map<string, PendingSkillAction>();
-  #journal = new ExecutionJournal();
-  #running: { operationId: string; kind: PendingSkillAction["kind"] } | null = null;
-  #disposed = false;
 
   constructor(ctx: Context, config: Partial<ImoConfig> = {}) {
     super(ctx, "imoSkillActions");
@@ -60,6 +74,12 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     this.#skills = ctx.get<ImoSkills>("imoSkills")!;
     this.#activation = ctx.get<ImoSkillActivation>("imoSkillActivation")!;
     this.#controller = skillActivationControllerFor(this.#activation);
+    skillActionsStateSlot = {
+      pending: new Map<string, PendingSkillAction>(),
+      journal: new ExecutionJournal(),
+      running: null,
+      disposed: false,
+    };
     this.#operationLog = ctx.get<OperationLogLike>("operationLog")!;
     this.request = this.request.bind(this);
     this.execute = this.execute.bind(this);
@@ -71,16 +91,16 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
       status: () => this.status(),
     } satisfies ImoSkillActions));
     this.ctx.effect(() => () => {
-      this.#disposed = true;
-      this.#pending.clear();
-      this.#journal.clear();
-      this.#running = null;
+      skillActionsStateFor(this).disposed = true;
+      skillActionsStateFor(this).pending.clear();
+      skillActionsStateFor(this).journal.clear();
+      skillActionsStateFor(this).running = null;
     }, "imoSkillActions.state");
   }
 
   async request(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionResult<SkillActionRequest>> {
     if (signal?.aborted) return resultFailure("cancelled", "skill action request was cancelled");
-    if (this.#disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
+    if (skillActionsStateFor(this).disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
     const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
     if (!normalized.ok) return normalized;
     const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
@@ -98,7 +118,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     } catch {
       return resultFailure("record-failed", "could not record skill action request");
     }
-    this.#pending.set(record.id, { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest });
+    skillActionsStateFor(this).pending.set(record.id, { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest });
     return { ok: true, value: { operationId: record.id, kind: normalized.value.kind, paramsDigest, preview: preview.value } };
   }
 
@@ -109,21 +129,21 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
    * Reuses the single-flight lock and the one-shot journal semantics.
    */
   async runDirect(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionExecution> {
-    if (this.#disposed) return executionFailure("service-disposed", "IMO skill action service is disposed", "");
+    if (skillActionsStateFor(this).disposed) return executionFailure("service-disposed", "IMO skill action service is disposed", "");
     if (signal?.aborted) return executionFailure("cancelled", "skill action was cancelled", "");
-    if (this.#running !== null) return executionFailure("busy", "another skill action is already running", "");
+    if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", "");
     const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
     if (!normalized.ok) return normalized as unknown as SkillActionExecution;
     const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
     if (!preview.ok) return preview as unknown as SkillActionExecution;
     const operationId = `direct:${normalized.value.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     const pending: PendingSkillAction = { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest: skillActionParamsDigest(normalized.value) };
-    this.#running = { operationId, kind: pending.kind };
+    skillActionsStateFor(this).running = { operationId, kind: pending.kind };
     try {
       const outcome = await this.executeDirectKernel(operationId, pending, signal);
       return outcome;
     } finally {
-      this.#running = null;
+      skillActionsStateFor(this).running = null;
     }
   }
 
@@ -236,35 +256,36 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     if (record.decision !== "approved") return executionFailure("not-approved", "only approved skill actions may run", operationId);
     if (record.resultDigest !== undefined) return executionFailure("already-executed", "skill action operation already has a result", operationId);
     // In-memory journal: an executed attempt is never re-run.
-    const journal = this.#journal.get(operationId);
+    const journal = skillActionsStateFor(this).journal.get(operationId);
     if (journal?.state === "executed") {
       if (journal.outcomeUnknown) return executionFailure("execution-outcome-unknown", "skill action outcome could not be determined; it will never be re-run", operationId);
       if (journal.evidenceRecorded) return executionFailure("already-executed", "skill action operation already has a result", operationId);
       // Evidence was not yet durably recorded: retry recordResult only.
       return this.retryEvidence(operationId, journal);
     }
-    if (this.#disposed) return executionFailure("service-disposed", "IMO skill action service is disposed", operationId);
+    if (skillActionsStateFor(this).disposed) return executionFailure("service-disposed", "IMO skill action service is disposed", operationId);
     if (journal?.state === "executing") return executionFailure("busy", "another skill action attempt is already running", operationId);
-    const pending = this.#pending.get(operationId);
+    const pending = skillActionsStateFor(this).pending.get(operationId);
     if (pending === undefined) return executionFailure("missing-pending-input", "skill action parameters are unavailable; re-request the action", operationId);
     if (record.kind !== pending.kind || record.paramsDigest !== pending.paramsDigest || record.paramsDigest !== skillActionParamsDigest(pending.input)) {
       return executionFailure("operation-params-mismatch", "skill action operation parameters do not match", operationId);
     }
-    if (this.#running !== null) return executionFailure("busy", "another skill action is already running", operationId);
-    this.#running = { operationId, kind: pending.kind };
+    if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", operationId);
+    skillActionsStateFor(this).running = { operationId, kind: pending.kind };
     try {
       return await this.executePending(operationId, pending, signal);
     } finally {
-      this.#running = null;
+      skillActionsStateFor(this).running = null;
     }
   }
 
   status(): SkillActionStatus {
-    return this.#running === null ? { running: false } : { running: true, current: { ...this.#running } };
+    const current = skillActionsStateFor(this).running;
+    return current === null ? { running: false } : { running: true, current: { operationId: current.operationId, kind: current.kind } };
   }
 
   private async executePending(operationId: string, pending: PendingSkillAction, signal?: AbortSignal): Promise<SkillActionExecution> {
-    if (!this.#journal.begin(operationId)) return executionFailure("already-executed", "skill action operation already has a result", operationId);
+    if (!skillActionsStateFor(this).journal.begin(operationId)) return executionFailure("already-executed", "skill action operation already has a result", operationId);
     const before = pending.preview.before;
     if (before === undefined) {
       return this.recordOutcome(operationId, pending, {
@@ -310,7 +331,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
         ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation,
         kind: pending.input.kind, beforeNames: before.names, expectedRevision,
       });
-      this.#journal.markOutcomeUnknown(operationId);
+      skillActionsStateFor(this).journal.markOutcomeUnknown(operationId);
       return executionFailure("execution-outcome-unknown", "skill action outcome could not be determined; it will never be re-run", operationId);
     }
   }
@@ -400,22 +421,22 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
   ): Promise<SkillActionExecution> {
     const full: SkillReceiptInput = { operationId, kind: pending.kind, ...input, ...this.provenanceFor(pending) };
     const { receipt, resultDigest } = buildSkillReceipt(full);
-    this.#journal.commit(operationId, receipt, resultDigest);
-    if (!this.#journal.isEventEmitted(operationId)) {
-      this.#journal.markEventEmitted(operationId);
+    skillActionsStateFor(this).journal.commit(operationId, receipt, resultDigest);
+    if (!skillActionsStateFor(this).journal.isEventEmitted(operationId)) {
+      skillActionsStateFor(this).journal.markEventEmitted(operationId);
       this.emitActionEvent(receipt, resultDigest);
     }
     try {
       await this.#operationLog.recordResult(operationId, { resultDigest, artifactRefs: [] });
     } catch (error) {
       if (codeOf(error) === "already-has-result") {
-        this.#journal.markEvidenceRecorded(operationId);
+        skillActionsStateFor(this).journal.markEvidenceRecorded(operationId);
         return executionFailure("already-executed", "skill action operation already has a result", operationId);
       }
       return { ok: true, receipt, ...(input.hint === undefined ? {} : { hint: input.hint }), evidencePending: true };
     }
-    this.#journal.markEvidenceRecorded(operationId);
-    this.#pending.delete(operationId);
+    skillActionsStateFor(this).journal.markEvidenceRecorded(operationId);
+    skillActionsStateFor(this).pending.delete(operationId);
     return { ok: true, receipt, ...(input.hint === undefined ? {} : { hint: input.hint }) };
   }
 
@@ -427,21 +448,21 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
       await this.#operationLog.recordResult(operationId, { resultDigest, artifactRefs: [] });
     } catch (error) {
       if (codeOf(error) === "already-has-result") {
-        this.#journal.markEvidenceRecorded(operationId);
+        skillActionsStateFor(this).journal.markEvidenceRecorded(operationId);
         if (!journal.eventEmitted) {
-          this.#journal.markEventEmitted(operationId);
+          skillActionsStateFor(this).journal.markEventEmitted(operationId);
           this.emitActionEvent(receipt, resultDigest);
         }
         return executionFailure("already-executed", "skill action operation already has a result", operationId);
       }
       return { ok: true, receipt, evidencePending: true };
     }
-    this.#journal.markEvidenceRecorded(operationId);
+    skillActionsStateFor(this).journal.markEvidenceRecorded(operationId);
     if (!journal.eventEmitted) {
-      this.#journal.markEventEmitted(operationId);
+      skillActionsStateFor(this).journal.markEventEmitted(operationId);
       this.emitActionEvent(receipt, resultDigest);
     }
-    this.#pending.delete(operationId);
+    skillActionsStateFor(this).pending.delete(operationId);
     return { ok: true, receipt };
   }
 
