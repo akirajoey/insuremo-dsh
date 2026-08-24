@@ -7,7 +7,8 @@ import { ImoSkillsService } from "./skills.ts";
 import { ImoSkillActivationService } from "./skill-activation.ts";
 import { ImoOverviewService } from "./overview/service.ts";
 import { InsuremoRoutesService, setActivationControllerOnContext } from "./overview/route-service.ts";
-import { mountInsuremoSkillProvider } from "./skill-provider.ts";
+import { InsuremoSkillProviderService } from "./skill-provider-service.ts";
+import { ImoProfileContextService } from "./profile-context.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
 import { ImoSkillActionsService } from "./skill-actions/service.ts";
 import type { ImoCli } from "./cli.ts";
@@ -64,12 +65,12 @@ export type {
 } from "./run.ts";
 
 /** Services required by this Host-only package. */
-export const inject = ["subprocess", "operationLog", "skills", "storageDomain", "webServer", "systemPrompt"];
+export const inject = ["subprocess", "operationLog", "skills", "storageDomain", "webServer", "agents"];
 
 /** Loader-facing plugin name. */
 export const name = "@icomposer/insuremo-service";
 
-export { ImoCliService, ImoUpgradeService, ImoSkillsService, ImoAuthService, ImoAuthActionsService, ImoOverviewService };
+export { ImoCliService, ImoUpgradeService, ImoSkillsService, ImoAuthService, ImoAuthActionsService, ImoOverviewService, InsuremoSkillProviderService, ImoProfileContextService };
 
 // Cordis context faces stay declared at the composition boundary so each
 // domain module remains independent of the barrel and there are no cycles.
@@ -130,7 +131,12 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   ctx.plugin(ImoAuthService, merged);
   ctx.plugin(ImoAuthActionsService, merged);
   ctx.plugin(ImoOverviewService, merged as never);
-        ctx.effect(() => mountInsuremoSkillProvider(ctx), "insuremo-skill-provider");
+  // TASK-044 C: mount the provider via a PERSISTENT SERVICE so the
+  // rank-0 mask/enabled catalog survives the loader-effect sweep window and
+  // controls the real aggregated model-facing catalog.
+  ctx.plugin(InsuremoSkillProviderService, {});
+  // TASK-044 B: independent per-lifecycle profile runtime-context.
+  ctx.plugin(ImoProfileContextService, {});
 }
 
 export default ImoCliService;

@@ -1,44 +1,5 @@
-.icon {
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  line-height: 16px;
-  border-radius: 4px;
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-  border: 1px solid transparent;
-}
-
-.icon[data-state="on"] {
-  color: var(--dsw-alias-state-success-primary);
-}
-
-.icon[data-state="bound"] {
-  color: var(--dsw-alias-state-success-primary);
-}
-
-.icon[data-state="pending"] {
-  opacity: 0.5;
-}
-
-.icon[data-state="off"],
-.icon[data-state="none"] {
-  opacity: 0.35;
-}
-
-/* Pending iComposer: hollow glyph + dashed ring so a half-lit "i" stays
-   legible against any theme background while reading as "awaiting". */
-.icon.iconPending {
-  color: var(--dsw-alias-label-secondary);
-  opacity: 1;
-  border: 1px dashed var(--dsw-alias-label-tertiary);
-}
-
-/* TASK-043 (A): the footer slot entry is only a hidden driver — the visible
-   glyphs live inside the native Workspaces rows. */
+/* TASK-043/044 (A): the footer slot entry is only a hidden driver — the
+   visible glyphs live inside the native Workspaces rows. */
 .driver {
   display: none;
 }
@@ -48,38 +9,59 @@
 .rowIcons {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   margin-left: auto;
   flex: none;
 }
 
+/* Health glyph shell: consistent 16px vector, positioned for the pending
+   corner dot; NO square/dot box, no dashed border anywhere. */
 .rowIcons .icon {
-  width: 14px;
-  height: 14px;
+  position: relative;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  line-height: 14px;
   border-radius: 4px;
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  border: 1px solid transparent;
 }
 
+.rowIcons .icon svg {
+  display: block;
+}
+
+/* ON / bound: vivid vector with a soft badge background (only real tokens). */
 .rowIcons .icon[data-state="on"],
 .rowIcons .icon[data-state="bound"] {
   color: var(--dsw-alias-state-success-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
 }
 
+/* OFF: the same outline vector, dimmed to label-tertiary at ~32% opacity. */
 .rowIcons .icon[data-state="off"],
 .rowIcons .icon[data-state="none"] {
-  opacity: 0.35;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.32;
 }
 
+/* Pending: warn color, no box/ring — a subtle corner dot reads "awaiting". */
 .rowIcons .icon.iconPending,
 .rowIcons .icon[data-state="pending"] {
+  color: var(--dsw-alias-state-warn-primary);
+  background: transparent;
   opacity: 1;
-  color: var(--dsw-alias-label-secondary);
-  border: 1px dashed var(--dsw-alias-label-tertiary);
+}
+
+/* pending corner dot: absolute, no layout shift, not wrapping the glyph. */
+.rowIcons .iconPending::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
 }

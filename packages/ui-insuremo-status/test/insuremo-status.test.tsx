@@ -233,7 +233,8 @@ describe("theme variable regression (TASK-040)", () => {
     }
     const health = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.module.css"), "utf8");
     expect(health).toContain("var(--dsw-alias-state-success-primary)");
-    expect(health).toContain("var(--dsw-alias-label-secondary)");
+    expect(health).toContain("var(--dsw-alias-state-warn-primary)");
+    expect(health).toContain("var(--dsw-alias-label-tertiary)");
     expect(health).toContain("iconPending");
     const picker = readFileSync(resolve(process.cwd(), "src/client/ProfilePicker.module.css"), "utf8");
     expect(picker).toContain("var(--dsw-alias-state-error-primary)");
@@ -297,5 +298,29 @@ describe("TASK-043 FIX-2 workspace decorator keyed by workspaceId", () => {
     expect(css).not.toContain(".strip");
     expect(css).not.toContain(".workspaceName");
     expect(css).not.toContain(".row {");
+  });
+});
+
+describe("TASK-044 A icon redesign", () => {
+  it("health glyphs are 16px inline SVGs, no Unicode glyphs, consistent states", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const health = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.tsx"), "utf8");
+    // no Unicode glyph characters rendered as text labels
+    expect(health).not.toContain(">i</span>");
+    expect(health).not.toContain(">▦</span>");
+    expect(health).not.toContain(">◍</span>");
+    expect(health).toContain("<IcomposerGlyph />");
+    expect(health).toContain("<GraphGlyph />");
+    expect(health).toContain("<IntelligenceGlyph />");
+    const glyphs = readFileSync(resolve(process.cwd(), "src/client/HealthGlyphs.tsx"), "utf8");
+    expect(glyphs).toContain('width: "16"');
+    expect(glyphs).toContain('height: "16"');
+    expect(glyphs).toContain("stroke: \"currentColor\"");
+    const css = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.module.css"), "utf8");
+    // ON uses only real state tokens
+    expect(css).toContain("var(--dsw-alias-state-success-primary)");
+    expect(css).toContain("var(--dsw-alias-state-warn-primary)");
+    expect(css).toContain("opacity: 0.32");
   });
 });

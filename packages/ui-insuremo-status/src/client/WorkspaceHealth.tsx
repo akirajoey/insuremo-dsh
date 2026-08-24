@@ -2,6 +2,7 @@ import { Component, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type { InsuremoStatusLocaleKey } from "./locales.ts";
+import { IcomposerGlyph, GraphGlyph, IntelligenceGlyph } from "./HealthGlyphs.tsx";
 import css from "./WorkspaceHealth.module.css";
 
 /** Props supplied by the sidebar footer-action slot owner. */
@@ -58,20 +59,20 @@ function Glyphs(props: {
           data-state={props.row.autoBindState}
           title={props.row.autoBindState === "bound" ? props.t("health.iComposerBound") : props.t("health.iComposerPendingHint")}
           aria-label={props.row.autoBindState === "bound" ? props.t("health.iComposerBound") : props.t("health.iComposerPending")}
-        >i</span>
+        ><IcomposerGlyph /></span>
       ) : null}
       <span
         className={css.icon}
         data-state={props.row.graphReady ? "on" : "off"}
         title={props.row.graphReady ? props.t("health.graphReady") : props.t("health.graphNotReady")}
         aria-label={props.t("health.graphReady")}
-      >▦</span>
+      ><GraphGlyph /></span>
       <span
         className={css.icon}
         data-state={props.row.explainReady ? "on" : "off"}
         title={props.row.explainReady ? props.t("health.explainReady") : props.t("health.explainNotReady")}
         aria-label={props.t("health.explainReady")}
-      >◍</span>
+      ><IntelligenceGlyph /></span>
     </span>
   );
 }

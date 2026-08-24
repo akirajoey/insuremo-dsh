@@ -149,3 +149,18 @@ declare module "@deepseek-ai/dsh-subprocess" {
     }): SubprocessHandle;
   }
 }
+
+declare module "@deepseek-ai/dsh-llm" {
+  export interface UserMessageContentText { readonly type: "text"; readonly text: string }
+  export interface UserMessage {
+    readonly content: readonly UserMessageContentText[];
+    readonly source: any;
+    readonly data?: Record<string, unknown>;
+  }
+  export interface CreateUserMessageInput {
+    content: readonly UserMessageContentText[];
+    source: any;
+    data?: Record<string, unknown>;
+  }
+  export function createUserMessage(input: CreateUserMessageInput): UserMessage;
+}
