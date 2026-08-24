@@ -100,8 +100,13 @@ test("activation disable removes the skill from the real catalog; re-enable rest
     assert.deepEqual(before, ["imo-audit-helper", "imo-batch"]);
 
     await fx.controller.setEnabled("imo-audit-helper", false, names);
-    const afterDisable = (await fx.skills.list()).map(s => s.name).sort();
-    assert.deepEqual(afterDisable, ["imo-batch"], "disabled skill must vanish from the catalog");
+    // TASK-043 (B): the disabled name remains as a non-invocable insuremo mask
+    // rather than vanishing — it shadows any same-name filesystem entry.
+    const afterDisable = await fx.skills.list();
+    const auditAfterDisable = afterDisable.find(s => s.name === "imo-audit-helper");
+    assert.ok(auditAfterDisable, "mask entry present");
+    assert.equal(auditAfterDisable.invocation?.modelInvocable, false, "mask must be non-invocable");
+    assert.deepEqual(afterDisable.filter(s => s.name !== "imo-audit-helper").map(s => s.name).sort(), ["imo-batch"]);
 
     await fx.controller.setEnabled("imo-audit-helper", true, names);
     const afterEnable = (await fx.skills.list()).map(s => s.name).sort();

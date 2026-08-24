@@ -321,7 +321,13 @@ test("provider list refilters when activation changes after the first scan", asy
   try {
     const result = await fx.provider.list({});
     assert.equal(Array.isArray(result), true);
-    if (Array.isArray(result)) assert.deepEqual(result, []);
+    if (Array.isArray(result)) {
+      // TASK-043 (B): the disabled installed skill is contributed as a
+      // non-invocable mask (rank 450) instead of being dropped.
+      assert.deepEqual(result.map(candidate => candidate.name), ["alpha"]);
+      assert.equal(result[0].invocation.modelInvocable, false);
+      assert.equal(result[0].invocation.userInvocable, false);
+    }
     assert.ok(snapshots >= 2);
   } finally {
     fx.lifecycle.abort();

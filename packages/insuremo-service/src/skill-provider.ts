@@ -19,6 +19,13 @@ import { readFrontmatterPrefix, readSkillDocument } from "./skill-document.ts";
 
 /** IMO entries sit above generic user-agent skills, but below project/custom roots. */
 export const INSUREMO_SKILL_RANK = 450;
+/**
+ * TASK-043: non-invocable mask rank. Rank 0 wins over EVERY project/user/
+ * custom/filesystem root (project-dsh 100, project-agents 200, custom 300,
+ * user-dsh 400, user-agents 500), so a disabled InsureMO skill's mask
+ * shadows any same-name entry from any source in the aggregated catalog.
+ */
+export const INSUREMO_SKILL_MASK_RANK = 0;
 export const INSUREMO_SKILL_PROVIDER = "insuremo" as const;
 export const INSUREMO_SKILL_SOURCE = "insuremo" as const;
 /** Host-internal refresh signal for successful store mutations (no raw control exposed). */
@@ -182,7 +189,26 @@ export class InsuremoSkillProvider implements SkillProvider {
             }
             // A deliberate disabled state is healthy: do not inspect its file
             // and do not turn an otherwise complete inventory incomplete.
-            if (!enabledNames.has(item.name)) continue;
+            if (!enabledNames.has(item.name)) {
+              // TASK-043 (B): contribute a non-invocable MASK candidate so the
+              // aggregated model-facing catalog's same-name entry (typically
+              // from the user ~/.agents/skills filesystem provider, rank 500)
+              // is shadowed by this rank-450 mask — a disabled InsureMO skill
+              // must disappear from every model/user invocation surface while
+              // the real files stay untouched. `get()` stays unreachable for
+              // masks: the final activation check in getWithSignal rejects
+              // any disabled name.
+              candidates.push(Object.freeze({
+                name: item.name,
+                description: `${item.name} is disabled in InsureMO settings`,
+                invocation: Object.freeze({ modelInvocable: false, userInvocable: false }),
+                source: INSUREMO_SKILL_SOURCE,
+                provider: INSUREMO_SKILL_PROVIDER,
+                rank: INSUREMO_SKILL_MASK_RANK,
+                locator: null,
+              }));
+              continue;
+            }
             const manifest = await resolveManifest(item.path, allowedRootPath, allowedRoot);
             this.throwIfCancelled(cancellation.signal);
             if (manifest === undefined) {

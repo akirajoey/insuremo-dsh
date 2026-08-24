@@ -153,7 +153,12 @@ test("activation persists across restart and still requires explicit enable", as
     const state = await second.activation.snapshot(["alpha", "beta"]);
     assert.deepEqual(state.enabled, ["alpha"]);
     assert.deepEqual(state.disabled, ["beta"]);
-    assert.deepEqual((await second.registry.snapshot()).skills.map(skill => skill.name), ["alpha"]);
+    // TASK-043 (B): the disabled name stays in the catalog as an insuremo
+    // non-invocable mask (shadowing any same-name filesystem entry).
+    const persisted = (await second.registry.snapshot()).skills;
+    assert.deepEqual(persisted.map(skill => skill.name).sort(), ["alpha", "beta"]);
+    const betaEntry = persisted.find(skill => skill.name === "beta");
+    assert.equal(betaEntry?.invocation?.modelInvocable, false);
     await second.activation.setEnabled("beta", true, ["alpha", "beta"], state.revision);
     assert.deepEqual((await second.registry.snapshot()).skills.map(skill => skill.name), ["alpha", "beta"]);
   } finally {

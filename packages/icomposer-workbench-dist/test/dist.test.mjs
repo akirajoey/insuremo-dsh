@@ -37,7 +37,7 @@ test("cordis.patch.yml is a single insert with the inject union", async () => {
   const injectMatch = text.match(/inject: \[([^\]]+)\]/);
   assert.ok(injectMatch !== undefined);
   const inject = injectMatch[1].split(",").map(s => s.trim());
-  assert.deepEqual([...inject].sort(), ["jobs", "skills", "storageDomain", "subprocess", "tools", "webServer", "workspaceRegistry"]);
+  assert.deepEqual([...inject].sort(), ["jobs", "skills", "storageDomain", "subprocess", "systemPrompt", "tools", "webServer", "workspaceRegistry"]);
   assert.equal(text.includes("config:"), false, "patch must not carry config");
 });
 

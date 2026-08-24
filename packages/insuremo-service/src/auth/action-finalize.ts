@@ -1,5 +1,5 @@
 import { digest } from "../run.ts";
-import { AUTH_ACTION_COMPLETED_EVENT, AUTH_ACTION_FAILED_EVENT } from "./action-types.ts";
+import { AUTH_ACTION_COMPLETED_EVENT, AUTH_ACTION_FAILED_EVENT, IMO_AUTH_DEFAULT_KIND } from "./action-types.ts";
 import type {
   ImoAuthActionError,
   ImoAuthActionExecution,
@@ -47,6 +47,12 @@ export async function finalizeAction(
     kind: input.kind,
     status: input.status,
     resultDigest,
+    // TASK-043 FIX-3: default-switch completions carry the sanitized target
+    // profile name (non-secret) so a listener can sync the runtime-context
+    // synchronously instead of racing an async refresh.
+    ...(input.status === "completed" && input.kind === IMO_AUTH_DEFAULT_KIND && input.profileName !== undefined
+      ? { profile: input.profileName }
+      : {}),
   });
   const hint = input.httpStatus === 401 ? "login-required" : input.httpStatus === 403 ? "permission-denied" : undefined;
   return hint === undefined ? { ok: true, receipt } : { ok: true, receipt, hint };

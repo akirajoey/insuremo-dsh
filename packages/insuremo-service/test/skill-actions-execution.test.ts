@@ -300,7 +300,14 @@ test("catalog integration: install keeps a new skill invisible until enabled", a
     if (!requested.ok) return;
     await fx.approve(requested.value.operationId);
     await fx.actions.execute(requested.value.operationId);
-    assert.deepEqual((await registry.list()).map(item => item.name), ["alpha"]);
+    // TASK-043 (B): the disabled-but-installed skill appears as a non-invocable
+    // insuremo mask instead of vanishing (it must shadow same-name filesystem
+    // entries in the aggregated catalog).
+    const afterInstall = await registry.list() as ReadonlyArray<{ name: string; provider?: string; invocation?: { modelInvocable?: boolean } }>;
+    assert.deepEqual(afterInstall.map(item => item.name).sort(), ["alpha", "beta"]);
+    const betaMask = afterInstall.find(item => item.name === "beta");
+    assert.equal(betaMask?.provider, "insuremo");
+    assert.equal(betaMask?.invocation?.modelInvocable, false);
     const enable = await fx.actions.request({ kind: "skill-activation", name: "beta", enabled: true });
     if (!enable.ok) return;
     await fx.approve(enable.value.operationId);

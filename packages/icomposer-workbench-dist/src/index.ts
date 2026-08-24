@@ -42,6 +42,7 @@ export const inject = [
   "webServer",
   "tools",
   "jobs",
+  "systemPrompt",
 ] as const;
 
 /** Per-package config overrides keyed by package id (all optional). */

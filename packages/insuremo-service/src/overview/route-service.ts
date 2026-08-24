@@ -28,7 +28,10 @@ type RouteDisposer = () => void;
  * service registry teardown (and double-registration is tolerated).
  */
 export class InsuremoRoutesService extends Service {
-  static inject = ["webServer"] as const;
+  // TASK-043: systemPrompt and imoAuth are declared so the loader guarantees
+  // an active fiber before the runtime-context mounts; a missing service is a
+  // loud failure here, never a swallowed no-op.
+  static inject = ["webServer", "systemPrompt", "imoAuth"] as const;
 
   #activationController: ActivationControllerLike | undefined;
   #disposers: RouteDisposer[] = [];
@@ -54,7 +57,12 @@ export class InsuremoRoutesService extends Service {
     safe(() => mountOverviewRoute(ctx));
     safe(() => mountWriteRoutes(ctx));
     safe(() => mountWorkspacesStatusRoute(ctx));
-    safe(() => mountCurrentProfileSection(ctx));
+    // TASK-043 FIX-2: the runtime-context is a REAL async mount — awaited (so
+    // the first assembly is prewarmed), and NEVER swallowed. A missing
+    // systemPrompt/imoAuth throws here, failing [Service.init] loudly instead
+    // of continuing with a false "active".
+    const disposer = await mountCurrentProfileSection(ctx);
+    if (disposer !== undefined) this.#disposers.push(disposer);
     const firstRequestGuard = (_req: IncomingMessage, res: ServerResponse): void => {
       res.writeHead(500);
       res.end();

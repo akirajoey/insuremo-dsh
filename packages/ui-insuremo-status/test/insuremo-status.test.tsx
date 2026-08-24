@@ -244,3 +244,58 @@ describe("theme variable regression (TASK-040)", () => {
     expect(en["health.iComposerPendingHint"]).toContain("bind workspace");
   });
 });
+
+describe("TASK-043 workspace row decoration (A)", () => {
+  it("parseWorkspaceHealthRows keeps displayName for row matching", async () => {
+    const { parseWorkspaceHealthRows } = await import("../src/client/WorkspaceHealth.tsx");
+    const rows = parseWorkspaceHealthRows({ workspaces: [
+      { workspaceId: "w1", displayName: "ssapocpa", detected: true, autoBindState: "bound", graphReady: true, explainReady: true },
+    ] });
+    expect(rows?.[0].displayName).toBe("ssapocpa");
+    expect(rows).toHaveLength(1);
+  });
+
+  it("renders a hidden driver (no visible footer rows) — glyphs move into native rows", async () => {
+    const { WorkspaceHealth } = await import("../src/client/WorkspaceHealth.tsx");
+    expect(WorkspaceHealth).toBeTruthy();
+    // structural guard: the component source must not render visible .strip rows anymore
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.tsx"), "utf8");
+    expect(source).toContain('css.driver');
+    expect(source).toContain("MutationObserver");
+    expect(source).toContain(HOST_ATTR_GUARD);
+    expect(source).not.toContain('css.strip');
+  });
+
+  const HOST_ATTR_GUARD = "data-icomposer-workspace-health";
+});
+
+describe("TASK-043 FIX-2 workspace decorator keyed by workspaceId", () => {
+  it("parse keeps per-row workspaceId so same-title rows stay distinct", async () => {
+    const { parseWorkspaceHealthRows } = await import("../src/client/WorkspaceHealth.tsx");
+    const rows = parseWorkspaceHealthRows({ workspaces: [
+      { workspaceId: "w1", displayName: "ssapocpa", detected: true, autoBindState: "bound", graphReady: true, explainReady: true },
+      { workspaceId: "w2", displayName: "ssapocpa", detected: false, autoBindState: "none", graphReady: false, explainReady: false },
+    ] });
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0].workspaceId).toBe("w1");
+    expect(rows?.[1].workspaceId).toBe("w2");
+    expect(rows?.[0].displayName).toBe("ssapocpa");
+    expect(rows?.[1].displayName).toBe("ssapocpa");
+  });
+
+  it("syncRows keys ports by workspaceId (no dead .strip/.row/.workspaceName CSS)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.tsx"), "utf8");
+    // per-row ports keyed by workspaceId, occurrence-paired for same titles
+    expect(source).toContain("this.#ports.set(id, port)");
+    expect(source).toContain("this.#ports.get(id)");
+    expect(source).toContain("#occurrenceCounter");
+    const css = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.module.css"), "utf8");
+    expect(css).not.toContain(".strip");
+    expect(css).not.toContain(".workspaceName");
+    expect(css).not.toContain(".row {");
+  });
+});

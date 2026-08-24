@@ -36,99 +36,18 @@ import {
   type ImoAuthSecret,
   type ImoAuthValidation,
 } from "./types.ts";
-import { LIST_CACHE_TTL_MS, readProfileStore, authCancelled } from "./profile-store.ts";
+import {
+  LIST_CACHE_TTL_MS,
+  authCancelled,
+  authCacheKey,
+  authCacheMatches,
+  authLifecycleError,
+  authParseError,
+  authRunError,
+  authStatusError,
+  type PendingAuthPrepare,
+} from "./service-helpers.ts";
 
-interface PendingAuthPrepare {
-  readonly profile: string | null;
-  readonly env: string | null;
-  readonly epoch: number;
-  readonly generation: number;
-  invalidated: boolean;
-  promise: Promise<ImoAuthResult<AuthCacheEntry>>;
-}
-
-function authParseError(command: string, phase: string, stdoutDigest: string, stderrDigest: string): ImoAuthResult<never> {
-  return {
-    ok: false,
-    error: {
-      code: "parse-error",
-      message: `IMO auth ${phase} output could not be parsed`,
-      command,
-      stdoutDigest,
-      stderrDigest,
-    },
-  };
-}
-
-function authRunError(
-  error: RunFailure,
-  command: string,
-  phase: string,
-  classifyStatus = false,
-): ImoAuthError {
-  const status = classifyStatus
-    ? error.httpStatus === 401
-      ? "invalid-auth"
-      : error.httpStatus === 403
-        ? "forbidden"
-        : undefined
-    : undefined;
-  const code = status ?? error.code;
-  return {
-    code,
-    message: `IMO auth ${phase} failed: ${code}`,
-    command,
-    ...(error.exitCode === undefined ? {} : { exitCode: error.exitCode }),
-    ...(error.signal === undefined ? {} : { signal: error.signal }),
-    ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }),
-    ...(error.stdoutDigest === undefined ? {} : { stdoutDigest: error.stdoutDigest }),
-    ...(error.stderrDigest === undefined ? {} : { stderrDigest: error.stderrDigest }),
-  };
-}
-
-function authStatusError(
-  code: "invalid-auth" | "forbidden",
-  command: string,
-  phase: string,
-  stdoutDigest: string,
-  stderrDigest: string,
-): ImoAuthResult<never> {
-  return {
-    ok: false,
-    error: {
-      code,
-      message: `IMO auth ${phase} failed: ${code}`,
-      command,
-      httpStatus: code === "invalid-auth" ? 401 : 403,
-      stdoutDigest,
-      stderrDigest,
-    },
-  };
-}
-
-function authLifecycleError(
-  code: typeof AUTH_PREPARE_INVALIDATED_CODE | typeof AUTH_SERVICE_DISPOSED_CODE,
-  command: string,
-): ImoAuthResult<never> {
-  return {
-    ok: false,
-    error: { code, message: `IMO auth prepare failed: ${code}`, command },
-  };
-}
-
-function authCacheKey(profile: string | null, env: string | null): string {
-  return JSON.stringify([profile, env]);
-}
-
-function authCacheMatches(
-  entry: { readonly profile: string | null; readonly env: string | null },
-  request: ImoAuthInvalidateRequest,
-): boolean {
-  return (request.profile === undefined || entry.profile === request.profile)
-    && (request.env === undefined || entry.env === request.env);
-}
-
-/** Host-only auth service. Prepare tokens never leave the closure-backed lease. */
 export class ImoAuthService extends Service implements ImoAuth {
   static inject = ["subprocess"];
   static Config = Config;
@@ -137,6 +56,8 @@ export class ImoAuthService extends Service implements ImoAuth {
   #cache = new Map<string, AuthCacheEntry>();
   #listCache: { readonly at: number; readonly value: ImoAuthResult<ImoAuthProfileList> } | undefined;
   #listInflight: Promise<ImoAuthResult<ImoAuthProfileList>> | undefined;
+  #defaultCache: { readonly at: number; readonly value: ImoAuthResult<ImoAuthDefaultProfile> } | undefined;
+  #defaultInflight: Promise<ImoAuthResult<ImoAuthDefaultProfile>> | undefined;
   #inflight = new Map<string, PendingAuthPrepare>();
   #pendingMeta = new Map<string, { profile: string | null; env: string | null }>();
   #generations = new Map<string, number>();
@@ -151,6 +72,7 @@ export class ImoAuthService extends Service implements ImoAuth {
     this.listProfiles = this.listProfiles.bind(this);
     this.listProfilesCached = this.listProfilesCached.bind(this);
     this.profilesFast = this.profilesFast.bind(this);
+    this.defaultProfileCached = this.defaultProfileCached.bind(this);
     this.defaultProfile = this.defaultProfile.bind(this);
     this.validate = this.validate.bind(this);
     this.prepare = this.prepare.bind(this);
@@ -198,9 +120,33 @@ export class ImoAuthService extends Service implements ImoAuth {
   }
 
   /**
-   * Cached profile list (TASK-041): 60s TTL in-memory; a CLI failure serves
-   * the last good result instead of an empty list so the UI never renders a
-   * misleading "None". `profilesFast` prefers this as its fallback.
+   * Cached default-profile (TASK-043 fix-3): 60s TTL + in-flight coalescing,
+   * so `profilesFast` never spawns the CLI on a warm fast read.
+   */
+  async defaultProfileCached(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthDefaultProfile>> {
+    const now = Date.now();
+    if (this.#defaultCache !== undefined && now - this.#defaultCache.at <= LIST_CACHE_TTL_MS) {
+      return this.#defaultCache.value;
+    }
+    if (this.#defaultInflight !== undefined) return this.#defaultInflight;
+    const inflight = this.defaultProfile(signal).then((result) => {
+      this.#defaultInflight = undefined;
+      if (result.ok) this.#defaultCache = { at: Date.now(), value: result };
+      return result;
+    }, (error) => {
+      this.#defaultInflight = undefined;
+      throw error;
+    });
+    this.#defaultInflight = inflight;
+    return inflight;
+  }
+
+  /**
+   * Fast snapshot (TASK-043): sanitized CLI profile list with a 60s TTL
+   * in-memory cache — NO direct read of the imo credential store (that file
+   * holds `access_token`, so it must never enter this process's memory).
+   * A CLI failure serves the last good sanitized list (stale=true) instead
+   * of an empty result, so the UI never renders a misleading "None".
    */
   async listProfilesCached(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>> {
     const now = Date.now();
@@ -221,28 +167,21 @@ export class ImoAuthService extends Service implements ImoAuth {
   }
 
   /**
-   * Millisecond profile snapshot straight from the imo CLI's plaintext store
-   * (TASK-041). Only descriptive fields are read — access tokens are never
-   * loaded. Falls back to the cached CLI list (stale=true) when the file is
-   * absent, unreadable, or malformed; a read failure with no cache at all
-   * degrades to the cached CLI path.
+   * Millisecond profile snapshot from the SANITIZED CLI cache only
+   * (TASK-043): never reads the credential store. First call triggers the
+   * CLI prep run; subsequent calls within the 60s TTL are cache hits. A CLI
+   * failure with no warm cache is an honest error (UI shows a skeleton +
+   * short retry, never a fake empty list).
    */
   async profilesFast(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfilesFast>> {
-    const read = await readProfileStore();
-    if (read !== undefined) {
-      return { ok: true, value: { profiles: read.profiles, defaultProfile: read.defaultProfile, stale: false } };
-    }
-    if (signal?.aborted) return authCancelled(this.config.command);
     const cached = await this.listProfilesCached(signal);
-    if (cached.ok) {
-      const def = await this.defaultProfile(signal);
-      const profiles = cached.value.profiles.map((profile) => {
-        const isDefault = def.ok ? def.value.profileName === profile.profileName : profile.isDefault === true;
-        return isDefault === (profile.isDefault === true) ? profile : { ...profile, isDefault };
-      });
-      return { ok: true, value: { profiles, defaultProfile: def.ok ? def.value.profileName : null, stale: true } };
-    }
-    return cached;
+    if (!cached.ok) return cached;
+    const def = await this.defaultProfileCached(signal);
+    const profiles = cached.value.profiles.map((profile) => {
+      const isDefault = def.ok ? def.value.profileName === profile.profileName : profile.isDefault === true;
+      return isDefault === (profile.isDefault === true) ? profile : { ...profile, isDefault };
+    });
+    return { ok: true, value: { profiles, defaultProfile: def.ok ? def.value.profileName : null, stale: false } };
   }
 
   async validate(profile?: string, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthValidation>> {
@@ -349,6 +288,13 @@ export class ImoAuthService extends Service implements ImoAuth {
       if (pending !== undefined) pending.invalidated = true;
     }
     for (const key of keys) this.#generations.set(key, (this.#generations.get(key) ?? 0) + 1);
+    // TASK-043 fix-3: any invalidation drops the sanitized list/default fast
+    // caches too, so a profile switch is re-read on the next fast access
+    // (never a stale cached snapshot).
+    this.#listCache = undefined;
+    this.#listInflight = undefined;
+    this.#defaultCache = undefined;
+    this.#defaultInflight = undefined;
     this.ctx.emit(AUTH_CACHE_INVALIDATED_EVENT, {
       ...(request.profile === undefined ? {} : { profile: request.profile }),
       ...(request.env === undefined ? {} : { env: request.env }),

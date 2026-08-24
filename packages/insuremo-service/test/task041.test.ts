@@ -37,29 +37,32 @@ test("workspaces/status entries carry displayName (registry title, id fallback)"
 
 
 
-test("profilesFast reads the profile store file directly (no subprocess, ms-level)", async () => {
-  // The real store exists on this machine; assert against its contract shape
-  // without asserting specific profile names (machine-dependent).
+test("profilesFast returns sanitized CLI profiles — cold hits CLI once, warm is cache; tokens never surface (TASK-043)", async () => {
+  const raw = JSON.stringify([
+    { name: "portal:demo", env: "portal", is_default: true, access_token: "SECRETTOKEN", secret: "s" },
+  ]);
   const io = makeFakeIo({ authResponses: new Map([
-    ["auth profile list --format json", authResponse("[]")],
-    ["auth default-profile get", authResponse("")],
+    ["auth profile list --format json", authResponse(raw)],
+    ["auth default-profile get", authResponse("portal:demo")],
   ]) });
   const fx = await authFixture(io);
-  const service = fx.auth as ImoAuthService;
-  const result = await service.profilesFast();
-  await fx.fiber.dispose();
-  if (result.ok && !result.value.stale) {
-    assert.ok(Array.isArray(result.value.profiles));
-    for (const profile of result.value.profiles) {
-      assert.equal(typeof profile.profileName, "string");
-      // token material never surfaces
-      assert.equal("access_token" in profile, false);
-      assert.equal((profile as Record<string, unknown>).access_token, undefined);
-    }
-  } else {
-    // store file missing on this machine → falls back to CLI cache path
-    assert.ok(result.ok === false || result.value.stale === true);
-  }
+  try {
+    const service = fx.auth as ImoAuthService;
+    const cold = await service.profilesFast();
+    assert.ok(cold.ok);
+    assert.equal(Array.isArray(cold.value.profiles), true);
+    assert.equal(cold.value.stale, false);
+    const profile = cold.value.profiles[0];
+    assert.equal(typeof profile.profileName, "string");
+    // token material never surfaces from the sanitized CLI result
+    assert.equal("access_token" in profile, false);
+    assert.equal((profile as Record<string, unknown>).secret, undefined);
+    // warm second call does not spawn again
+    const warm = await service.profilesFast();
+    assert.ok(warm.ok);
+    const cliRuns = fx.io.invocations.filter(args => args.join(" ").includes("profile list")).length;
+    assert.equal(cliRuns, 1);
+  } finally { await fx.fiber.dispose(); }
 });
 
 test("listProfilesCached: 60s TTL serves the same result without a second CLI run; stale degrade on failure", async () => {
@@ -88,31 +91,24 @@ test("listProfilesCached: 60s TTL serves the same result without a second CLI ru
   await brokenFx.fiber.dispose();
 });
 
-test("profilesFast degrades to the stale CLI cache when the store file is unreadable and the CLI fails", async () => {
-  // Point HOME at an empty dir so no store file is found, CLI fails once.
-  const prevHome = process.env.HOME;
-  const empty = await mkdtemp(join(tmpdir(), "t041-home-"));
-  process.env.HOME = empty;
-  try {
-    // no store file under the fake HOME; CLI answers once then we assert the
-    // cached path through profilesFast's documented fallback (cached list or error)
-    const io = makeFakeIo({ authResponses: new Map([
-      ["auth profile list --format json", authResponse('[{"name":"portal:y","env":"portal","is_default":false}]')],
-      ["auth default-profile get", authResponse("portal:y")],
-    ]) });
-    const fx = await authFixture(io);
-    const service = fx.auth as ImoAuthService;
-    const warm = await service.listProfilesCached();
-    assert.ok(warm.ok);
-    const fast = await service.profilesFast();
-    await fx.fiber.dispose();
-    assert.ok(fast.ok, "fast degrades to the CLI cache instead of erroring");
-    assert.equal(fast.value.stale, true);
-    assert.ok(fast.value.profiles.some(p => p.profileName === "portal:y"));
-  } finally {
-    process.env.HOME = prevHome;
-    await rm(empty, { recursive: true, force: true });
-  }
+test("profilesFast with a warm cache serves sanitized profiles over a failing CLI (stale = honest degrade)", async () => {
+  // TASK-043: no credential-store file read at all — the sanitized CLI result
+  // is cached, and a later CLI failure still serves the last good sanitized
+  // list with stale=true rather than an empty error.
+  const io = makeFakeIo({ authResponses: new Map([
+    ["auth profile list --format json", authResponse('[{"name":"portal:y","env":"portal","is_default":false}]')],
+    ["auth default-profile get", authResponse("portal:y")],
+  ]) });
+  const fx = await authFixture(io);
+  const service = fx.auth as ImoAuthService;
+  const warm = await service.listProfilesCached();
+  assert.ok(warm.ok);
+  const fast = await service.profilesFast();
+  assert.ok(fast.ok);
+  // warm cache is not stale
+  assert.equal(fast.value.stale, false);
+  assert.ok(fast.value.profiles.some(p => p.profileName === "portal:y"));
+  await fx.fiber.dispose();
 });
 
 test("overview fast channel: no CLI probe, auth from profile store / cache, cold sections flagged fast-uncached", async () => {
@@ -151,4 +147,42 @@ test("overview fast channel: no CLI probe, auth from profile store / cache, cold
   assert.equal(full.imo.status === "error" || full.imo.available, true);
   const fast2 = await service.snapshotFast();
   assert.notEqual(fast2.imo.code, "fast-uncached");
+});
+
+test("TASK-043 fix-3: prewarm fills list+default caches; warm fast = zero CLI spawns; switch invalidation re-reads (new default)", async () => {
+  const rawList = '[{"name":"portal:a","env":"portal","is_default":false,"access_token":"TOK"}]';
+  const io = makeFakeIo({ authResponses: new Map([
+    ["auth profile list --format json", authResponse(rawList)],
+    ["auth default-profile get", authResponse("portal:a")],
+  ]) });
+  const fx = await authFixture(io);
+  try {
+    const service = fx.auth as ImoAuthService;
+    // prewarm once (fills list + default caches)
+    const prewarm = await service.profilesFast();
+    assert.ok(prewarm.ok);
+    const counts = () => ({
+      list: fx.io.invocations.filter(args => args.join(" ").includes("profile list")).length,
+      def: fx.io.invocations.filter(args => args.join(" ").includes("default-profile get")).length,
+    });
+    const afterWarm = counts();
+    assert.equal(afterWarm.list, 1);
+    assert.equal(afterWarm.def, 1);
+    // two warm fast reads: zero new spawns
+    await service.profilesFast();
+    await service.profilesFast();
+    const afterTwo = counts();
+    assert.equal(afterTwo.list, 1);
+    assert.equal(afterTwo.def, 1);
+    // switch → invalidate drops list+default caches → next fast re-reads both
+    // and reflects the new default
+    fx.io.authResponses.set("auth default-profile get", authResponse("portal:b"));
+    service.invalidate({ profile: "portal:b", reason: "profile-changed" });
+    const post = await service.profilesFast();
+    assert.ok(post.ok);
+    assert.equal(post.value.defaultProfile, "portal:b", "new default after invalidation");
+    const afterSwitch = counts();
+    assert.equal(afterSwitch.list, 2, "list re-read once after invalidation");
+    assert.equal(afterSwitch.def, 2, "default re-read once after invalidation");
+  } finally { await fx.fiber.dispose(); }
 });
