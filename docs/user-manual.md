@@ -20,7 +20,6 @@
    - 5.6 本地校验（icomposer-verify）
    - 5.7 iComposer Code Intelligence（代码智能）
    - 5.8 写闭环（icomposer-write）
-   - 5.9 会话间通信（workbench-intercom）
    - 5.10 操作日志与审批（workbench-operation-log）
    - 5.11 界面插件（ui-*）
 6. [Agent 工具参考（8 个只读工具）](#6-agent-工具参考)
@@ -41,7 +40,6 @@ iComposer Workbench 是运行在 **DeepSeek Harness** 之上的插件化工作�
 - **只读理解**：资产目录扫描、SDK/工具书索引、init/reload 预览、本地校验；
 - **代码智能（iComposer Code Intelligence）**：纯 TypeScript 实现的依赖图构建、API 调用链查询、影响分析、语义检索、业务解释；
 - **写闭环**：审批门控的 push / test / release / create / metadata，全部留有 digest 凭据（receipt）；
-- **会话间通信**：多 Agent 会话的消息、问答（ask/reply）、等待状态投影；
 - **审批与证据**：所有高风险副作用必须经操作日志审批后才执行，结果以 SHA-256 摘要记录。
 
 **设计原则**：不修改 Harness 核心；所有 IMO 子进程经 `ctx.subprocess`；token 不落盘不出闭包；原始输出只以 digest 形式跨越公共边界；每个生产/测试文件 ≤500 行。
@@ -56,7 +54,7 @@ iComposer Workbench 是运行在 **DeepSeek Harness** 之上的插件化工作�
 │   subprocess · storageDomain · workspaceRegistry · jobs ·   │
 │   skills · webServer · tools · sessionPersistence           │
 └───────────────▲────────────────────────────────────────────┘
-                │ 插件注入（14 个 workbench 插件行）
+                │ 插件注入（13 个 workbench 插件行）
 ┌───────────────┴────────────────────────────────────────────┐
 │                    iComposer Workbench                      │
 │                                                            │
@@ -69,9 +67,8 @@ iComposer Workbench 是运行在 **DeepSeek Harness** 之上的插件化工作�
 │  icomposer-code-         图构建 / 查询 / 语义检索 / 解释 /    │
 │    intelligence          后台 job / 诊断 / 清理              │
 │  icomposer-write         push/test/release/create/metadata  │
-│  workbench-intercom      会话注册 / 消息 / ask/reply/cancel  │
 │  workbench-operation-log 审批流与 receipt 存储               │
-│  workbench-contracts     全部命令的 zod 契约（76+ schemas）   │
+│  workbench-contracts     全部命令的 zod 契约（62 schemas）   │
 │  ui-insuremo-settings    Settings > InsureMO 页面           │
 │  ui-insuremo-status      侧栏状态徽标                        │
 │  ui-workbench-jobs       会话内 Job 卡片                     │
@@ -82,10 +79,9 @@ iComposer Workbench 是运行在 **DeepSeek Harness** 之上的插件化工作�
 
 | 数据 | 位置 |
 |---|---|
-| 绑定/操作日志/激活状态/Intercom 元数据 | `<DSH_HOME>/storages/`（JSON 域存储） |
+| 绑定/操作日志/激活状态元数据 | `<DSH_HOME>/storages/`（JSON 域存储） |
 | ICI 图快照与向量 | `<DSH_HOME>/ici/<16hex>/graph/` |
 | 写闭环证据 artifact | `<DSH_HOME>/write/<16hex>/artifacts/` |
-| Intercom 消息正文 | `<DSH_HOME>/intercom/<hash>/messages/` |
 | 真实 `~/.dsh` `~/.insuremo` | 测试时永不触碰（隔离 DSH_HOME） |
 
 ---
@@ -196,7 +192,7 @@ node scripts/verify-standard-install.mjs # 场景验证（repo 路径/tgz，均�
 # 写入 .dsh-home/（自动拒绝真实 ~/.dsh）
 pnpm run setup-profile
 
-# 从 Harness 根 dump 组合结果：期望 14 个 workbench 插件行
+# 从 Harness 根 dump 组合结果：期望 13 个 workbench 插件行
 cd ../deepseek-harness
 DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dump-config
 ```
@@ -325,22 +321,6 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 
 超时/中断语义：spawn 后结果不确定 → `outcome-unknown`，**永不自动重跑**。
 
-### 5.9 会话间通信（`@icomposer/workbench-intercom`）
-
-**面向接口**：`ctx.intercom`。
-
-- 会话：`register` · `heartbeat` · `unregister` · `listSessions`
-- 消息：`send` · `inbox` · `read` · `markDelivered` · `pending`
-- 问答：`ask` · `reply` · `cancel` · `pendingAsks` · `resolveStatus`
-- 租约：`lease-acquire` · `lease-release`
-
-- 消息**正文不进 domain**——存 `<DSH_HOME>/intercom/<hash>/messages/<seq>.txt`，domain 只存 sha256 digest + 引用；
-- seq 由 domain global CAS 分配（20 并发全唯一连续）；
-- read 仅 sender/recipient 可读（第三方 `denied`）；每次读取重验 digest（篡改检测）；
-- ask/reply/cancel：ask → 接收方 `waiting`；reply → 回复送达 + 等待解除；cancel 仅 asker；10 并发 reply 同一 ask 恰 1 胜；
-- `resolveStatus` **每次全量从 domain 推导**（无内存缓存）——刷新后 pending 状态一致；
-- cwd file lease 为 **advisory**（30min TTL）：他人持有时返回信息但不阻止任何读写。
-
 ### 5.10 操作日志与审批（`@icomposer/workbench-operation-log`）
 
 **面向接口**：`ctx.operationLog.append/list/decide/recordResult`
@@ -380,7 +360,7 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 
 ## 7. Workbench API 命令参考
 
-`@icomposer/workbench-contracts` 定义全部命令契约（zod strict，可生成 JSON Schema，共 76+ schemas）。命令清单：
+`@icomposer/workbench-contracts` 定义全部命令契约（zod strict，可生成 JSON Schema，共 62 schemas）。命令清单：
 
 ```text
 system/capabilities
@@ -410,9 +390,6 @@ icomposer-write/release-preview · release-repos · release-branches · release-
 icomposer-write/create-options · create-preview · create-execute
 icomposer-write/metadata-preview · metadata-execute
 
-intercom/register · heartbeat · unregister · list · send · inbox · read
-intercom/mark-delivered · pending · ask · reply · cancel
-intercom/pending-asks · resolve-status · lease-acquire · lease-release
 
 operation/record · operation/list · operation/decide
 ```
@@ -469,7 +446,6 @@ node scripts/audit-secrets.mjs   # 全仓脱敏扫描（token 形状/canary/路�
 5. 真实 Harness 升级演练——以只读审计 + 回滚预案替代（checkout 99f6f02 即恢复）；
 6. 浏览器写 transport——CSRF/Origin 设计 deferred，Web 侧仅只读 GET 桥；
 7. `verify utils` CLI 会在 workspace `.metadata/icomposer/` 写缓存（CLI 正常行为，已按用户裁定接受）；
-8. Intercom 双真实 session UI 接线（协议层已全验证）。
 
 **P2 残余**：README 含开发者机器绝对路径（待通用化）；`ici/service.ts` 恰 500 行贴限；并行真实 smoke 偶发超时（隔离重跑即过）；进程内 journal 重启后 conflict resolution 返回安全侧错误（需人工 reconcile）。
 
@@ -489,7 +465,6 @@ node scripts/audit-secrets.mjs   # 全仓脱敏扫描（token 形状/canary/路�
 | `local-unpushed-changes` | test 前先 push，或带 `overrideUnpushed:true`（会记入 receipt） |
 | `conflict` (push) | 调 `pushResolve`：cancel / prefer-local / prefer-server（后两者各自需要新审批） |
 | `binding-conflict` | 同目录已有其他 env/tenant 身份——换目录/worktree 或先 unbind |
-| `peer-not-found` (intercom) | 对端重名——改用 `toSessionId` 精确寻址 |
 | `storage-error` | 检查 DSH_HOME 可写性；digest 校验失败（文件被外部改动）也走此码 |
 | IMO 401 | `imo auth login --env <env> --force` 后重新 prepare |
 
@@ -499,8 +474,6 @@ node scripts/audit-secrets.mjs   # 全仓脱敏扫描（token 形状/canary/路�
 
 ```text
 677bd45 chore(e2e): add poc end-to-end regression, audits and readiness gate [TASK-033]
-8cef1ee feat(intercom): add ask reply cancel with derived waiting projection [TASK-032]
-e403911 feat(intercom): add session registry and externalized message store [TASK-031]
 cba29ba feat(write): add create and metadata loops with catalog-verified receipts [TASK-030]
 680d4eb feat(write): add test evidence and release loop with independent receipts [TASK-029]
 2d65242 feat(write): add approval-gated icomposer push with conflict resolution chain [TASK-028]

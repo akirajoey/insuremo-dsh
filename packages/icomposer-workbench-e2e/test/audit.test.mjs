@@ -68,6 +68,6 @@ test("audit-compat: passes on the real repository and writes the snapshot", asyn
   const parsed = JSON.parse(snapshot);
   assert.equal(parsed.harnessCommit, "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca");
   assert.equal(parsed.harnessClean, true);
-  assert.equal(parsed.pluginCount, 14);
+  assert.equal(parsed.pluginCount, 13);
   assert.equal(parsed.checks.every(check => check.ok), true);
 });

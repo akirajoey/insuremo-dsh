@@ -34,7 +34,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "node ../../scripts/clean-dist-lib.mjs && tsdown",
     "prepare": "pnpm run build",
     "typecheck": "pnpm run build && node --check lib/index.js && node --check lib/client.js",
     "test": "node --test test/*.test.mjs"
@@ -61,7 +61,6 @@
     "@icomposer/icomposer-verify": "file:../icomposer-verify",
     "@icomposer/icomposer-code-intelligence": "file:../icomposer-code-intelligence",
     "@icomposer/icomposer-write": "file:../icomposer-write",
-    "@icomposer/workbench-intercom": "file:../workbench-intercom",
     "@icomposer/insuremo-service": "file:../insuremo-service",
     "@icomposer/ui-insuremo-settings": "file:../ui-insuremo-settings",
     "@icomposer/ui-insuremo-status": "file:../ui-insuremo-status",

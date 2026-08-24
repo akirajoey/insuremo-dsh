@@ -6,7 +6,7 @@
  *
  *   profile composition (dump assertions) -> workspace fixture -> catalog
  *   -> ici build/query/search/explain -> verify utils (fake imo) -> push
- *   preview dry-run (fake imo) -> intercom register/ask/reply -> ici cleanup
+ *   preview dry-run (fake imo) -> ici cleanup
  *
  * Each step records {step, ok, durationMs, counts}; the summary is written to
  * <DSH_HOME>/e2e-report.json. Any failure exits non-zero.
@@ -133,13 +133,12 @@ try {
     const patchPath = join(dshHome, "profiles/icomposer-web/node_modules/@icomposer/bundle-workbench/cordis.patch.yml");
     const patch = await readFile(patchPath, "utf8");
     const pluginLines = patch.split("\n").filter(line => line.trim().startsWith("name: '@icomposer"));
-    expect(pluginLines.length === 14, `expected 14 plugin lines, got ${pluginLines.length}`);
+    expect(pluginLines.length === 13, `expected 13 plugin lines, got ${pluginLines.length}`);
     expect(patch.includes("inject: [subprocess, workspaceBinding, imoAuth, operationLog]"), "write inject line missing");
-    expect(patch.includes("inject: [storageDomain]"), "intercom inject line missing");
     expect(patch.includes("inject: [workspaceBinding, icomposerCatalog, imoAuth, jobs]"), "ici inject line missing");
     const nodeModules = await readdir(join(dshHome, "profiles/icomposer-web/node_modules/@icomposer"));
-    expect(nodeModules.includes("icomposer-write") && nodeModules.includes("workbench-intercom"), "profile install missing new packages");
-    return { plugins: 14, packages: nodeModules.length };
+    expect(nodeModules.includes("icomposer-write"), "profile install missing write package");
+    return { plugins: 13, packages: nodeModules.length };
   }) && allOk;
 
   // Shared fixture + fake runtime for the in-process chain.
@@ -256,33 +255,7 @@ try {
     return { files: res.value.files.length, conflict: false };
   }) && allOk;
 
-  // Step 10: intercom register/ask/reply (real provider over real storage).
-  const { applyIntercom } = await import("../workbench-intercom/src/index.ts");
-  let intercom: any;
-  await applyIntercom({
-    storageDomain,
-    provide(name, value) { if (name === "intercom") intercom = value; return () => {}; },
-    effect(setup) { void setup(); return () => {}; },
-  } as never);
-
-  allOk = await timed("intercom-ask-reply", async () => {
-    const asker: any = await intercom.register({ peerName: "e2e-asker", cwd: fixture.root });
-    const worker: any = await intercom.register({ peerName: "e2e-worker", cwd: fixture.root });
-    expect(asker.ok && worker.ok, "intercom register failed");
-    const list: any = await intercom.listSessions();
-    expect(list.value.length === 2, `expected 2 sessions, got ${list.value.length}`);
-    const asked: any = await intercom.ask({ fromSessionId: asker.value.sessionId, toSessionId: worker.value.sessionId, text: "run the payment regression" });
-    expect(asked.ok && asked.value.askStatus === "pending", "ask failed");
-    const st: any = await intercom.resolveStatus({ sessionId: worker.value.sessionId });
-    expect(st.value.status === "waiting", `worker not waiting: ${JSON.stringify(st.value)}`);
-    const replied: any = await intercom.reply({ fromSessionId: worker.value.sessionId, toSeq: asked.value.seq, text: "regression green" });
-    expect(replied.ok && replied.value.restored === true, "reply failed");
-    const after: any = await intercom.resolveStatus({ sessionId: worker.value.sessionId });
-    expect(after.value.status === "idle" && after.value.waitingFor.length === 0, "worker not restored");
-    return { sessions: 2, askSeq: asked.value.seq, restored: true };
-  }) && allOk;
-
-  // Step 11: ici cleanup plan/apply leaves a clean snapshot state.
+  // Step 10: ici cleanup plan/apply leaves a clean snapshot state.
   allOk = await timed("ici-cleanup", async () => {
     const plan = await ici.cleanupPlan({ workspaceId: "e2e" });
     expect(plan.ok === true, `cleanupPlan failed: ${JSON.stringify(plan.error)}`);

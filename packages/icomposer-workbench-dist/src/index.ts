@@ -14,8 +14,8 @@
  * inject `imoAuth` (lifecycle/verify/code-intelligence/write) mount after it,
  * so their sequential awaits resolve instead of deadlocking.
  * operationLog/workspaceBinding/catalog follow (write needs operationLog,
- * code-intelligence needs the catalog), then the remaining readers and
- * intercom. The interactive test plugin is intentionally excluded.
+ * code-intelligence needs the catalog), then the remaining readers. The
+ * interactive test plugin is intentionally excluded.
  */
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
@@ -27,7 +27,6 @@ import * as lifecycle from "../../icomposer-lifecycle/src/index.ts";
 import * as verify from "../../icomposer-verify/src/index.ts";
 import * as codeIntelligence from "../../icomposer-code-intelligence/src/index.ts";
 import * as write from "../../icomposer-write/src/index.ts";
-import * as intercom from "../../workbench-intercom/src/index.ts";
 import * as insuremoService from "../../insuremo-service/src/index.ts";
 
 /** Loader-facing plugin name (the distributable package identity). */
@@ -55,7 +54,7 @@ export interface WorkbenchDistConfig {
 
 /**
  * Aggregate mount service: the service shell first (imoAuth + faces + routes),
- * then registries, then the imoAuth-injecting readers/writers, then intercom.
+ * then registries, then the imoAuth-injecting readers/writers.
  */
 export class WorkbenchDistService extends Service {
   constructor(ctx: Context, config: WorkbenchDistConfig = {}) {
@@ -76,7 +75,6 @@ export class WorkbenchDistService extends Service {
     await ctx.plugin(verify as never, this.#config.verify);
     await ctx.plugin(codeIntelligence as never);
     await ctx.plugin(write as never, this.#config.write);
-    await ctx.plugin(intercom as never);
   }
 }
 

@@ -28,15 +28,40 @@ const version = manifest.version;
 const staged = join(releaseDir, "icomposer-workbench-dist");
 
 await rm(releaseDir, { recursive: true, force: true });
+await rm(join(distDir, "lib"), { recursive: true, force: true });
 await mkdir(staged, { recursive: true });
 
-// Build fresh artifacts first (lib/ is part of the shipped payload).
+// Build fresh artifacts first (lib/ is part of the shipped payload). The
+// explicit removal above is a release-time defense even if a caller bypasses
+// the package build script.
 execFileSync("pnpm", ["run", "build"], { cwd: distDir, stdio: "inherit" });
+
+const retiredWord = "inter" + "com";
+const retiredService = "INTER" + "COM_SERVICE";
+const retiredMarker = new RegExp(`workbench-${retiredWord}|${retiredService}|${retiredWord}/`, "i");
+const textExtensions = new Set([".js", ".map", ".json", ".md", ".yml"]);
+async function assertNoRetiredText(root, label) {
+  async function walkText(dir) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { await walkText(full); continue; }
+      if (!textExtensions.has(full.slice(full.lastIndexOf(".")))) continue;
+      const st = await stat(full);
+      if (st.size > 20_000_000) throw new Error(`refusing oversized text scan: ${full}`);
+      const text = await readFile(full, "utf8");
+      if (retiredMarker.test(text)) throw new Error(`retired communication marker in ${label}/${relative(root, full)}`);
+    }
+  }
+  await walkText(root);
+}
+await assertNoRetiredText(join(distDir, "lib"), "dist/lib");
 
 // Copy the install-relevant payload only.
 for (const entry of ["lib", "cordis.patch.yml", "package.json", "README.md"]) {
   await cp(join(distDir, entry), join(staged, entry), { recursive: true });
 }
+
+await assertNoRetiredText(staged, "staged");
 
 // The shipped package.json must not build on install: the prebuilt lib/ is
 // the payload, and the file:../sibling devDependencies cannot resolve inside

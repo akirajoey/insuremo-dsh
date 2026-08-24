@@ -2,7 +2,7 @@
 
 iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发工作台
 (工作区绑定、资产目录、代码智能、verify/push/test/release/create/metadata
-审批写闭环、Intercom 会话消息、设置页/状态徽标/任务节点三块 UI)。
+审批写闭环、设置页/状态徽标/任务节点三块 UI)。
 
 ## 安装(三种方式)
 
@@ -41,7 +41,7 @@ dsh plugin --profile web add @icomposer/workbench
 
 ## 已知限制（源码开发 profile）
 
-仓库的开发态 profile（`pnpm setup-profile`，14 个插件并行挂载）在真实 boot
+仓库的开发态 profile（`pnpm setup-profile`，13 个插件并行挂载）在真实 boot
 时存在 loader 生命周期问题：函数式 apply 入口的嵌套 Service/效果会在挂载后
 ~25ms 被 loader 的 effect 清扫回收（服务名随之消失，6 个入口 pending）。分发包
 （本包，单一 Service 入口）不受影响——`verify-standard-install` 的真实 boot +
@@ -71,7 +71,7 @@ overview 200 断言持续守护。开发调试请使用分发包安装路径。
 
 - `lib/index.js` —— Host 聚合入口(9 个子插件按依赖序挂载:
   operation-log → workspace-binding → catalog → reference → lifecycle →
-  verify → code-intelligence → intercom → insuremo-service)。
+  verify → code-intelligence → write → insuremo-service)。
 - `lib/client.js` —— 客户端聚合闭包工厂(设置节 + 状态徽标 + 任务节点)。
 - `cordis.patch.yml` —— 单行插件层声明。
 

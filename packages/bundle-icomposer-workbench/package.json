@@ -28,7 +28,6 @@
     "@icomposer/icomposer-lifecycle": "file:../icomposer-lifecycle",
     "@icomposer/icomposer-verify": "file:../icomposer-verify",
     "@icomposer/icomposer-code-intelligence": "file:../icomposer-code-intelligence",
-    "@icomposer/icomposer-write": "file:../icomposer-write",
-    "@icomposer/workbench-intercom": "file:../workbench-intercom"
+    "@icomposer/icomposer-write": "file:../icomposer-write"
   }
 }

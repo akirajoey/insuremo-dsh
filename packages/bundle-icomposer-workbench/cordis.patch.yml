@@ -34,10 +34,6 @@
       name: '@icomposer/icomposer-write'
       inject: [subprocess, workspaceBinding, imoAuth, operationLog]
 
-    - id: workbench-intercom
-      name: '@icomposer/workbench-intercom'
-      inject: [storageDomain]
-
     - id: insuremo-service
       name: '@icomposer/insuremo-service'
       inject: [subprocess, operationLog, skills, storageDomain, webServer]

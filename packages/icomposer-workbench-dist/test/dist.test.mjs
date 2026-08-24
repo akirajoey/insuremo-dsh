@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -44,16 +45,14 @@ test("cordis.patch.yml is a single insert with the inject union", async () => {
 test("host entry aggregates nine packages in dependency order with union inject", async () => {
   const source = await readFile(join(distDir, "src", "index.ts"), "utf8");
   // P0 fix: insuremo-service mounts FIRST (provides imoAuth), imoAuth-injecting
-  // packages (lifecycle/verify/code-intelligence/write) after it, intercom last.
-  // all ten imports present (order of imports is irrelevant; apply order is
-  // what governs service availability)
-  const names = ["insuremo-service", "operation-log", "workspace-binding", "catalog", "reference", "lifecycle", "verify", "code-intelligence", "write", "intercom"];
-  assert.equal(names.length, 10, "aggregate must mount ten packages");
+  // packages (lifecycle/verify/code-intelligence/write) after it.
+  const names = ["insuremo-service", "operation-log", "workspace-binding", "catalog", "reference", "lifecycle", "verify", "code-intelligence", "write"];
+  assert.equal(names.length, 9, "aggregate must mount nine packages");
   for (const name of names) {
     assert.ok(source.includes(`as ${requireAlias(name)}`), `aggregate missing import for ${name}`);
   }
-  // APPLY order (P0): service first, then registries, then imoAuth injectors, intercom last
-  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "verify", "codeIntelligence", "write", "intercom"];
+  // APPLY order (P0): service first, then registries, then imoAuth injectors
+  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "verify", "codeIntelligence", "write"];
   let lastApply = -1;
   for (const alias of applyOrder) {
     const idx = source.indexOf(`ctx.plugin(${alias} as never`);
@@ -67,11 +66,10 @@ test("host entry aggregates nine packages in dependency order with union inject"
     const injectorApply = source.indexOf(`ctx.plugin(${injector} as never`);
     assert.ok(serviceApply >= 0 && injectorApply > serviceApply, `${injector} must mount after insuremo-service (imoAuth)`);
   }
-  // write still after code-intelligence, intercom last
+  // write still after code-intelligence
   const writeApply = source.indexOf("ctx.plugin(write as never");
   const iciApply = source.indexOf("ctx.plugin(codeIntelligence as never");
-  const intercomApply = source.indexOf("ctx.plugin(intercom as never");
-  assert.ok(iciApply < writeApply && writeApply < intercomApply, "write mount position wrong");
+  assert.ok(iciApply < writeApply, "write mount position wrong");
   // the interactive test plugin is excluded
   assert.equal(source.includes("plugin-workbench-test"), false);
   function requireAlias(name) {
@@ -87,6 +85,24 @@ test("client entry aggregates the three UI applies with union inject", async () 
     assert.ok(source.includes(alias), `client aggregate missing ${alias}`);
   }
   assert.deepEqual(["slots", "locale", "sessions"], ["slots", "locale", "sessions"]);
+});
+
+test("clean build removes stale retired chunks and emits only fresh artifacts", async () => {
+  const libDir = join(distDir, "lib");
+  await mkdir(libDir, { recursive: true });
+  const stale = join(libDir, "stale-retired-marker.js");
+  const retiredWord = "inter" + "com";
+  const retiredService = "INTER" + "COM_SERVICE";
+  await writeFile(stale, `// workbench-${retiredWord} ${retiredService} ${retiredWord}/\n`, "utf8");
+  execFileSync("pnpm", ["run", "build"], { cwd: distDir, timeout: 120_000, stdio: "ignore" });
+  const files = await readdir(libDir);
+  assert.equal(files.includes("stale-retired-marker.js"), false);
+  assert.ok(files.includes("index.js") && files.includes("client.js"));
+  for (const file of files) {
+    if (!/[.]m?js$|[.]map$/.test(file)) continue;
+    const text = await readFile(join(libDir, file), "utf8");
+    assert.equal(new RegExp(`workbench-${retiredWord}|${retiredService}|${retiredWord}/`, "i").test(text), false, `${file} retains retired marker`);
+  }
 });
 
 test("built artifacts exist, are pure JS, and bundle @icomposer dependencies", async () => {

@@ -1,7 +1,7 @@
 /**
  * Merged cordis Context shim for the dist aggregate build: the union of the
  * member sets every Workbench sub-package consumes (verify's tools/jobs/
- * systemPrompt + insuremo-service's webServer/emit/on + intercom/storage).
+ * systemPrompt + insuremo-service's webServer/emit/on + storage).
  */
 declare module "@deepseek-ai/cordis" {
   export class Service { static readonly init: unique symbol; protected readonly ctx: Context; constructor(ctx: Context, name: string); }
