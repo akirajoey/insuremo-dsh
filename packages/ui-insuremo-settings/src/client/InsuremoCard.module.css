@@ -160,6 +160,59 @@
   flex-wrap: wrap;
 }
 
+.toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 2px 0;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+.toggle:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.controlTrack {
+  width: 30px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  transition: background 120ms var(--ds-ease-in-out), border-color 120ms var(--ds-ease-in-out);
+}
+
+.toggle[aria-checked="true"] .controlTrack {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.controlThumb {
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-1);
+  transform: translateX(0);
+  transition: transform 120ms var(--ds-ease-in-out);
+}
+
+.toggle[aria-checked="true"] .controlThumb {
+  transform: translateX(12px);
+}
+
 .meta {
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;

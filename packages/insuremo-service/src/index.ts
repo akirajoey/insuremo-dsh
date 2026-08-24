@@ -8,6 +8,7 @@ import { ImoSkillActivationService } from "./skill-activation.ts";
 import { ImoOverviewService } from "./overview/service.ts";
 import { InsuremoRoutesService, setActivationControllerOnContext } from "./overview/route-service.ts";
 import { InsuremoSkillProviderService } from "./skill-provider-service.ts";
+import { InsuremoAgentSkillMaskService } from "./skill-agent-mask-service.ts";
 import { ImoProfileContextService } from "./profile-context.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
 import { ImoSkillActionsService } from "./skill-actions/service.ts";
@@ -70,7 +71,7 @@ export const inject = ["subprocess", "operationLog", "skills", "storageDomain", 
 /** Loader-facing plugin name. */
 export const name = "@icomposer/insuremo-service";
 
-export { ImoCliService, ImoUpgradeService, ImoSkillsService, ImoAuthService, ImoAuthActionsService, ImoOverviewService, InsuremoSkillProviderService, ImoProfileContextService };
+export { ImoCliService, ImoUpgradeService, ImoSkillsService, ImoAuthService, ImoAuthActionsService, ImoOverviewService, InsuremoSkillProviderService, InsuremoAgentSkillMaskService, ImoProfileContextService };
 
 // Cordis context faces stay declared at the composition boundary so each
 // domain module remains independent of the barrel and there are no cycles.
@@ -135,6 +136,9 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   // rank-0 mask/enabled catalog survives the loader-effect sweep window and
   // controls the real aggregated model-facing catalog.
   ctx.plugin(InsuremoSkillProviderService, {});
+  // TASK-045 B: exact-agent rank-0 masks must be mounted through each
+  // agent.ctx.skills layer, not merged into the global provider layer.
+  ctx.plugin(InsuremoAgentSkillMaskService, {});
   // TASK-044 B: independent per-lifecycle profile runtime-context.
   ctx.plugin(ImoProfileContextService, {});
 }

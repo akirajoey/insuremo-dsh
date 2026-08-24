@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import { test } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
 import {
   ImoProfileContextService, decideProfileContext, shortDigest,
-  PROFILE_DIGEST_SECTION, eventDigest, compactCheckpointSource,
+  PROFILE_DIGEST_SECTION, eventDigest, compactCheckpointSource, shellQuote,
   type InsuremoProfile,
 } from "../src/profile-context.ts";
+
+const execFile = promisify(execFileCallback);
 
 function makeProfile(name: string | null, env?: string): InsuremoProfile {
   return { name, ...(env === undefined ? {} : { env }), digest: name === null ? "none" : shortDigest(name) };
@@ -56,7 +60,11 @@ test("TASK-044 B real roundtrip: turn1 injects one; turn2 same profile does NOT 
     assert.equal(first.injected.length, 1);
     const msg = first.injected[0] as { content?: { text?: string }[]; source?: { sections?: { name?: string; text?: string }[] } };
     // content is human-only: no {d= } leak
-    assert.match(msg.content?.[0]?.text ?? "", /InsureMO active profile: portal:microsite/);
+    assert.match(msg.content?.[0]?.text ?? "", /InsureMO authoritative profile for this session: portal:microsite/);
+    assert.match(msg.content?.[0]?.text ?? "", /overrides cwd workspace\/global default resolution/);
+    assert.match(msg.content?.[0]?.text ?? "", /imo auth prepare --profile 'portal:microsite' --json/);
+    assert.match(msg.content?.[0]?.text ?? "", /imo devops --profile 'portal:microsite' cicd list/);
+    assert.match(msg.content?.[0]?.text ?? "", /does not support explicit --profile, stop and report/);
     assert.doesNotMatch(msg.content?.[0]?.text ?? "", /\{d=/);
     // digest is recoverable from source metadata of the real stored event
     const digest = eventDigest(agent.session.events[agent.session.events.length - 1]);
@@ -73,6 +81,25 @@ test("TASK-044 B real roundtrip: turn1 injects one; turn2 same profile does NOT 
   } finally { await fx.fiber.dispose(); }
 });
 
+test("TASK-045 profile policy migration upgrades a legacy same-digest event once", async () => {
+  const fx = await mountFixture(makeProfile("portal:microsite"));
+  try {
+    const agent: HistoryAgent = { session: { events: [{
+      type: "user/message",
+      data: { content: [{ type: "text", text: "InsureMO active profile: portal:microsite." }], source: {
+        kind: "plugin", plugin: "icomposer-current-profile",
+        sections: [{ name: PROFILE_DIGEST_SECTION, text: `{d=${shortDigest("portal:microsite")}}` }],
+      } },
+    }] } };
+    const upgraded = await roundtrip(fx.service, agent, 1);
+    assert.equal(upgraded.injected.length, 1, "legacy Task044 event gets one policy upgrade");
+    const policy = upgraded.injected[0] as { content?: { text?: string }[]; source?: { policyVersion?: string } };
+    assert.equal(policy.source?.policyVersion, "2");
+    assert.match(policy.content?.[0]?.text ?? "", /authoritative profile/);
+    assert.equal((await roundtrip(fx.service, agent, 1)).injected.length, 0, "upgraded event dedups thereafter");
+  } finally { await fx.fiber.dispose(); }
+});
+
 test("TASK-044 B switch/compact lifecycle with real events", async () => {
   const fx = await mountFixture(makeProfile("portal:microsite"));
   try {
@@ -82,7 +109,10 @@ test("TASK-044 B switch/compact lifecycle with real events", async () => {
     const sw = await roundtrip(fx.service, agent, 1); // 2 (changed)
     assert.equal(sw.injected.length, 1);
     const swMsg = sw.injected[0] as { content?: { text?: string }[] };
-    assert.match(swMsg.content?.[0]?.text ?? "", /changed/);
+    assert.match(swMsg.content?.[0]?.text ?? "", /authoritative profile changed/);
+    assert.match(swMsg.content?.[0]?.text ?? "", /overrides cwd workspace\/global default resolution/);
+    assert.match(swMsg.content?.[0]?.text ?? "", /--profile 'portal:mo-re'/);
+    assert.doesNotMatch(swMsg.content?.[0]?.text ?? "", /portal:microsite/);
     // same new profile → dedup
     assert.equal((await roundtrip(fx.service, agent, 1)).injected.length, 0);
     // manual compact via the REAL compaction checkpoint source shape
@@ -115,10 +145,20 @@ test("TASK-044 B service registers from [Service.init], not constructor; survive
   await fiber.dispose();
 });
 
+test("TASK-045 shellQuote is execution-safe for profile command arguments", async () => {
+  const run = async (value: string): Promise<string> => {
+    const result = await execFile("/bin/bash", ["-c", `printf '%s' ${shellQuote(value)}`], { timeout: 1_000 });
+    return result.stdout;
+  };
+  assert.equal(await run("evil'x"), "evil'x");
+  assert.equal(await run("space value; printf BAD"), "space value; printf BAD");
+  assert.equal(await run("$(printf BAD)"), "$(printf BAD)");
+});
+
 test("TASK-044 B: decideProfileContext matrix (pure)", () => {
   const ev = (name: string) => ({
     type: "user/message",
-    data: { content: [{ type: "text", text: "hi" }], source: { kind: "plugin", plugin: "icomposer-current-profile", sections: [{ name: PROFILE_DIGEST_SECTION, text: `{d=${shortDigest(name)}}` }] } },
+    data: { content: [{ type: "text", text: "hi" }], source: { kind: "plugin", plugin: "icomposer-current-profile", policyVersion: "2", sections: [{ name: PROFILE_DIGEST_SECTION, text: `{d=${shortDigest(name)}}` }] } },
   });
   // first → inject
   assert.equal(decideProfileContext([], makeProfile("a")).inject, true);

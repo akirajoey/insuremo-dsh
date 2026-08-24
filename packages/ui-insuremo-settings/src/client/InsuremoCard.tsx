@@ -163,23 +163,59 @@ class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"
   }
 }
 
-class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void }, { rows: Readonly<Record<string, { error?: string; retry?: boolean }>>; updatingAll: boolean }> {
-  override state: { rows: Readonly<Record<string, { error?: string; retry?: boolean }>>; updatingAll: boolean } = { rows: {}, updatingAll: false };
+interface SkillRowState {
+  readonly enabled?: boolean;
+  readonly busy?: boolean;
+  readonly error?: string;
+  readonly retry?: boolean;
+}
+
+class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void }, { rows: Readonly<Record<string, SkillRowState>>; updatingAll: boolean }> {
+  override state: { rows: Readonly<Record<string, SkillRowState>>; updatingAll: boolean } = { rows: {}, updatingAll: false };
+
+  override componentDidUpdate(): void {
+    // Keep a successful optimistic value visible until silentReload delivers
+    // the authoritative parent props. Then remove only the override, keeping
+    // any row error/busy metadata intact.
+    const confirmed = new Set(
+      (this.props.skills.entries ?? []).filter(entry => {
+        const row = this.state.rows[entry.name];
+        return row?.enabled !== undefined && row.enabled === entry.enabled;
+      }).map(entry => entry.name),
+    );
+    if (confirmed.size === 0) return;
+    this.setState(prev => {
+      const rows = { ...prev.rows };
+      for (const name of confirmed) {
+        const row = rows[name];
+        if (row === undefined || row.enabled === undefined) continue;
+        const { enabled: _enabled, ...rest } = row;
+        rows[name] = rest;
+      }
+      return { ...prev, rows };
+    });
+  }
 
   /**
    * Last-write-wins (TASK-041): no expectedRevision is sent — the server
    * commits against its own latest revision and returns the new one, which
    * removes the revision-conflict storms when the card holds a stale view.
    */
-  private async toggle(name: string, next: boolean): Promise<void> {
-    this.setState(prev => ({ rows: { ...prev.rows, [name]: {} } }));
+  private async toggle(name: string, next: boolean, previous: boolean): Promise<void> {
+    // Optimistically move the thumb and lock only this row while the action is
+    // in flight. A failed request restores the server value explicitly.
+    this.setState(prev => ({ rows: { ...prev.rows, [name]: { enabled: next, busy: true } } }));
     const outcome = await postAction<{ revision: number }>("skill-activation", { name, enabled: next });
-    if (outcome.ok) this.props.onChanged();
-    else {
+    if (outcome.ok) {
+      // Keep the optimistic value while the parent's silent reload is still
+      // returning; otherwise the old entry prop briefly flashes back.
+      this.setState(prev => ({ rows: { ...prev.rows, [name]: { enabled: next, busy: false } } }));
+      this.props.onChanged();
+    } else {
       const conflict = outcome.error.code === "revision-conflict";
       const network = outcome.error.code === "network";
       const message = network ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
-      this.setState(prev => ({ rows: { ...prev.rows, [name]: { error: message, ...(conflict ? { retry: true } : {}) } } }));
+      this.setState(prev => ({ rows: { ...prev.rows, [name]: { enabled: previous, error: message, ...(conflict ? { retry: true } : {}) } } }));
       if (conflict) this.props.onChanged();
     }
   }
@@ -221,17 +257,23 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
           <ul className={css.list}>
             {entries.map(entry => {
               const row = this.state.rows[entry.name] ?? {};
+              const enabled = row.enabled ?? entry.enabled;
+              const busy = row.busy === true;
               return (
                 <li key={entry.name}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={entry.enabled}
-                      onChange={event => void this.toggle(entry.name, event.target.checked)}
-                      aria-label={`${t("skillsToggle")}: ${entry.name}`}
-                    />
-                    <code>{entry.name}</code>
-                  </label>
+                  <button
+                    type="button"
+                    role="switch"
+                    className={css.toggle}
+                    aria-checked={enabled}
+                    aria-busy={busy || undefined}
+                    aria-label={`${t("skillsToggle")}: ${entry.name}`}
+                    disabled={busy}
+                    onClick={() => void this.toggle(entry.name, !enabled, entry.enabled)}
+                  >
+                    <span className={css.controlTrack} aria-hidden="true"><span className={css.controlThumb} /></span>
+                  </button>
+                  <code>{entry.name}</code>
                   <span className={css.meta}>{entry.description}</span>
                   <button type="button" className={css.small} onClick={() => void this.remove(entry.name)} aria-label={`remove ${entry.name}`}>×</button>
                   {row.error !== undefined ? <span role="alert" className={css.error}>{row.error}{row.retry === true ? ` · ${t("skillsRetryHint")}` : ""}</span> : null}

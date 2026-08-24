@@ -8,8 +8,23 @@ export const PROFILE_CONTEXT_PLUGIN = "icomposer-current-profile";
 export const PROFILE_SECTION = "insuremo-active-profile";
 /** A NON-DISPLAY metadata section carrying only the profile digest token. */
 export const PROFILE_DIGEST_SECTION = "insuremo-profile-digest";
+/** Metadata version for the authoritative policy text (Task045 migration). */
+export const PROFILE_POLICY_VERSION = "2";
 /** Compact checkpoint plugin marker (Harness compaction checkpoint source). */
 const COMPACT_PLUGIN = "compact";
+
+export function shellQuote(value: string): string {
+  return "'" + value.replaceAll("'", "'\"'\"'") + "'";
+}
+
+function profilePolicyText(profile: InsuremoProfile, changed = false): string {
+  if (profile.name === null) {
+    return `${changed ? "InsureMO authoritative profile changed: none. " : "InsureMO authoritative profile for this session: none. "}Select or log in to a profile first; do not execute remote/auth commands until one is selected.`;
+  }
+  const env = profile.env === undefined ? "" : ` (env ${profile.env})`;
+  const quoted = shellQuote(profile.name);
+  return `${changed ? "InsureMO authoritative profile changed: " : "InsureMO authoritative profile for this session: "}${profile.name}${env}. This value overrides cwd workspace/global default resolution. Every remote/auth imo command must pass --profile ${quoted}; never rely on an implicit default. Examples: imo auth prepare --profile ${quoted} --json; imo devops --profile ${quoted} cicd list. If a command or script does not support explicit --profile, stop and report; do not silently fall back to the cwd default.`;
+}
 
 /** Per-session current profile fact. */
 export interface InsuremoProfile {
@@ -69,6 +84,14 @@ export function shortDigest(name: string): string {
  * `insuremo-profile-digest` section) — never from prose, never from message
  * content. The content carries only the human-readable sentence.
  */
+export function eventPolicyVersion(event: unknown): string | undefined {
+  const data = (event as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return undefined;
+  const source = (data as { source?: { kind?: unknown; plugin?: unknown; policyVersion?: unknown } }).source;
+  return source?.kind === "plugin" && source.plugin === PROFILE_CONTEXT_PLUGIN && typeof source.policyVersion === "string"
+    ? source.policyVersion : undefined;
+}
+
 export function eventDigest(event: unknown): string | undefined {
   const data = (event as { data?: unknown }).data;
   if (typeof data !== "object" || data === null) return undefined;
@@ -120,6 +143,7 @@ export interface ProfilePlan {
 export function decideProfileContext(events: readonly unknown[], profile: InsuremoProfile): ProfilePlan {
   let lastIndex = -1;
   let lastDigest: string | undefined;
+  let lastPolicyVersion: string | undefined;
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i] as { type?: unknown; data?: { source?: { kind?: unknown; plugin?: unknown } } } | undefined;
     if (ev?.type === "user/message"
@@ -127,29 +151,27 @@ export function decideProfileContext(events: readonly unknown[], profile: Insure
       && ev.data.source.plugin === PROFILE_CONTEXT_PLUGIN) {
       lastIndex = i;
       lastDigest = eventDigest(events[i]);
+      lastPolicyVersion = eventPolicyVersion(events[i]);
       break;
     }
   }
   const currentDigest = profile.digest;
-  const noneText = "InsureMO active profile: none. Run `imo auth login` and set a default profile before remote operations.";
   if (lastIndex === -1) {
     // ① first user input
-    const text = profile.name === null ? noneText
-      : `InsureMO active profile: ${profile.name}${profile.env === undefined ? "" : ` (env ${profile.env})`}.`;
-    return { inject: true, text };
+    return { inject: true, text: profilePolicyText(profile) };
   }
   if (compactAfter(events, lastIndex)) {
-    // ② compaction dropped the prior row — re-assert current
-    const text = profile.name === null ? noneText
-      : `InsureMO active profile: ${profile.name}${profile.env === undefined ? "" : ` (env ${profile.env})`}.`;
-    return { inject: true, text };
+    // ② compaction dropped the prior row — re-assert current policy
+    return { inject: true, text: profilePolicyText(profile) };
+  }
+  if (lastPolicyVersion !== PROFILE_POLICY_VERSION) {
+    // ③ Task044 events have the same digest but no policy metadata. Upgrade
+    // the durable session once without changing the plugin identity.
+    return { inject: true, text: profilePolicyText(profile) };
   }
   if (lastDigest !== currentDigest) {
-    // ③ profile switched
-    const text = profile.name === null
-      ? "InsureMO active profile changed: none (previously selected profile was cleared)."
-      : `InsureMO active profile changed: previous → ${profile.name}${profile.env === undefined ? "" : ` (env ${profile.env})`}.`;
-    return { inject: true, text, changed: true };
+    // ③ profile switched; the new authoritative policy supersedes the old one
+    return { inject: true, text: profilePolicyText(profile, true), changed: true };
   }
   return { inject: false };
 }
@@ -209,6 +231,7 @@ export class ImoProfileContextService extends Service {
           kind: "plugin",
           plugin: PROFILE_CONTEXT_PLUGIN,
           form: "snapshot",
+          policyVersion: PROFILE_POLICY_VERSION,
           sections: [
             { name: PROFILE_SECTION, text },
             { name: PROFILE_DIGEST_SECTION, text: digestText },

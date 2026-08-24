@@ -80,6 +80,8 @@ interface SkillProviderControl {
   invalidate(): void;
 }
 
+export type InsuremoSkillProviderMode = "full" | "disabled-mask";
+
 interface SkillRegistry {
   registerProvider(create: (control: SkillProviderControl) => SkillProvider): () => void;
 }
@@ -116,6 +118,7 @@ export class InsuremoSkillProvider implements SkillProvider {
   readonly #issued = new WeakSet<object>();
 
   private readonly inventoryResolver: () => ImoSkills | undefined;
+  private readonly mode: InsuremoSkillProviderMode;
 
   constructor(
     private readonly ctx: Context,
@@ -123,7 +126,9 @@ export class InsuremoSkillProvider implements SkillProvider {
     inventory: ImoSkills | (() => ImoSkills | undefined),
     private readonly scope: ImoSkillScope = "global",
     activation?: SkillActivationInput,
+    mode: InsuremoSkillProviderMode = "full",
   ) {
+    this.mode = mode;
     this.#control = control;
     this.#activation = new SkillActivationGate(ctx, control, activation);
     this.inventoryResolver = typeof inventory === "function" ? inventory : () => inventory;
@@ -209,6 +214,10 @@ export class InsuremoSkillProvider implements SkillProvider {
               }));
               continue;
             }
+            // An exact-agent provider is a mask-only overlay. Enabled entries
+            // remain available from the global provider and must not steal a
+            // nearer project/preset implementation.
+            if (this.mode === "disabled-mask") continue;
             const manifest = await resolveManifest(item.path, allowedRootPath, allowedRoot);
             this.throwIfCancelled(cancellation.signal);
             if (manifest === undefined) {
@@ -370,6 +379,32 @@ export function mountInsuremoSkillProvider(
     () => ctx.get<ImoSkills>("imoSkills"),
     scope,
     () => ctx.get<ImoSkillActivation>("imoSkillActivation"),
+  ));
+}
+
+/** Register only disabled rank-0 masks in an exact agent scope. */
+export function mountInsuremoSkillMaskProvider(
+  ctx: Context,
+  agentCtx: Context,
+  scope: ImoSkillScope = "global",
+): () => void {
+  let registry: SkillRegistry | undefined;
+  try {
+    // Prefer the exact `agent.ctx.skills` face. A scoped Cordis proxy carries
+    // the agent layer into registerProvider so its effect is agent-owned.
+    registry = (agentCtx as unknown as { skills?: SkillRegistry }).skills;
+  } catch {
+    registry = undefined;
+  }
+  registry ??= agentCtx.get<SkillRegistry>("skills");
+  if (registry === undefined || typeof registry.registerProvider !== "function") return () => {};
+  return registry.registerProvider((control) => new InsuremoSkillProvider(
+    ctx,
+    control,
+    () => ctx.get<ImoSkills>("imoSkills"),
+    scope,
+    () => ctx.get<ImoSkillActivation>("imoSkillActivation"),
+    "disabled-mask",
   ));
 }
 

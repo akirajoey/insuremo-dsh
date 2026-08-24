@@ -107,7 +107,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const openHeader = view.view.getByRole("button", { name: new RegExp(`${zh.collapse}: ${zh.title}`) });
     expect(openHeader.getAttribute("aria-expanded")).toBe("true");
     expect(await view.view.findByText(zh.imoTitle)).toBeTruthy();
-    expect(await view.view.findByRole("checkbox", { name: `${zh.skillsToggle}: imo-audit-helper` })).toBeTruthy();
+    expect(await view.view.findByRole("switch", { name: `${zh.skillsToggle}: imo-audit-helper` })).toBeTruthy();
     expect(await view.view.findByText(zh.skillsUpdateAll)).toBeTruthy();
     expect(await view.view.findByText(zh.iciTitle)).toBeTruthy();
     // auth region removed (picker owns switching)
@@ -189,14 +189,63 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const view = runtime.renderSlot("settings.plugin.item", {});
     await expand(view);
     await view.view.findByText(zh.skillsUpdateAll);
-    const toggle = view.view.getAllByRole("checkbox").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper"))!;
+    const toggle = view.view.getAllByRole("switch").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper"))!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
     toggle.click();
     expect(await view.view.findByText(/revision-conflict/)).toBeTruthy();
     expect(await view.view.findByText(new RegExp(zh.skillsRetryHint))).toBeTruthy();
     await vi.waitFor(() => {
-      const after = view.view.getAllByRole("checkbox").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper")) as HTMLInputElement;
-      expect(after.checked).toBe(true); // rolled back after refetch
+      const after = view.view.getAllByRole("switch").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper"))!;
+      expect(after.getAttribute("aria-checked")).toBe("true"); // rolled back after refetch
     });
+  });
+
+  it("skills use native switch semantics with optimistic busy state and no checkbox input", async () => {
+    let resolveAction: ((value: Response) => void) | undefined;
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/actions/skill-activation")) {
+        return await new Promise<Response>(resolve => { resolveAction = resolve; });
+      }
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    const toggle = await view.view.findByRole("switch", { name: `${zh.skillsToggle}: imo-audit-helper` });
+    expect(view.container.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    toggle.click();
+    await vi.waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    expect(toggle.getAttribute("aria-busy")).toBe("true");
+    expect((toggle as HTMLButtonElement).disabled).toBe(true);
+    await vi.waitFor(() => expect(resolveAction).toBeTruthy());
+    resolveAction?.(jsonResponse({ ok: true, result: { revision: 8 } }));
+    await vi.waitFor(() => expect(toggle.getAttribute("aria-busy")).toBeNull());
+  });
+
+  it("successful toggle holds optimistic value until deferred silent reload confirms props", async () => {
+    let resolveAction: ((value: Response) => void) | undefined;
+    let resolveReload: ((value: Response) => void) | undefined;
+    const updated = { ...fixtureView, skills: { ...fixtureView.skills, enabled: 1, disabled: 2, entries: fixtureView.skills.entries!.map(entry => entry.name === "imo-audit-helper" ? { ...entry, enabled: false } : entry) } };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-activation")) return await new Promise<Response>(resolve => { resolveAction = resolve; });
+      if (url.includes("?fast=0")) return await new Promise<Response>(resolve => { resolveReload = resolve; });
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    const toggle = await view.view.findByRole("switch", { name: `${zh.skillsToggle}: imo-audit-helper` });
+    toggle.click();
+    await vi.waitFor(() => expect(toggle.getAttribute("aria-busy")).toBe("true"));
+    await vi.waitFor(() => expect(resolveAction).toBeTruthy());
+    resolveAction?.(jsonResponse({ ok: true, result: { revision: 8 } }));
+    await vi.waitFor(() => expect(toggle.getAttribute("aria-busy")).toBeNull());
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    await vi.waitFor(() => expect(resolveReload).toBeTruthy());
+    resolveReload?.(jsonResponse(updated));
+    await vi.waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
   });
 
   it("skill remove button posts skill-remove (auth radio removed with the Auth region)", async () => {
