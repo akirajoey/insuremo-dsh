@@ -55,21 +55,33 @@ export function mountCurrentProfileSection(ctx: Context): () => void {
   // auth action completed (incl. default-profile switches) → drop the mirror
   const off = ctx.on(AUTH_ACTION_COMPLETED_EVENT as never, (() => { cached = undefined; }) as never) as unknown as (() => void) | undefined;
 
-  const unregister = ctx.systemPrompt.section({
+  const render = (): string => {
+    if (cached === undefined || Date.now() - cached.at > TTL_MS) void refresh();
+    const profile = cached?.state.profile;
+    if (profile === undefined || profile === null) {
+      return "InsureMO current auth profile: not-configured. Run `imo auth login` and set a default profile before remote operations.";
+    }
+    return `InsureMO current auth profile: ${profile.name}${profile.env === undefined ? "" : ` (env ${profile.env})`}. Workbench remote operations use this profile.`;
+  };
+
+  // TASK-042: the static section (assembled into every prompt) plus a dynamic
+  // context contribution re-evaluated per assembly — a profile switch lands
+  // in the very next message's assembled context without any per-session
+  // history (the model observes the changed value naturally).
+  const unregisterSection = ctx.systemPrompt.section({
     name: "insuremo:current-profile",
     order: 160,
-    text: (): string => {
-      if (cached === undefined || Date.now() - cached.at > TTL_MS) void refresh();
-      const profile = cached?.state.profile;
-      if (profile === undefined || profile === null) {
-        return "InsureMO current auth profile: not-configured. Run `imo auth login` and set a default profile before remote operations.";
-      }
-      return `InsureMO current auth profile: ${profile.name}${profile.env === undefined ? "" : ` (env ${profile.env})`}. Workbench remote operations use this profile.`;
-    },
+    text: render,
+  });
+  const unregisterContext = ctx.systemPrompt.context({
+    name: "insuremo:current-profile-context",
+    order: 160,
+    text: render,
   });
 
   return () => {
     try { off?.(); } catch { /* already detached */ }
-    unregister();
+    unregisterSection();
+    unregisterContext();
   };
 }

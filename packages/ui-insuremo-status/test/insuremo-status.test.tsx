@@ -90,6 +90,18 @@ describe("WorkspaceHealth", () => {
     expect(parseWorkspaceHealthRows({ workspaces: "no" })).toBeNull();
   });
 
+  it("rows carry displayName (id fallback) — TASK-041/042 health rows render titles, never raw ids when a title exists", async () => {
+    const { parseWorkspaceHealthRows } = await import("../src/client/WorkspaceHealth.tsx");
+    const rows = parseWorkspaceHealthRows({ workspaces: [
+      { workspaceId: "ws-1", displayName: "ssapocpa", detected: true, autoBindState: "bound", graphReady: true, explainReady: true },
+      { workspaceId: "ws-2", displayName: "", detected: false, autoBindState: "none", graphReady: false, explainReady: false },
+      { workspaceId: "ws-3", detected: false, autoBindState: "none", graphReady: false, explainReady: false },
+    ] });
+    expect(rows?.[0].displayName).toBe("ssapocpa");
+    expect(rows?.[1].displayName).toBe("ws-2");
+    expect(rows?.[2].displayName).toBe("ws-3");
+  });
+
 });
 
 describe("ProfilePicker (TASK-036)", () => {

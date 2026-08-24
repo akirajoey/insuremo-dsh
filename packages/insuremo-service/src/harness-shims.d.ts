@@ -25,7 +25,11 @@ declare module "@deepseek-ai/cordis" {
     emit(name: string, payload: unknown): void;
     effect(execute: () => () => void | Promise<void>, label?: string): () => Promise<void>;
     inject(names: readonly string[], callback: (ctx: unknown) => void): unknown;
-    readonly systemPrompt: { section(section: { readonly name: string; readonly order: number; readonly text: string | ((context: unknown) => string) }): () => void };
+    readonly systemPrompt: {
+      section(section: { readonly name: string; readonly order: number; readonly text: string | ((context: unknown) => string) }): () => void;
+      /** Dynamic context contribution (TASK-042): re-evaluated per assembly. */
+      context(contribution: { readonly name: string; readonly order: number; readonly text: string | ((context: unknown) => string) }): () => void;
+    };
     plugin(
       plugin: unknown,
       config?: unknown,

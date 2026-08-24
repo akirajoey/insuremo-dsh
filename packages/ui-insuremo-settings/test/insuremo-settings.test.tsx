@@ -36,7 +36,7 @@ function jsonResponse(body: unknown): Response {
 describe("InsureMO Plugins card (TASK-039/041)", () => {
   /** Card is collapsed by default (TASK-041); expand to reach the regions. */
   async function expand(view: { view: { findByRole: (role: string, opts?: Record<string, unknown>) => Promise<HTMLElement> } }): Promise<void> {
-    const toggle = await view.view.findByRole("button", { name: zh.expand });
+    const toggle = await view.view.findByRole("button", { name: new RegExp(zh.expand) });
     toggle.click();
     await Promise.resolve();
   }
@@ -78,25 +78,48 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     void resolveSlotLabel;
   });
 
-  it("collapsed by default shows the one-line summary; expanding reveals IMO/Skills/CI regions (no Auth)", async () => {
+  it("collapsed PluginCard-style header (summary description, chevron, aria); expanding reveals regions (no Auth)", async () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("settings.plugin.item", {});
-    // collapsed summary: version · default profile · skills count
-    const summary = await view.view.findByText((_, element) => element?.getAttribute("data-summary") === "1" ?? false);
-    expect(summary.textContent).toContain("0.2.17");
-    expect(summary.textContent).toContain("portal:microsite");
-    expect(summary.textContent).toContain("Skills 2/3");
+    // collapsed header button: aria-expanded=false, name + summary description
+    const header = await view.view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    // wait for the fast fetch to land: the description line carries the real
+    // summary only once the overview is ready (intermittent-loading fix)
+    await vi.waitFor(() => {
+      const element = view.container.querySelector("[data-summary=\"1\"]");
+      if (element === null || !element.textContent?.includes("0.2.17")) throw new Error("summary not ready");
+    });
+    const summary = view.container.querySelector("[data-summary=\"1\"]");
+    expect(summary?.textContent).toContain("0.2.17");
+    expect(summary?.textContent).toContain("portal:microsite");
+    expect(summary?.textContent).toContain("Skills 2/3");
+    // chevron present (svg)
+    expect(header.querySelector("svg")).toBeTruthy();
     // fast channel URL
     expect(fetchMock).toHaveBeenCalledWith(`${OVERVIEW_URL}?fast=1`, expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    // expanded regions
-    await expand(view);
+    // regions hidden while collapsed
+    expect(view.view.queryByText(zh.imoTitle)).toBeNull();
+    // expanding flips aria and reveals regions
+    header.click();
+    await Promise.resolve();
+    const openHeader = view.view.getByRole("button", { name: new RegExp(`${zh.collapse}: ${zh.title}`) });
+    expect(openHeader.getAttribute("aria-expanded")).toBe("true");
     expect(await view.view.findByText(zh.imoTitle)).toBeTruthy();
     expect(await view.view.findByRole("checkbox", { name: `${zh.skillsToggle}: imo-audit-helper` })).toBeTruthy();
     expect(await view.view.findByText(zh.skillsUpdateAll)).toBeTruthy();
     expect(await view.view.findByText(zh.iciTitle)).toBeTruthy();
     // auth region removed (picker owns switching)
     expect(view.view.queryByRole("radio")).toBeNull();
+  });
+
+  it("update-available badge rides the collapsed header (pending slot)", async () => {
+    const updateView = { ...fixtureView, imo: { ...fixtureView.imo, updateAvailable: true, target: "0.2.18" } };
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(updateView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    expect(await view.view.findByText(zh.imoUpdateAvailable)).toBeTruthy();
   });
 
   it("one-click upgrade: POST envelope + success line (direct, no approval chain)", async () => {
@@ -202,7 +225,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     vi.stubGlobal("fetch", fetchMock);
     locale.setLocale("en");
     const view = runtime.renderSlot("settings.plugin.item", {});
-    (await view.view.findByRole("button", { name: en.expand })).click();
+    (await view.view.findByRole("button", { name: new RegExp(en.expand) })).click();
     expect(await view.view.findByText(en.imoTitle)).toBeTruthy();
   });
 
@@ -214,7 +237,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(hostile));
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("settings.plugin.item", {});
-    await view.view.findByText(zh.title);
+    await view.view.findByRole("button", { name: new RegExp(zh.title) });
     await vi.waitFor(() => {
       const text = view.container.textContent ?? "";
       expect(text).not.toContain("SECRETTOKEN");

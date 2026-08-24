@@ -268,3 +268,9 @@ restart. No action uses `--insecure`; tests and real smoke never run auth writes
 **settings.plugin.item 注册范式（侦察结论）**：Plugins 设置页的卡片来自 `settings.plugin.item` keyed slot（声明在 `@deepseek-ai/dsh-client-ui-settings-plugins`，key=卡片所编辑的 settings namespace）；ConfigurablePluginsTab 通过 `api.settings.describe({})` 读 Host serve 的 namespace 列表，与浏览器侧注册的卡片 key 求交集后逐个 dispatch（`renderSlot(key, owner, { entryKey: ns })`）。**Host 侧必须 `ctx.inject(["settings"], sctx => sctx.settings.register(ns, schema, { base }))` 注册 namespace**（insuremo-service 现注册占位 namespace `insuremo`），浏览器侧同 key 注册卡片即自动配对——不自造 tab。
 
 **UI 重做**：ui-insuremo-settings 旧 InsuremoSection/四面板已删；新 `InsuremoCard`（settings.plugin.item, key="insuremo"）四区：IMO（版本+一键升级）、Auth（profile 单选切换+CLI 提示）、Skills（开关+更新全部+单项移除）、Code Intelligence（embedding 端点展示）。侧栏 footer 徽标/ProfilePicker（ui-insuremo-status）不变。
+
+## Skills 开关与 catalog 语义（TASK-042）
+
+- InsureMO provider 的条目受 activation 域门控：去勾选 → `SKILL_ACTIVATION_CHANGED` 事件（revision 递增）→ provider gate `control.invalidate()` → harness SkillRegistry 缓存失效 → 下一次 `ctx.skills.list()` 不再列出该 skill（re-enable 即恢复）。
+- 该门控只影响 **insuremo provider 自己的条目**；harness skill catalog 是多 provider 合并的全局视图，其他来源（如 `~/.agents/skills` 的宿主 provider）不受影响。
+- 集成测试 `test/skill-catalog-gate.test.ts` 用真实 SkillRegistry + 真实 activation 域固化此行为（disable → catalog 移除 → re-enable → 恢复）。

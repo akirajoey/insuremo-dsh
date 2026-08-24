@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { ChevronIcon } from "./ChevronIcon.tsx";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import { OVERVIEW_URL, parseOverview, type ImoOverviewView } from "./overview.ts";
 import { postAction } from "./actions.ts";
@@ -68,39 +69,43 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
   override render(): ReactNode {
     const state = this.state;
     const t = this.t.bind(this);
+    const summary = state.status === "ready"
+      ? `${state.view.imo.available ? (state.view.imo.current ?? "—") : t("imoUnavailable")} · ${state.view.auth.defaultProfile ?? "—"} · ${t("skillsTitle")} ${state.view.skills.enabled}/${state.view.skills.installed}`
+      : state.status === "loading" ? t("loading") : t("error");
     return (
-      <section className={css.card} aria-labelledby="insuremo-card-title">
-        <div className={css.headerRow}>
-          <h3 id="insuremo-card-title">{t("title")}</h3>
-          <button type="button" className={css.small} aria-expanded={state.expanded} onClick={() => this.setState(prev => ({ ...prev, expanded: !prev.expanded }))}>
-            {state.expanded ? t("collapse") : t("expand")}
-          </button>
-        </div>
-        {state.status === "loading" ? (
-          <p className={css.hint} data-skeleton="1" aria-busy="true">{t("loading")}</p>
-        ) : null}
-        {state.status === "error" ? <p className={css.error}>{t("error")}</p> : null}
-        {state.status === "ready" ? (
-          <>
-            <p className={css.summary} data-summary="1">
-              <code>{state.view.imo.available ? (state.view.imo.current ?? "—") : t("imoUnavailable")}</code>
-              {" · "}
-              {state.view.auth.defaultProfile ?? "—"}
-              {" · "}
-              {`${t("skillsTitle")} ${state.view.skills.enabled}/${state.view.skills.installed}`}
-            </p>
-            {state.expanded ? (
+      <section className={`${css.card}${state.expanded ? ` ${css.cardOpen}` : ""}`}>
+        <button
+          type="button"
+          className={css.header}
+          aria-expanded={state.expanded}
+          aria-label={`${t(state.expanded ? "collapse" : "expand")}: ${t("title")}`}
+          onClick={() => this.setState(prev => ({ ...prev, expanded: !prev.expanded }))}
+        >
+          <span className={css.headText}>
+            <span className={css.name}>{t("title")}</span>
+            <span className={css.description} data-summary="1">{summary}</span>
+          </span>
+          {state.status === "ready" && state.view.imo.updateAvailable ? <span className={css.pending}>{t("imoUpdateAvailable")}</span> : null}
+          <ChevronIcon className={`${css.chevron}${state.expanded ? ` ${css.chevronOpen}` : ""}`} />
+        </button>
+        {state.expanded ? (
+          <div className={css.body}>
+            {state.status === "loading" ? (
+              <p className={css.hint} data-skeleton="1" aria-busy="true">{t("loading")}</p>
+            ) : null}
+            {state.status === "error" ? <p className={css.error}>{t("error")}</p> : null}
+            {state.status === "ready" ? (
               <>
                 <ImoRegion t={t} imo={state.view.imo} onChanged={() => void this.silentReload()} />
                 <SkillsRegion t={t} skills={state.view.skills} onChanged={() => void this.silentReload()} />
                 {state.view.ici !== undefined ? <IciRegion t={t} ici={state.view.ici} /> : null}
               </>
             ) : null}
-          </>
+            <div className={css.footer}>
+              <button type="button" className={css.refresh} onClick={() => void this.load("full")} aria-label={t("refresh")}>{t("refresh")}</button>
+            </div>
+          </div>
         ) : null}
-        <p>
-          <button type="button" onClick={() => void this.load("full")} aria-label={t("refresh")}>{t("refresh")}</button>
-        </p>
       </section>
     );
   }
