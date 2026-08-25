@@ -112,10 +112,11 @@ describe("ProfilePicker (TASK-036)", () => {
   const overviewPayload = {
     auth: {
       profiles: [
-        { name: "portal:microsite", env: "aws_sg_insuremo_portal", tenantCode: "microsite", account: "user@example.com", isDefault: true, valid: true },
-        { name: "portal:mo-re", env: "aws_sg_insuremo_portal", tenantCode: "mo-re", account: "user@example.com", valid: true },
+        { name: "portal:microsite", env: "aws_sg_insuremo_portal", tenantCode: "microsite", account: "user@example.com", isDefault: true, isActive: true, valid: true },
+        { name: "portal:mo-re", env: "aws_sg_insuremo_portal", tenantCode: "mo-re", account: "user@example.com", isDefault: false, valid: true },
       ],
       defaultProfileName: "portal:microsite",
+      activeProfileName: "portal:microsite",
     },
   };
 
@@ -164,11 +165,11 @@ describe("ProfilePicker (TASK-036)", () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/overview?fast=1"), expect.anything());
   });
 
-  it("selecting a profile POSTs the action envelope and collapses with the new default", async () => {
+  it("selecting a profile POSTs the action envelope and collapses with the new Active Profile", async () => {
     let switched = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("/actions/default-profile")) {
+      if (url.includes("/actions/active-profile")) {
         expect(init?.method).toBe("POST");
         expect((init?.headers as Record<string, string>)["X-Workbench-Action"]).toBe("1");
         expect(JSON.parse(String(init?.body))).toEqual({ profile: "portal:mo-re" });
@@ -176,7 +177,7 @@ describe("ProfilePicker (TASK-036)", () => {
         return jsonResponse({ ok: true, result: { status: "completed", profile: "portal:mo-re" } });
       }
       if (url.includes("/overview") && switched) {
-        return jsonResponse({ auth: { profiles: overviewPayload.auth.profiles.map(p => ({ ...p, isDefault: p.name === "portal:mo-re" })), defaultProfileName: "portal:mo-re" } });
+        return jsonResponse({ auth: { profiles: overviewPayload.auth.profiles.map(p => ({ ...p, isActive: p.name === "portal:mo-re" })), activeProfileName: "portal:mo-re" } });
       }
       return jsonResponse(overviewPayload);
     });
@@ -191,7 +192,7 @@ describe("ProfilePicker (TASK-036)", () => {
     });
     row.click();
     await vi.waitFor(() => {
-      const actionCall = fetchMock.mock.calls.find(call => String(call[0]).includes("/actions/default-profile"));
+      const actionCall = fetchMock.mock.calls.find(call => String(call[0]).includes("/actions/active-profile"));
       expect(actionCall).toBeTruthy();
     });
     await vi.waitFor(() => {
@@ -202,7 +203,7 @@ describe("ProfilePicker (TASK-036)", () => {
   it("action failure shows the inline error and stays open", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/actions/default-profile")) {
+      if (url.includes("/actions/active-profile")) {
         return jsonResponse({ ok: false, error: { code: "busy", message: "busy" } });
       }
       return jsonResponse(overviewPayload);

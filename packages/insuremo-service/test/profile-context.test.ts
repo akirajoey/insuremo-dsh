@@ -12,7 +12,7 @@ import {
 const execFile = promisify(execFileCallback);
 
 function makeProfile(name: string | null, env?: string): InsuremoProfile {
-  return { name, ...(env === undefined ? {} : { env }), digest: name === null ? "none" : shortDigest(name) };
+  return { name, ...(env === undefined ? {} : { env }), digest: shortDigest(name ?? "<none>") };
 }
 
 interface HistoryAgent { session: { events: unknown[] } }
@@ -42,8 +42,9 @@ async function mountFixture(current: InsuremoProfile) {
       value: { profiles: cur.name === null ? [] : [{ profileName: cur.name, env: cur.env }], defaultProfile: cur.name },
     }),
   } as never);
-  // the static inject requires an `agents` service; a non-service value satisfies it
+  // the static inject requires `agents` and the Workbench Active Profile face.
   ctx.provide("agents" as never, {} as never);
+  ctx.provide("imoActiveProfile" as never, { get: async () => ({ ok: true, value: { activeProfileName: cur.name, profile: cur.name === null ? undefined : { env: cur.env } } }) } as never);
   const fiber = ctx.plugin(ImoProfileContextService as never);
   await fiber.await();
   const service = ctx.get("imoProfileContext" as never) as unknown as ImoProfileContextService;
@@ -136,6 +137,7 @@ test("TASK-044 B digest helper: stable non-secret id", () => {
 test("TASK-044 B service registers from [Service.init], not constructor; survives a >100ms sweep window", async () => {
   const ctx = new Context();
   ctx.provide("imoAuth", { profilesFast: async () => ({ ok: false, error: {} }) } as never);
+  ctx.provide("imoActiveProfile" as never, { get: async () => ({ ok: true, value: { activeProfileName: null } }) } as never);
   ctx.provide("agents" as never, {} as never);
   const fiber = ctx.plugin(ImoProfileContextService as never);
   await fiber.await();
@@ -205,6 +207,7 @@ test("TASK-044 FIX: disposeProfileContext via ctx.get() proxy removes the real l
     }),
   } as never);
   ctx.provide("agents" as never, {} as never);
+  ctx.provide("imoActiveProfile" as never, { get: async () => ({ ok: true, value: { activeProfileName: "portal:microsite", profile: {} } }) } as never);
   const fiber = ctx.plugin(ImoProfileContextService as never);
   await fiber.await();
   const proxy = ctx.get("imoProfileContext" as never) as unknown as {

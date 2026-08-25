@@ -17,7 +17,7 @@ const fixtureView = {
   auth: { status: "ok", profiles: [
     { name: "portal:microsite", env: "portal", tenantCode: "microsite", isDefault: true, valid: true },
     { name: "portal:mo-re", env: "portal", tenantCode: "mo-re", valid: true },
-  ], count: 2, defaultProfile: "portal:microsite" },
+  ], count: 2, defaultProfile: "portal:microsite", activeProfileName: "portal:microsite", activeProfileStatus: "active" },
   skills: { status: "ok", installed: 3, valid: 3, enabled: 2, disabled: 1, names: ["a", "b", "c"], activationRevision: 7, entries: [
     { name: "imo-audit-helper", description: "audit", enabled: true },
     { name: "imo-log-helper", description: "log", enabled: false },

@@ -277,6 +277,36 @@ test("skill-update/install/remove direct kernels + default-profile direct", asyn
   } finally { await h.dispose(); }
 });
 
+test("TASK-047 active-profile route delegates only to Active Profile and maps failures", async () => {
+  const calls: string[] = [];
+  const h = await fixture(baseServices({
+    authActions: { runDirectDefaultSwitch: async () => { calls.push("default"); return { ok: true, receipt: { status: "completed" } }; } },
+  }));
+  try {
+    const unavailable = await call(h.server, "active-profile", { body: JSON.stringify({ profile: "a" }) });
+    assert.equal(JSON.parse(unavailable.body).error.code, "service-unavailable");
+    const active = {
+      select: async (name: string) => {
+        calls.push(`active:${name}`);
+        if (name === "bad") return { ok: false, error: { code: "invalid-profile", message: "profile is not available" } };
+        if (name === "down") return { ok: false, error: { code: "unavailable", message: "unavailable" } };
+        return { ok: true, value: { activeProfileName: name, revision: 4 } };
+      },
+    };
+    h.ctx.provide("imoActiveProfile" as never, active as never);
+    const success = await call(h.server, "active-profile", { body: JSON.stringify({ profile: "good" }) });
+    assert.deepEqual(JSON.parse(success.body), { ok: true, result: { status: "completed", profile: "good", revision: 4 } });
+    const invalid = await call(h.server, "active-profile", { body: JSON.stringify({ profile: "bad" }) });
+    assert.equal(JSON.parse(invalid.body).error.code, "invalid-profile");
+    const failure = await call(h.server, "active-profile", { body: JSON.stringify({ profile: "down" }) });
+    assert.equal(JSON.parse(failure.body).error.code, "unavailable");
+    const missing = await call(h.server, "active-profile", { body: JSON.stringify({}) });
+    assert.equal(JSON.parse(missing.body).error.code, "invalid-input");
+    assert.deepEqual(calls, ["active:good", "active:bad", "active:down"]);
+  } finally { await h.dispose(); }
+  assert.equal(h.server.routes.has(actionPath("active-profile")), false);
+});
+
 test("method gate: GET → 405; dispose unmounts all routes", async () => {
   const h = await fixture();
   try {

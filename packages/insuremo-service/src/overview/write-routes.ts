@@ -236,7 +236,19 @@ export function mountWriteRoutes(ctx: Context): () => void {
     return directSkillOutcome(outcome);
   }));
 
-  // default-profile: direct one-shot switch, no approval chain.
+  // active-profile: Workbench-owned selection. It validates the fresh
+  // sanitized inventory and never invokes the IMO default-profile command.
+  register(actionRoute(`${ACTIONS_PREFIX}/active-profile`, async (body, signal) => {
+    const active = ctx.get("imoActiveProfile" as never) as { select(name: string, signal?: AbortSignal): Promise<{ ok: true; value: { activeProfileName: string | null; revision: number } } | { ok: false; error: { code?: string; message?: string } }> } | undefined;
+    if (active === undefined) return faceError(undefined, "service-unavailable");
+    const profile = str(body.profile);
+    if (profile === undefined) return faceError({ code: "invalid-input", message: "profile is required" }, "invalid-input");
+    const selected = await active.select(profile, signal);
+    if (!selected.ok) return faceError(selected.error, "action-failed");
+    return { ok: true, result: { status: selected.value.activeProfileName === profile ? "completed" : "none", profile, revision: selected.value.revision } };
+  }));
+
+  // default-profile: direct one-shot switch, no approval chain (legacy explicit workflow).
   register(actionRoute(`${ACTIONS_PREFIX}/default-profile`, async (body, signal) => {
     const authActions = ctx.get("imoAuthActions" as never) as unknown as {
       runDirectDefaultSwitch(input: { profile: string }, signal?: AbortSignal): Promise<

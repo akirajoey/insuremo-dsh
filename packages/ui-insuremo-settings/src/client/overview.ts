@@ -6,6 +6,7 @@ export interface OverviewProfileView {
   readonly env?: string;
   readonly tenantCode?: string;
   readonly isDefault: boolean;
+  readonly isActive?: boolean;
   readonly valid?: boolean;
 }
 
@@ -41,6 +42,9 @@ export interface ImoOverviewView {
     readonly profiles: readonly OverviewProfileView[];
     readonly count: number;
     readonly defaultProfile?: string;
+    readonly activeProfileName?: string | null;
+    readonly activeProfileRevision?: number;
+    readonly activeProfileStatus?: string;
   };
   readonly skills: {
     readonly status: string;
@@ -115,11 +119,15 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
           ...optStr("env", p?.env),
           ...optStr("tenantCode", p?.tenantCode),
           isDefault: bool(p?.isDefault),
+          ...(bool(p?.isActive) ? { isActive: true } : {}),
           ...optBool("valid", p?.valid),
         };
       }),
       count: num(auth.count),
       ...optStr("defaultProfile", auth.defaultProfile),
+      ...(auth.activeProfileName === null ? { activeProfileName: null } : optStr("activeProfileName", auth.activeProfileName)),
+      ...(typeof auth.activeProfileRevision === "number" && Number.isFinite(auth.activeProfileRevision) ? { activeProfileRevision: Math.trunc(auth.activeProfileRevision) } : {}),
+      ...optStr("activeProfileStatus", auth.activeProfileStatus),
     },
     skills: {
       status: str(skills.status, "error"),

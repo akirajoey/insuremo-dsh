@@ -1,6 +1,7 @@
 import { isSkillName } from "@deepseek-ai/dsh-skill";
 import type { ImoCli } from "../cli.ts";
 import type { ImoAuth } from "../auth/types.ts";
+import type { ImoActiveProfile } from "../active-profile.ts";
 import type { ImoSkills } from "../skills.ts";
 import type { ImoSkillActivation } from "../skill-activation.ts";
 import type { OperationLogLike } from "../operation-log-face.ts";
@@ -22,6 +23,7 @@ const MAX_RECENT = 20;
 export interface OverviewDependencies {
   readonly imoCli: ImoCli;
   readonly imoAuth: ImoAuth;
+  readonly imoActiveProfile?: ImoActiveProfile;
   readonly imoSkills: ImoSkills;
   readonly imoSkillActivation: ImoSkillActivation;
   readonly operationLog: OperationLogLike;
@@ -105,21 +107,29 @@ async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Pr
       });
       return section;
     }
+    const active = deps.imoActiveProfile === undefined ? undefined : await deps.imoActiveProfile.get(signal);
+    const activeView = active?.ok === true ? active.value : undefined;
+    const activeName = activeView?.activeProfileName ?? null;
     const profiles = list.value.profiles.slice(0, MAX_PROFILES).map(profile => Object.freeze({
       name: profile.profileName,
       ...(profile.env === undefined ? {} : { env: profile.env }),
       ...(profile.tenantCode === undefined ? {} : { tenantCode: profile.tenantCode }),
       ...(profile.accountName === undefined ? {} : { account: profile.accountName }),
       isDefault: profile.isDefault === true,
+      ...(activeView === undefined ? {} : { isActive: activeName === profile.profileName }),
       ...(profile.valid === undefined ? {} : { valid: profile.valid }),
     }));
     const defaultProfile = def.ok ? (def.value.profileName ?? undefined) : undefined;
     const noDefault = defaultProfile === undefined && profiles.length > 0;
+    const activeStatus = activeView?.status ?? (active === undefined ? "active" : "unavailable");
     section = Object.freeze({
-      status: noDefault || !def.ok ? "warning" : "ok",
+      status: noDefault || !def.ok || activeStatus !== "active" ? "warning" : "ok",
+      ...(active === undefined || active.ok ? {} : { code: "unavailable" as const }),
       profiles,
       count: list.value.profiles.length,
       ...(defaultProfile === undefined ? {} : { defaultProfile, defaultProfileName: defaultProfile }),
+      activeProfileName: activeName,
+      ...(activeView === undefined ? {} : { activeProfileRevision: activeView.revision, activeProfileStatus: activeView.status }),
     });
   } catch {
     section = Object.freeze({ status: "error", code: "unavailable", profiles: [], count: 0 });

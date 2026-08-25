@@ -13,12 +13,12 @@ interface ProfileRow {
   readonly env?: string;
   readonly tenantCode?: string;
   readonly account?: string;
-  readonly isDefault?: boolean;
+  readonly isActive?: boolean;
 }
 
 type PickerState =
-  | { readonly phase: "collapsed"; readonly profiles?: readonly ProfileRow[]; readonly defaultName?: string }
-  | { readonly phase: "open"; readonly profiles: readonly ProfileRow[]; readonly defaultName?: string; readonly busy: boolean; readonly error?: string };
+  | { readonly phase: "collapsed"; readonly profiles?: readonly ProfileRow[]; readonly activeName?: string }
+  | { readonly phase: "open"; readonly profiles: readonly ProfileRow[]; readonly activeName?: string; readonly busy: boolean; readonly error?: string };
 
 function tooltipOf(profile: ProfileRow, fallback: string): string {
   const parts = [profile.env, profile.tenantCode, profile.account].filter((part): part is string => typeof part === "string" && part.length > 0);
@@ -26,29 +26,29 @@ function tooltipOf(profile: ProfileRow, fallback: string): string {
 }
 
 /**
- * Sidebar default-profile selector (TASK-041): rendered as plain text rows
- * matching the session rows — collapsed shows the current default profile
+ * Sidebar Active Profile selector (TASK-047): rendered as plain text rows
+ * matching the session rows — collapsed shows the current active profile
  * name; expanded lists profile names with env/account/tenant on hover.
- * Data comes from the fast overview channel (profile-store read, no CLI
+ * Data comes from the fast overview channel (sanitized overview read, no CLI
  * subprocess); the switch still goes through the write bridge.
  */
 export class ProfilePicker extends Component<ProfilePickerProps, PickerState> {
   override state: PickerState = { phase: "collapsed" };
 
-  /** Fetch the current default once on mount (fast channel, millisecond
-   * read) so the collapsed row shows the profile name, not a placeholder. */
+  /** Fetch the current Active Profile once on mount so the collapsed row
+   * shows the selected profile name, not a placeholder. */
   override componentDidMount(): void {
-    void this.warmDefault();
+    void this.warmActive();
   }
 
-  private async warmDefault(): Promise<void> {
-    if (this.state.phase !== "collapsed" || this.state.defaultName !== undefined) return;
+  private async warmActive(): Promise<void> {
+    if (this.state.phase !== "collapsed" || this.state.activeName !== undefined) return;
     try {
       const response = await fetch(`${OVERVIEW_URL}?fast=1`, { headers: { Accept: "application/json" } });
       if (!response.ok) return;
       const parsed = this.parseProfiles(await response.json());
-      if (this.state.phase === "collapsed" && this.state.defaultName === undefined) {
-        this.setState({ phase: "collapsed", profiles: parsed.profiles, defaultName: parsed.defaultName });
+      if (this.state.phase === "collapsed" && this.state.activeName === undefined) {
+        this.setState({ phase: "collapsed", profiles: parsed.profiles, activeName: parsed.activeName });
       }
     } catch { /* keep placeholder */ }
   }
@@ -66,7 +66,7 @@ export class ProfilePicker extends Component<ProfilePickerProps, PickerState> {
     throw new Error("overview");
   }
 
-  private parseProfiles(payload: unknown): { profiles: readonly ProfileRow[]; defaultName?: string } {
+  private parseProfiles(payload: unknown): { profiles: readonly ProfileRow[]; activeName?: string } {
     if (typeof payload !== "object" || payload === null) throw new Error("shape");
     const auth = (payload as { auth?: unknown }).auth;
     if (typeof auth !== "object" || auth === null) throw new Error("shape");
@@ -81,24 +81,22 @@ export class ProfilePicker extends Component<ProfilePickerProps, PickerState> {
         env: typeof item.env === "string" ? item.env : undefined,
         tenantCode: typeof item.tenantCode === "string" ? item.tenantCode : undefined,
         account: typeof item.account === "string" ? item.account : undefined,
-        isDefault: item.isDefault === true,
+        isActive: item.isActive === true,
       }));
     const authRecord = auth as Record<string, unknown>;
-    const defaultName = typeof authRecord.defaultProfileName === "string"
-      ? authRecord.defaultProfileName
-      : typeof authRecord.defaultProfile === "string" ? authRecord.defaultProfile : undefined;
-    return { profiles, defaultName };
+    const activeName = typeof authRecord.activeProfileName === "string" ? authRecord.activeProfileName : undefined;
+    return { profiles, activeName };
   }
 
   private async open(): Promise<void> {
     if (this.state.phase === "open") return;
-    const previous = "defaultName" in this.state ? this.state.defaultName : undefined;
-    this.setState({ phase: "open", profiles: [], defaultName: previous, busy: true });
+    const previous = "activeName" in this.state ? this.state.activeName : undefined;
+    this.setState({ phase: "open", profiles: [], activeName: previous, busy: true });
     try {
       const response = await this.fetchFastRetry();
       if (!response.ok) throw new Error("overview");
       const parsed = this.parseProfiles(await response.json());
-      this.setState({ phase: "open", profiles: parsed.profiles, defaultName: parsed.defaultName, busy: false });
+      this.setState({ phase: "open", profiles: parsed.profiles, activeName: parsed.activeName, busy: false });
     } catch {
       this.setState(prev => (prev.phase === "open" ? { ...prev, busy: false, error: "network" } : prev));
     }
@@ -107,18 +105,18 @@ export class ProfilePicker extends Component<ProfilePickerProps, PickerState> {
   private async pick(name: string): Promise<void> {
     if (this.state.phase !== "open" || this.state.busy) return;
     this.setState((prev: PickerState) => prev.phase === "open" ? { ...prev, busy: true } : prev);
-    const outcome = await postAction<{ status: string; profile: string }>("default-profile", { profile: name });
+    const outcome = await postAction<{ status: string; profile: string }>("active-profile", { profile: name });
     if (outcome.ok) {
       const refreshed = await fetch(`${OVERVIEW_URL}?fast=1`, { headers: { Accept: "application/json" } }).then(r => r.ok ? r.json() : null).catch(() => null);
-      let nextDefault = name;
+      let nextActive = name;
       let nextProfiles: readonly ProfileRow[] | undefined;
       try {
         const parsed = this.parseProfiles(refreshed);
-        nextDefault = parsed.defaultName ?? name;
+        nextActive = parsed.activeName ?? name;
         nextProfiles = parsed.profiles;
       } catch { /* keep optimistic */ }
       this.setState((prev: PickerState) => prev.phase === "open"
-        ? { phase: "collapsed", profiles: nextProfiles ?? prev.profiles, defaultName: nextDefault }
+        ? { phase: "collapsed", profiles: nextProfiles ?? prev.profiles, activeName: nextActive }
         : prev);
     } else {
       const error = outcome.error.code === "network" ? "network" : outcome.error.code;
@@ -130,7 +128,7 @@ export class ProfilePicker extends Component<ProfilePickerProps, PickerState> {
     const { t } = this.props;
     const state = this.state;
     if (state.phase === "collapsed") {
-      const current = "defaultName" in state && state.defaultName !== undefined ? state.defaultName : "";
+      const current = "activeName" in state && state.activeName !== undefined ? state.activeName : "";
       const currentRow = "profiles" in state ? state.profiles?.find(profile => profile.name === current) : undefined;
       const title = currentRow !== undefined ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
       return (
@@ -155,15 +153,15 @@ export class ProfilePicker extends Component<ProfilePickerProps, PickerState> {
               <button
                 type="button"
                 role="option"
-                aria-selected={profile.isDefault === true}
+                aria-selected={profile.isActive === true}
                 disabled={state.busy}
                 title={tooltipOf(profile, profile.name)}
-                data-default={profile.isDefault === true ? "1" : undefined}
+                data-active={profile.isActive === true ? "1" : undefined}
                 onClick={() => void this.pick(profile.name)}
                 className={css.row}
               >
                 <span className={css.rowName}>{profile.name}</span>
-                {profile.isDefault === true ? <span className={css.rowMark} aria-hidden="true">✓</span> : null}
+                {profile.isActive === true ? <span className={css.rowMark} aria-hidden="true">✓</span> : null}
               </button>
             </li>
           ))}

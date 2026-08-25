@@ -25,6 +25,7 @@ export interface OverviewAuthProfile {
   /** Login account (fast channel tooltip). */
   readonly account?: string;
   readonly isDefault: boolean;
+  readonly isActive?: boolean;
   readonly valid?: boolean;
 }
 
@@ -34,6 +35,9 @@ export interface OverviewAuthSection extends OverviewSectionBase {
   readonly defaultProfile?: string;
   /** Same value as defaultProfile under the UI-facing field name. */
   readonly defaultProfileName?: string;
+  readonly activeProfileName?: string | null;
+  readonly activeProfileRevision?: number;
+  readonly activeProfileStatus?: "active" | "none" | "missing" | "unavailable";
 }
 
 /** Per-skill row for the Settings skills panel (allowlist, ≤100 entries). */

@@ -11,6 +11,7 @@ import { InsuremoSkillProviderService } from "./skill-provider-service.ts";
 import { InsuremoAgentSkillMaskService } from "./skill-agent-mask-service.ts";
 import { ImoProfileContextService } from "./profile-context.ts";
 import { ImoAuthService, ImoAuthActionsService } from "./auth/index.ts";
+import { ImoActiveProfileService } from "./active-profile.ts";
 import { ImoSkillActionsService } from "./skill-actions/service.ts";
 import type { ImoCli } from "./cli.ts";
 import type { ImoUpgrade } from "./upgrade.ts";
@@ -59,6 +60,8 @@ export {
   invalidateInsuremoSkillCatalog,
 } from "./skill-provider.ts";
 export * from "./auth/index.ts";
+export { ImoActiveProfileService, activeProfileDomain, ACTIVE_PROFILE_CHANGED_EVENT } from "./active-profile.ts";
+export type { ImoActiveProfile, ActiveProfileView, ActiveProfileResult, ActiveProfileStatus } from "./active-profile.ts";
 export type {
   ImoCliError,
   ImoCliErrorCode,
@@ -85,6 +88,7 @@ declare module "@deepseek-ai/cordis" {
     imoOverview: ImoOverview;
     imoAuth: ImoAuth;
     imoAuthActions: ImoAuthActions;
+    imoActiveProfile: import("./active-profile.ts").ImoActiveProfile;
     operationLog: OperationLogLike;
   }
 }
@@ -130,6 +134,7 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
     },
   });
   ctx.plugin(ImoAuthService, merged);
+  ctx.plugin(ImoActiveProfileService, {});
   ctx.plugin(ImoAuthActionsService, merged);
   ctx.plugin(ImoOverviewService, merged as never);
   // TASK-044 C: mount the provider via a PERSISTENT SERVICE so the

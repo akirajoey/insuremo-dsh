@@ -52,20 +52,17 @@ export interface ProfilePreStepDecision {
   readonly messages?: readonly unknown[];
 }
 
-/** Default resolver fed by the sanitized imoAuth fast cache. */
+/** Resolver reads only the Workbench-owned Active Profile face. */
 function defaultResolver(ctx: Context): ProfileResolver {
   return async () => {
-    const auth = (ctx as unknown as { get(name: string): unknown }).get("imoAuth") as {
-      profilesFast?: () => Promise<{ ok: boolean; value?: { profiles: readonly { profileName: string; env?: string }[]; defaultProfile: string | null } }>;
+    const active = (ctx as unknown as { get(name: string): unknown }).get("imoActiveProfile") as {
+      get?: () => Promise<{ ok: boolean; value?: { activeProfileName: string | null; profile?: { env?: string } } }>;
     } | undefined;
-    if (auth?.profilesFast === undefined) return undefined;
-    const fast = await auth.profilesFast();
-    if (fast.ok !== true || fast.value === undefined) return undefined;
-    const name = fast.value.defaultProfile;
-    if (name === null || name === undefined) return { name: null, digest: shortDigest("\u003cnone\u003e") };
-    const found = fast.value.profiles.find(p => p.profileName === name);
-    const digest = shortDigest(name);
-    return { name, ...(found?.env === undefined ? {} : { env: found.env }), digest };
+    if (active?.get === undefined) return undefined;
+    const result = await active.get();
+    if (result.ok !== true || result.value === undefined) return undefined;
+    const name = result.value.activeProfileName;
+    return { name, ...(result.value.profile?.env === undefined ? {} : { env: result.value.profile.env }), digest: shortDigest(name ?? "<none>") };
   };
 }
 
@@ -187,7 +184,7 @@ export function decideProfileContext(events: readonly unknown[], profile: Insure
  * the loader sweep window). The disposer is retained and released on teardown.
  */
 export class ImoProfileContextService extends Service {
-  static inject = ["agents", "imoAuth"] as const;
+  static inject = ["agents", "imoAuth", "imoActiveProfile"] as const;
 
   private readonly resolver: ProfileResolver;
   #disposers: (() => void)[] = [];

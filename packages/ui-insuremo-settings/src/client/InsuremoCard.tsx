@@ -70,7 +70,7 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
     const state = this.state;
     const t = this.t.bind(this);
     const summary = state.status === "ready"
-      ? `${state.view.imo.available ? (state.view.imo.current ?? "—") : t("imoUnavailable")} · ${state.view.auth.defaultProfile ?? "—"} · ${t("skillsTitle")} ${state.view.skills.enabled}/${state.view.skills.installed}`
+      ? `${state.view.imo.available ? (state.view.imo.current ?? "—") : t("imoUnavailable")} · ${state.view.auth.activeProfileName ?? "—"} · ${t("skillsTitle")} ${state.view.skills.enabled}/${state.view.skills.installed}`
       : state.status === "loading" ? t("loading") : t("error");
     return (
       <section className={`${css.card}${state.expanded ? ` ${css.cardOpen}` : ""}`}>
