@@ -241,9 +241,11 @@ describe("theme variable regression (TASK-040)", () => {
     expect(picker).toContain("var(--dsw-alias-state-error-primary)");
   });
 
-  it("pending iComposer hint locale exists in both languages", async () => {
-    expect(zh["health.iComposerPendingHint"]).toContain("绑定");
-    expect(en["health.iComposerPendingHint"]).toContain("bind workspace");
+  it("pending iComposer hint says local ICI is available and binding is remote-only", async () => {
+    expect(zh["health.iComposerPendingHint"]).toContain("本地 ICI");
+    expect(zh["health.iComposerPendingHint"]).toContain("远程写操作");
+    expect(en["health.iComposerPendingHint"]).toContain("local ICI");
+    expect(en["health.iComposerPendingHint"]).toContain("remote write");
   });
 });
 

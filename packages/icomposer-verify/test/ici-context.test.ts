@@ -32,7 +32,10 @@ test("ICI context injects only for exact detected/bound workspace and deduplicat
     const source = (first.messages?.[0] as { source?: { plugin?: string; workspaceId?: string } }).source;
     assert.equal(source?.plugin, ICI_CONTEXT_PLUGIN);
     assert.equal(source?.workspaceId, "ws-a");
-    assert.match(String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text), /ici_build/);
+    const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
+    assert.match(text, /ici_build/);
+    assert.match(text, /ici_explain also writes workspace-local explain context\/state artifacts/);
+    assert.doesNotMatch(text, /query\/search\/explain.*read-only/);
     assert.equal((await step(fx.service, current)).messages?.length, 0);
     assert.equal((await step(fx.service, current, 2)).messages?.length, 0);
   } finally { await fx.fiber.dispose(); }

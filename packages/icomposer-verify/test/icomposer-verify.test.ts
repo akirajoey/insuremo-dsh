@@ -471,16 +471,17 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
       if (buildShouldFail) return { ok: false, error: { code: "storage-error" } };
       options?.onProgress?.(1, 2, "scanning metadata api");
       options?.onProgress?.(2, 2, "writing graph outputs");
-      return { ok: true, value: { manifest: { nodeCount: 3, edgeCount: 2, sourceFingerprint: "f".repeat(64), builtAt: new Date().toISOString() } } };
+      return { ok: true, value: { artifactPath: ".metadata/icomposer/ici/graph/current", manifest: { nodeCount: 3, edgeCount: 2, sourceFingerprint: "f".repeat(64), builtAt: new Date().toISOString() } } };
     },
     index: async (input: { workspaceId: string; rebuild?: boolean }, options?: { signal?: AbortSignal; onProgress?: (c: number, t: number, l: string) => void }) => {
       if (buildShouldFail) return { ok: false, error: { code: "embedding-error" } };
       options?.onProgress?.(1, 1, "embedding batch");
-      return { ok: true, value: { total: 5, embedded: input.rebuild === true ? 5 : 1, reused: input.rebuild === true ? 0 : 4 } };
+      return { ok: true, value: { artifactPath: ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl", total: 5, embedded: input.rebuild === true ? 5 : 1, reused: input.rebuild === true ? 0 : 4 } };
     },
     explainContext: async () => ({
       ok: true,
       value: {
+        artifactPath: ".metadata/icomposer/ici/explain/TestAPI-abc/context.json",
         api: { id: "api:TestAPI", name: "TestAPI", path: "src/x.groovy" },
         technicalText: "API: TestAPI\nMode: technical\nDownstream: function:Fn",
         downstream: [{ id: "method:TestAPI.execute", kind: "method" }],
@@ -615,11 +616,14 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     assert.equal(buildInline.kind, "inline");
     assert.equal(buildInline.detail.nodeCount, 3);
     assert.equal(buildInline.detail.edgeCount, 2);
+    assert.equal(buildInline.artifact_path, ".metadata/icomposer/ici/graph/current");
+    assert.equal(buildInline.detail.artifact_path, undefined);
     assert.equal(buildInline.error, undefined);
-    assert.doesNotThrow(() => registered.get("ici_build")!.output.render({}, buildInline));
+    assert.match((registered.get("ici_build")!.output.render({}, buildInline) as any)[0].text, /artifact=\.metadata/);
     // ici_build search-index mode
     const indexInline: any = await registered.get("ici_build")!.execute({ workspace_id: "ws1", mode: "search-index", rebuild: true }, exec);
     assert.equal(indexInline.kind, "inline");
+    assert.equal(indexInline.artifact_path, ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl");
     assert.deepEqual(indexInline.detail, { total: 5, embedded: 5, reused: 0 });
     // ici_status diagnostics projection
     const status: any = await registered.get("ici_status")!.execute({ workspace_id: "ws1" }, exec);
@@ -633,7 +637,8 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     assert.equal(explainOut.impactCount, 1);
     assert.deepEqual(explainOut.businessReference, ["IComposerPaymentUtils"]);
     assert.equal(explainOut.error, undefined);
-    assert.doesNotThrow(() => registered.get("ici_explain")!.output.render({}, explainOut));
+    assert.equal(explainOut.artifact_path, ".metadata/icomposer/ici/explain/TestAPI-abc/context.json");
+    assert.match((registered.get("ici_explain")!.output.render({}, explainOut) as any)[0].text, /artifact=\.metadata/);
   } finally {
     for (const dispose of disposers) dispose();
   }

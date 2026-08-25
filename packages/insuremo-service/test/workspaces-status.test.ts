@@ -94,6 +94,24 @@ test("statuses: four-quadrant aggregation (bound×graph×explain joins)", async 
   } finally { await h.dispose(); await rm(dsh, { recursive: true, force: true }); }
 });
 
+test("new explain state requires a matching valid artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "w038-artifact-"));
+  const stateDir = join(root, ".metadata", "icomposer", "ici", "explain");
+  await mkdir(stateDir, { recursive: true });
+  const artifactPath = ".metadata/icomposer/ici/explain/Api-ce111709f54c/context.json";
+  await mkdir(join(root, ".metadata", "icomposer", "ici", "explain", "Api-ce111709f54c"), { recursive: true });
+  await writeFile(join(root, artifactPath), JSON.stringify({ schemaVersion: 2, kind: "context", bundle: { api: {}, manifest: {}, technicalText: "x", downstream: [], impact: [] } }), "utf8");
+  await writeFile(join(stateDir, "state.json"), JSON.stringify({ schemaVersion: 2, kind: "context", generatedAt: "now", apiName: "Api", artifactPath }), "utf8");
+  const h = await fixture({ rows: [{ workspaceId: "ws-artifact", canonicalPath: root, detectedIcomposer: true, autoBindState: "pending" }] });
+  try {
+    let statuses = await buildWorkspaceStatuses(h.ctx as never);
+    assert.equal(statuses[0]?.explainReady, true);
+    await writeFile(join(root, artifactPath), JSON.stringify({ schemaVersion: 2, kind: "deterministic", result: {} }), "utf8");
+    statuses = await buildWorkspaceStatuses(h.ctx as never);
+    assert.equal(statuses[0]?.explainReady, false);
+  } finally { await h.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("route: GET serves the projection with no-store/nosniff; non-GET → 405; dispose unmounts", async () => {
   const h = await fixture({
     rows: [{ workspaceId: "ws-1", canonicalPath: "/x", detectedIcomposer: true, autoBindState: "bound" }],

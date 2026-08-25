@@ -15,47 +15,114 @@ export function workspaceHash(canonicalPathInput: string, workspaceId: string): 
   return createHash("sha256").update(`${canonicalPath}:${workspaceId}`).digest("hex").slice(0, 16);
 }
 
-export function graphBaseDir(canonicalPath: string, workspaceId: string): string {
+export function workspaceIciBaseDir(canonicalPath: string): string {
+  return join(canonicalPath, ".metadata", "icomposer", "ici");
+}
+
+export function legacyGraphBaseDir(canonicalPath: string, workspaceId: string): string {
   return join(getDshHome(), "ici", workspaceHash(canonicalPath, workspaceId), "graph");
 }
 
-/** Marker file recording the last successful explain (icon data source). */
-export function explainStatePath(canonicalPath: string, workspaceId: string): string {
-  return join(graphBaseDir(canonicalPath, workspaceId), "explain-state.json");
+/** New writes live in the workspace-owned, CLI/cache metadata area. */
+export function graphBaseDir(canonicalPath: string, _workspaceId: string): string {
+  return join(workspaceIciBaseDir(canonicalPath), "graph");
 }
+
+export const GRAPH_ARTIFACT_RELATIVE_PATH = ".metadata/icomposer/ici/graph/current" as const;
+export const SEARCH_ARTIFACT_RELATIVE_PATH = ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl" as const;
+
+export async function searchCachePath(canonicalPath: string, workspaceId: string): Promise<string> {
+  const current = join(graphBaseDir(canonicalPath, workspaceId), "search", "api_embeddings.jsonl");
+  try { await stat(current); return current; } catch { return join(legacyGraphBaseDir(canonicalPath, workspaceId), "search", "api_embeddings.jsonl"); }
+}
+
+export function explainBaseDir(canonicalPath: string): string {
+  return join(workspaceIciBaseDir(canonicalPath), "explain");
+}
+
+export function explainStatePath(canonicalPath: string, _workspaceId: string): string {
+  return join(explainBaseDir(canonicalPath), "state.json");
+}
+
+export function legacyExplainStatePath(canonicalPath: string, workspaceId: string): string {
+  return join(legacyGraphBaseDir(canonicalPath, workspaceId), "explain-state.json");
+}
+
+function safeExplainSlug(apiName: string): string {
+  const slug = apiName.normalize("NFKC").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 72);
+  const suffix = createHash("sha256").update(apiName).digest("hex").slice(0, 12);
+  return `${slug.length > 0 ? slug : "api"}-${suffix}`;
+}
+
+export function explainContextPath(canonicalPath: string, apiName: string): string {
+  return join(explainBaseDir(canonicalPath), safeExplainSlug(apiName), "context.json");
+}
+
+export function explainDeterministicPath(canonicalPath: string, apiName: string): string {
+  return join(explainBaseDir(canonicalPath), safeExplainSlug(apiName), "deterministic.json");
+}
+
+export function explainContextArtifactRelativePath(apiName: string): string {
+  return `.metadata/icomposer/ici/explain/${safeExplainSlug(apiName)}/context.json`;
+}
+
+export function explainDeterministicArtifactRelativePath(apiName: string): string {
+  return `.metadata/icomposer/ici/explain/${safeExplainSlug(apiName)}/deterministic.json`;
+}
+
+const MAX_EXPLAIN_API_NAME = 512;
 
 export interface ExplainStateFile {
-  readonly schemaVersion: 1;
-  readonly lastExplainAt: string;
+  readonly schemaVersion: 2;
+  readonly kind: "context" | "deterministic";
+  readonly generatedAt: string;
   readonly apiName: string;
+  readonly artifactPath: string;
 }
 
-/** Read the explain marker; null when absent or malformed. */
+/** Read new state first. Legacy fallback is allowed only when the new state is absent. */
 export async function readExplainState(canonicalPath: string, workspaceId: string): Promise<ExplainStateFile | null> {
-  try {
-    const text = await readFile(explainStatePath(canonicalPath, workspaceId), "utf8");
-    const parsed = JSON.parse(text) as ExplainStateFile;
-    if (parsed.schemaVersion !== 1 || typeof parsed.lastExplainAt !== "string" || typeof parsed.apiName !== "string") return null;
-    return parsed;
-  } catch {
+  const newPath = explainStatePath(canonicalPath, workspaceId);
+  let raw: string;
+  try { raw = await readFile(newPath, "utf8"); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+    try { raw = await readFile(legacyExplainStatePath(canonicalPath, workspaceId), "utf8"); } catch { return null; }
+    try {
+      const legacy = JSON.parse(raw) as { schemaVersion?: number; lastExplainAt?: string; apiName?: string };
+      if (legacy.schemaVersion === 1 && typeof legacy.lastExplainAt === "string" && typeof legacy.apiName === "string") return { schemaVersion: 2, kind: "context", generatedAt: legacy.lastExplainAt, apiName: legacy.apiName, artifactPath: "" };
+    } catch { /* invalid legacy marker */ }
     return null;
   }
+  try {
+    const parsed = JSON.parse(raw) as { schemaVersion?: number; kind?: string; generatedAt?: string; apiName?: string; artifactPath?: string };
+    const kind = parsed.kind === "context" || parsed.kind === "deterministic" ? parsed.kind : null;
+    const expected = kind === "context" ? explainContextArtifactRelativePath(parsed.apiName ?? "") : kind === "deterministic" ? explainDeterministicArtifactRelativePath(parsed.apiName ?? "") : "";
+    if (parsed.schemaVersion !== 2 || kind === null || typeof parsed.generatedAt !== "string" || parsed.generatedAt.length === 0 || typeof parsed.apiName !== "string" || parsed.apiName.length === 0 || parsed.artifactPath !== expected) return null;
+    const artifact = JSON.parse(await readFile(join(canonicalPath, parsed.artifactPath), "utf8")) as { schemaVersion?: unknown; kind?: unknown };
+    return artifact.schemaVersion === 2 && artifact.kind === kind ? parsed as ExplainStateFile : null;
+  } catch { return null; }
 }
 
-/** Persist the explain marker (atomic tmp+rename, bounded fields only). */
-export async function writeExplainState(canonicalPath: string, workspaceId: string, apiName: string): Promise<void> {
-  const dir = graphBaseDir(canonicalPath, workspaceId);
-  await mkdir(dir, { recursive: true });
-  const state: ExplainStateFile = { schemaVersion: 1, lastExplainAt: new Date().toISOString(), apiName: apiName.slice(0, 200) };
-  const final = explainStatePath(canonicalPath, workspaceId);
-  const tmp = join(dir, `.tmp-${Math.random().toString(36).slice(2, 8)}`);
-  try {
-    await writeFile(tmp, `${JSON.stringify(state)}\n`, "utf8");
-    await rename(tmp, final);
-  } catch (error) {
-    try { await rm(tmp, { force: true }); } catch { /* best-effort */ }
-    throw error;
-  }
+async function writeJsonAtomic(final: string, value: unknown, signal?: AbortSignal): Promise<void> {
+  await writeFileAtomic(final, `${JSON.stringify(value, null, 2)}\n`, { signal });
+}
+
+export async function writeExplainContext(canonicalPath: string, apiName: string, bundle: unknown, signal?: AbortSignal): Promise<string> {
+  if (apiName.length === 0 || apiName.length > MAX_EXPLAIN_API_NAME) throw new Error("api name exceeds artifact bound");
+  const generatedAt = new Date().toISOString();
+  const artifactPath = explainContextArtifactRelativePath(apiName);
+  await writeJsonAtomic(explainContextPath(canonicalPath, apiName), { schemaVersion: 2, kind: "context", generatedAt, bundle }, signal);
+  await writeJsonAtomic(explainStatePath(canonicalPath, ""), { schemaVersion: 2, kind: "context", generatedAt, apiName, artifactPath }, signal);
+  return artifactPath;
+}
+
+export async function writeExplainDeterministic(canonicalPath: string, apiName: string, result: unknown, signal?: AbortSignal): Promise<string> {
+  if (apiName.length === 0 || apiName.length > MAX_EXPLAIN_API_NAME) throw new Error("api name exceeds artifact bound");
+  const generatedAt = new Date().toISOString();
+  const artifactPath = explainDeterministicArtifactRelativePath(apiName);
+  await writeJsonAtomic(explainDeterministicPath(canonicalPath, apiName), { schemaVersion: 2, kind: "deterministic", generatedAt, result }, signal);
+  await writeJsonAtomic(explainStatePath(canonicalPath, ""), { schemaVersion: 2, kind: "deterministic", generatedAt, apiName, artifactPath }, signal);
+  return artifactPath;
 }
 
 export function currentDir(base: string): string {
@@ -66,13 +133,11 @@ export function stagingDir(base: string): string {
   return join(base, `staging-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 }
 
-export async function readManifest(base: string): Promise<IciManifest | null> {
-  try {
-    const text = await readFile(join(currentDir(base), "manifest.json"), "utf8");
-    return JSON.parse(text) as IciManifest;
-  } catch {
-    return null;
+export async function readManifest(base: string, legacyBase?: string): Promise<IciManifest | null> {
+  for (const candidate of [base, ...(legacyBase === undefined ? [] : [legacyBase])]) {
+    try { return JSON.parse(await readFile(join(currentDir(candidate), "manifest.json"), "utf8")) as IciManifest; } catch { /* fallback */ }
   }
+  return null;
 }
 
 export interface WriteFileAtomicOptions {
@@ -145,9 +210,8 @@ export async function writeFileAtomic(
       }
     }
   } catch (error) {
-    if (!(error instanceof DOMException)) {
-      await rmFn(tmp, { force: true }).catch(() => {});
-    }
+    // Abort can occur after the write and must not leave staging residue.
+    await rmFn(tmp, { force: true }).catch(() => {});
     throw error;
   }
 }
@@ -179,21 +243,21 @@ export interface IciEdgeLike {
 }
 
 /** Load the promoted `current` snapshot; null when no snapshot exists. */
-export async function loadSnapshot(base: string): Promise<GraphSnapshot | null> {
-  try {
-    const [manifestText, nodesText, edgesText] = await Promise.all([
-      readFile(join(currentDir(base), "manifest.json"), "utf8"),
-      readFile(join(currentDir(base), "nodes.json"), "utf8"),
-      readFile(join(currentDir(base), "edges.json"), "utf8"),
-    ]);
-    const manifest = JSON.parse(manifestText) as IciManifest;
-    const nodes = JSON.parse(nodesText) as IciNodeLike[];
-    const edges = JSON.parse(edgesText) as IciEdgeLike[];
-    if (!Array.isArray(nodes) || !Array.isArray(edges)) return null;
-    return { manifest, nodes, edges };
-  } catch {
-    return null;
+export async function loadSnapshot(base: string, legacyBase?: string): Promise<GraphSnapshot | null> {
+  for (const candidate of [base, ...(legacyBase === undefined ? [] : [legacyBase])]) {
+    try {
+      const [manifestText, nodesText, edgesText] = await Promise.all([
+        readFile(join(currentDir(candidate), "manifest.json"), "utf8"),
+        readFile(join(currentDir(candidate), "nodes.json"), "utf8"),
+        readFile(join(currentDir(candidate), "edges.json"), "utf8"),
+      ]);
+      const manifest = JSON.parse(manifestText) as IciManifest;
+      const nodes = JSON.parse(nodesText) as IciNodeLike[];
+      const edges = JSON.parse(edgesText) as IciEdgeLike[];
+      if (Array.isArray(nodes) && Array.isArray(edges)) return { manifest, nodes, edges };
+    } catch { /* fallback */ }
   }
+  return null;
 }
 
 export interface WriteAtomicOptions {

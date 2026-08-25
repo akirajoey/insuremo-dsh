@@ -22,7 +22,7 @@
    - 5.8 写闭环（icomposer-write）
    - 5.10 操作日志与审批（workbench-operation-log）
    - 5.11 界面插件（ui-*）
-6. [Agent 工具参考（8 个只读工具）](#6-agent-工具参考)
+6. [Agent 工具参考（8 个本地工具）](#6-agent-工具参考)
 7. [Workbench API 命令参考](#7-workbench-api-命令参考)
 8. [安全模型](#8-安全模型)
 9. [测试与验证](#9-测试与验证)
@@ -80,7 +80,7 @@ iComposer Workbench 是运行在 **DeepSeek Harness** 之上的插件化工作�
 | 数据 | 位置 |
 |---|---|
 | 绑定/操作日志/激活状态元数据 | `<DSH_HOME>/storages/`（JSON 域存储） |
-| ICI 图快照与向量 | `<DSH_HOME>/ici/<16hex>/graph/` |
+| ICI 图快照与向量 | `<workspace>/.metadata/icomposer/ici/graph/`（旧 `<DSH_HOME>/ici/<16hex>/graph/` 仅只读回退） |
 | 写闭环证据 artifact | `<DSH_HOME>/write/<16hex>/artifacts/` |
 | 真实 `~/.dsh` `~/.insuremo` | 测试时永不触碰（隔离 DSH_HOME） |
 
@@ -292,7 +292,7 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 | API 调用链 | `queryApi({query, depth?, focus?, maxNodes?})`：下游树、多起点、focus 子树过滤、cycle/seen 标记、截断边界列表 |
 | 影响分析 | `queryImpact({query})`：function/method 反向到 API 层的路径（每条含 hop 链）+ 置信度计数；冗余 method 跳压缩 |
 | 语义检索 | `index`（经 auth lease + curl embedding；增量：源未变复用旧向量）+ `search`（cosine top-N）；JSONL 为唯一向量存储 |
-| 业务解释 | `explainContext`（有界 bundle：API + 下游树 + 影响路径 + ref_doc 索引，供当前 Agent 撰写解释）+ `explainDeterministic`（离线三段模板 `{technical,business,method}`，明确标注推断非事实） |
+| 业务解释 | `explainContext` 返回并持久化真实上下文 bundle（API + 下游树 + 影响路径 + ref_doc 索引）到 `explain/<safe-api>/context.json`，供当前 Agent 撰写解释；`explainDeterministic` 另存 `deterministic.json`。`explain/state.json` 只在 artifact 完整有效时点亮第三 Intelligence 图标。 |
 | 后台 Job | `ici_build`/`ici_status` 工具：≤50 资产同步返回，>50 走 `ctx.jobs`（kind `ici-build`/`ici-index`）；kill → JobOutcome `killed` 且快照不变；readOutput 增量进度 |
 | 诊断 | 索引路径/schema/engine/节点边数/最后构建/stale 判定/必需文件（对照 Rust doctor 语义） |
 | 清理 | `cleanupPlan` 只列 `staging-*`/`stale-*` 残留；`cleanupApply` 逐路径复核（防 TOCTOU），仅删计划内生成物 |
@@ -341,7 +341,7 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 
 ## 6. Agent 工具参考
 
-以下 8 个工具全部注册进 Harness `ctx.tools`，**只读、并发安全、canonical JSON 输出**（Agent 可直接调用）：
+以下 8 个工具全部注册进 Harness `ctx.tools`，**不写源文件/凭据、并发安全、canonical JSON 输出**（Agent 可直接调用）；`ici_build`/索引和 `ici_explain` 会写 workspace-local ICI artifacts。
 
 | 工具 | 参数 | 功能 |
 |---|---|---|
@@ -352,7 +352,7 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 | `ici_search` | `{workspace_id, query, mode?, top?}` | 语义检索 top-N |
 | `ici_build` | `{workspace_id, mode?: graph\|search-index, rebuild?}` | 构建图/索引（≤50 资产同步；>50 后台 job 返回 jobId） |
 | `ici_status` | `{workspace_id}` | 图/索引诊断（版本/计数/stale/必需文件） |
-| `ici_explain` | `{workspace_id, query}` | 业务解释上下文 bundle（供 Agent 撰写三段解释） |
+| `ici_explain` | `{workspace_id, query}` | 业务解释上下文 bundle（供 Agent 撰写三段解释）；写入 `explain/<safe-api>/context.json` 与 `explain/state.json` |
 
 **不在工具面**（需审批流，走 Host face）：push/test/release/create/metadata/skill 写动作/升级。
 

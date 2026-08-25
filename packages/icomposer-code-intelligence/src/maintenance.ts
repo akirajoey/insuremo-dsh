@@ -10,8 +10,10 @@ export function isResidueName(name: string): boolean {
 }
 
 export interface MaintenancePaths {
-  /** Absolute <DSH_HOME>/ici/<hash> directory for one workspace. */
+  /** Absolute workspace-owned or legacy directory for one workspace. */
   readonly workspaceDir: string;
+  readonly fallbackWorkspaceDir?: string;
+  readonly searchWorkspaceDirs?: readonly string[];
 }
 
 export interface MaintenanceFileFacts {
@@ -45,10 +47,14 @@ export async function collectFileFacts(paths: MaintenancePaths): Promise<Mainten
   const nodesExists = await fileExists(join(current, "nodes.json"));
   const edgesExists = await fileExists(join(current, "edges.json"));
   let searchVectors = 0;
-  try {
-    const text = await readFile(join(paths.workspaceDir, "graph", "search", "api_embeddings.jsonl"), "utf8");
-    for (const line of text.split("\n")) if (line.trim()) searchVectors += 1;
-  } catch { /* no index yet */ }
+  const searchDirs = paths.searchWorkspaceDirs ?? [paths.workspaceDir, ...(paths.fallbackWorkspaceDir === undefined ? [] : [paths.fallbackWorkspaceDir])];
+  for (const directory of searchDirs) {
+    if (searchVectors > 0) break;
+    try {
+      const text = await readFile(join(directory, "graph", "search", "api_embeddings.jsonl"), "utf8");
+      for (const line of text.split("\n")) if (line.trim()) searchVectors += 1;
+    } catch { /* try fallback */ }
+  }
   return {
     manifest: manifest !== null ? JSON.stringify(manifest) : null,
     nodesExists,

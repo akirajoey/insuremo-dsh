@@ -6,7 +6,7 @@ import { buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
 import { embeddingLease, loadSearchDocs } from "./search-runtime.ts";
 import { resolveActiveProfileAuth } from "./active-profile-auth.ts";
-import { getDshHome, graphBaseDir, loadSnapshot, writeAtomic, writeFileAtomic, writeExplainState } from "./storage.ts";
+import { GRAPH_ARTIFACT_RELATIVE_PATH, SEARCH_ARTIFACT_RELATIVE_PATH, graphBaseDir, legacyGraphBaseDir, loadSnapshot, readManifest, searchCachePath, writeAtomic, writeFileAtomic, writeExplainContext, writeExplainDeterministic } from "./storage.ts";
 import { applyCleanup, buildDiagnosticsView, collectFileFacts, planCleanup } from "./maintenance.ts";
 import { buildDownstreamTrees, buildImpactPaths, candidatesOf, DEFAULT_DEPTH, DEFAULT_MAX_NODES, MAX_DEPTH, MAX_MAX_NODES, resolveFocusId, resolveQueryNodes } from "./query.ts";
 import {
@@ -44,7 +44,6 @@ import type {
   SearchInput,
   SearchResult,
 } from "./types.ts";
-
 declare module "@deepseek-ai/dsh-jobs" {
   interface JobKindMap {
     "ici-build": "ici-build";
@@ -96,7 +95,6 @@ export class IciEngineService extends Service {
   readonly #timeoutMs: number;
 
   readonly #embeddingUrl: string | undefined;
-
   constructor(ctx: Context, config: { timeoutMs?: number; embeddingUrl?: string } = {}) {
     super(ctx, "iciEngine");
     this.#timeoutMs = config.timeoutMs ?? 30_000;
@@ -111,8 +109,8 @@ export class IciEngineService extends Service {
       diagnostics: (input: { readonly workspaceId: string }) => self.diagnostics(input),
       cleanupPlan: (input: { readonly workspaceId: string }) => self.cleanupPlan(input),
       cleanupApply: (input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }) => self.cleanupApply(input),
-      explainContext: (input: { readonly workspaceId: string; readonly query: string }) => self.explainContext(input),
-      explainDeterministic: (input: { readonly workspaceId: string; readonly query: string }) => self.explainDeterministic(input),
+      explainContext: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainContext(input, options),
+      explainDeterministic: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainDeterministic(input, options),
     });
     ctx.set("iciEngine", face);
     ctx.effect(() => () => { self.#disposed = true; }, "iciEngine.dispose");
@@ -155,10 +153,9 @@ export class IciEngineService extends Service {
           nodeCount: nodes.length,
           edgeCount: edges.length,
           workspaceId: input.workspaceId,
-          canonicalPath,
         };
         await writeAtomic(base, manifest, nodes as unknown[], edges as unknown[], { signal });
-        return { ok: true, value: { manifest, nodes, edges } };
+        return { ok: true, value: { artifactPath: GRAPH_ARTIFACT_RELATIVE_PATH, manifest, nodes, edges } };
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return err("cancelled");
         if (signal?.aborted) return err("cancelled");
@@ -200,7 +197,7 @@ export class IciEngineService extends Service {
     if (!binding.ok) return { ok: false, result: binding as Result<never> };
     const { canonicalPath } = binding.value;
     const base = graphBaseDir(canonicalPath, workspaceId);
-    const snapshot = await loadSnapshot(base);
+    const snapshot = await loadSnapshot(base, legacyGraphBaseDir(canonicalPath, workspaceId));
     if (!snapshot) {
       return { ok: false, result: err("no-snapshot", "no-snapshot: run iciEngine.build first") };
     }
@@ -302,6 +299,7 @@ export class IciEngineService extends Service {
       }
       const value = (outcome as unknown as { ok: true; value: { total: number; embedded: number; reused: number } }).value;
       const result: SearchIndexResult = {
+        artifactPath: SEARCH_ARTIFACT_RELATIVE_PATH,
         workspaceId: input.workspaceId,
         total: value.total,
         embedded: value.embedded,
@@ -325,7 +323,7 @@ export class IciEngineService extends Service {
       const ctxLoad = await this.loadQueryContext(input.workspaceId, signal);
       if (!ctxLoad.ok) return ctxLoad.result;
       const { graph, canonicalPath, stale } = ctxLoad;
-      const cachePath = join(graphBaseDir(canonicalPath, input.workspaceId), "search", "api_embeddings.jsonl");
+      const cachePath = await searchCachePath(canonicalPath, input.workspaceId);
       const mode: EmbeddingMode = input.mode ?? "all";
       const top = clampInt(input.top, 10, 1, 50);
       const profile = await resolveActiveProfileAuth(this.ctx, signal);
@@ -341,16 +339,18 @@ export class IciEngineService extends Service {
     });
   }
 
-  // ---- diagnostics / cleanup ----
-
   async diagnostics(input: { readonly workspaceId: string }): Promise<Result<DiagnosticsResult>> {
     if (this.#disposed) return err("service-disposed");
     if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
     const binding = await this.workspaceEntry(input.workspaceId);
     if (!binding.ok) return binding as Result<never>;
     const { canonicalPath } = binding.value;
-    const workspaceDir = join(graphBaseDir(canonicalPath, input.workspaceId), "..");
-    const facts = await collectFileFacts({ workspaceDir });
+    const newBase = graphBaseDir(canonicalPath, input.workspaceId);
+    const legacyBase = legacyGraphBaseDir(canonicalPath, input.workspaceId);
+    const newManifest = await readManifest(newBase);
+    const workspaceDir = join(newManifest === null ? legacyBase : newBase, "..");
+    const fallbackWorkspaceDir = join(newManifest === null ? newBase : legacyBase, "..");
+    const facts = await collectFileFacts({ workspaceDir, fallbackWorkspaceDir, searchWorkspaceDirs: [join(newBase, ".."), join(legacyBase, "..")] });
     let isStale = false;
     if (facts.manifest !== null) {
       try {
@@ -392,7 +392,6 @@ export class IciEngineService extends Service {
     return { ok: true, value: { workspaceId: input.workspaceId, removed, skipped } };
   }
 
-  // ---- explain (TASK-027) ----
   private async loadExplainBase(
     workspaceId: string,
     query: string,
@@ -416,9 +415,10 @@ export class IciEngineService extends Service {
       return [];
     }
   }
-
-  async explainContext(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainContextBundle>> {
+  async explainContext(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainContextBundle>> {
+    const opts: BuildOptions = options instanceof AbortSignal ? { signal: options } : (options ?? {});
     if (this.#disposed) return err("service-disposed");
+    if (opts.signal?.aborted) return err("cancelled");
     if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
     if (typeof input.query !== "string" || !input.query.trim()) return err("invalid-workspace-id", "query is required");
     const base = await this.loadExplainBase(input.workspaceId, input.query);
@@ -437,12 +437,14 @@ export class IciEngineService extends Service {
       refDocNames,
       ...(stale ? { stale: true as const } : {}),
     });
-    await writeExplainState(canonicalPath, input.workspaceId, start.name).catch(() => undefined);
-    return { ok: true, value: bundle };
+    let artifactPath: string;
+    try { artifactPath = await writeExplainContext(canonicalPath, start.name, bundle, opts.signal); } catch { return opts.signal?.aborted ? err("cancelled") : err("storage-error"); }
+    return { ok: true, value: { ...bundle, artifactPath } };
   }
-
-  async explainDeterministic(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainDeterministicResult>> {
+  async explainDeterministic(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainDeterministicResult>> {
+    const opts: BuildOptions = options instanceof AbortSignal ? { signal: options } : (options ?? {});
     if (this.#disposed) return err("service-disposed");
+    if (opts.signal?.aborted) return err("cancelled");
     if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
     if (typeof input.query !== "string" || !input.query.trim()) return err("invalid-workspace-id", "query is required");
     const base = await this.loadExplainBase(input.workspaceId, input.query);
@@ -457,17 +459,18 @@ export class IciEngineService extends Service {
       sourceFingerprint: graph.manifest.sourceFingerprint,
       ...(stale ? { stale: true as const } : {}),
     });
-    await writeExplainState(canonicalPath, input.workspaceId, start.name).catch(() => undefined);
-    const result: ExplainDeterministicResult = {
-      generatedBy: "deterministic-v1",
-      promptVersion: "none",
+    const result = {
+      generatedBy: "deterministic-v1" as const,
+      promptVersion: "none" as const,
       sourceFingerprint: graph.manifest.sourceFingerprint,
       generatedAt: new Date().toISOString(),
       technical: parts.technical,
       business: parts.business,
       method: parts.method,
     };
-    return { ok: true, value: result };
+    let artifactPath: string;
+    try { artifactPath = await writeExplainDeterministic(canonicalPath, start.name, result, opts.signal); } catch { return opts.signal?.aborted ? err("cancelled") : err("storage-error"); }
+    return { ok: true, value: { ...result, artifactPath } };
   }
 
   private async workspaceEntry(
@@ -485,7 +488,6 @@ export class IciEngineService extends Service {
       return err("storage-error");
     }
     const v = res.value!;
-    // Local operations use only the registered canonical workspace path.
     return { ok: true, value: { canonicalPath: v.canonicalPath, workspaceId: v.workspaceId } };
   }
 

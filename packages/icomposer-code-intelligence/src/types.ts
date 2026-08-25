@@ -32,10 +32,11 @@ export interface IciManifest {
   readonly nodeCount: number;
   readonly edgeCount: number;
   readonly workspaceId: string;
-  readonly canonicalPath: string;
+  readonly canonicalPath?: string;
 }
 
 export interface IciBuildResult {
+  readonly artifactPath: string;
   readonly manifest: IciManifest;
   readonly nodes: readonly IciNode[];
   readonly edges: readonly IciEdge[];
@@ -69,6 +70,7 @@ export interface BuildOptions {
 }
 
 export interface ExplainContextBundle {
+  readonly artifactPath: string;
   readonly api: { readonly id: string; readonly name: string; readonly path: string };
   readonly technicalText: string;
   readonly downstream: readonly QueryApiTreeNode[];
@@ -83,6 +85,7 @@ export interface ExplainContextBundle {
 }
 
 export interface ExplainDeterministicResult {
+  readonly artifactPath: string;
   readonly generatedBy: "deterministic-v1";
   readonly promptVersion: "none";
   readonly sourceFingerprint: string;
@@ -101,8 +104,8 @@ export interface IciEngineFace {
   diagnostics(input: { readonly workspaceId: string }): Promise<Result<DiagnosticsResult>>;
   cleanupPlan(input: { readonly workspaceId: string }): Promise<Result<CleanupPlan>>;
   cleanupApply(input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }): Promise<Result<CleanupApplyResult>>;
-  explainContext(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainContextBundle>>;
-  explainDeterministic(input: { readonly workspaceId: string; readonly query: string }): Promise<Result<ExplainDeterministicResult>>;
+  explainContext(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainContextBundle>>;
+  explainDeterministic(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainDeterministicResult>>;
 }
 
 // ---- query surface (TASK-024; Rust query/mod.rs semantics) ----
@@ -182,6 +185,7 @@ export interface SearchIndexInput {
 }
 
 export interface SearchIndexResult {
+  readonly artifactPath: string;
   readonly workspaceId: string;
   readonly total: number;
   readonly embedded: number;

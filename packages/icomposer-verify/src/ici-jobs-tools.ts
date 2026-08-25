@@ -20,6 +20,7 @@ interface CatalogCountFace {
 }
 
 interface IciBuildResultLike {
+  artifactPath: string;
   manifest: {
     nodeCount: number;
     edgeCount: number;
@@ -29,13 +30,15 @@ interface IciBuildResultLike {
 }
 
 interface IciIndexResultLike {
+  artifactPath: string;
   total: number;
   embedded: number;
   reused: number;
 }
 
 interface IciEngineExplainFace {
-  explainContext(input: { workspaceId: string; query: string }): Promise<ResultLike<{
+  explainContext(input: { workspaceId: string; query: string }, options?: { signal?: AbortSignal } | AbortSignal): Promise<ResultLike<{
+    artifactPath: string;
     api: { id: string; name: string; path: string };
     technicalText: string;
     downstream: readonly { id: string; kind: string; ref?: string }[];
@@ -98,7 +101,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_explain",
     order: 150,
-    text: "ici_explain assembles a read-only context bundle (technical text, downstream tree, upstream impact, reference hints) for one api so the current Agent can write its business explanation. Read-only: it never writes files.",
+    text: "ici_explain assembles and persists a bounded context bundle (technical text, downstream tree, upstream impact, reference hints) for one API so the current Agent can write its business explanation. This operation writes workspace-local explain/context.json and explain/state.json artifacts; it never writes source files, profiles, tokens, or remote data.",
   }));
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_status",
@@ -119,6 +122,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         {
           workspace_id: { type: "string", required: true },
           kind: { type: "string", enum: ["inline", "background"], required: true },
+          artifact_path: { type: "string" },
           jobId: { type: "string" },
           label: { type: "string" },
           detail: objectSchema2(
@@ -140,6 +144,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         const v = value as {
           workspace_id: string;
           kind: "inline" | "background";
+          artifact_path?: string;
           jobId?: string;
           label?: string;
           detail?: { nodeCount?: number; edgeCount?: number; builtAt?: string; total?: number; embedded?: number; reused?: number };
@@ -147,13 +152,13 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         };
         if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
         if (v.kind === "background") {
-          return [{ type: "text", text: `workspace ${v.workspace_id}: background job ${v.jobId} (${v.label}) started` }];
+          return [{ type: "text", text: `workspace ${v.workspace_id}: background job ${v.jobId} (${v.label}) started; artifact=${v.artifact_path ?? "pending"}` }];
         }
         const d = v.detail ?? {};
         const parts: string[] = [];
         if (d.nodeCount !== undefined) parts.push(`nodes=${d.nodeCount} edges=${d.edgeCount ?? 0}`);
         if (d.total !== undefined) parts.push(`vectors total=${d.total} embedded=${d.embedded ?? 0} reused=${d.reused ?? 0}`);
-        return [{ type: "text", text: `workspace ${v.workspace_id}: done — ${parts.join("; ")}` }];
+        return [{ type: "text", text: `workspace ${v.workspace_id}: done — ${parts.join("; ")}; artifact=${v.artifact_path ?? "unknown"}` }];
       },
     },
     isConcurrencySafe: () => true,
@@ -250,6 +255,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       schema: objectSchema2(
         {
           workspace_id: { type: "string", required: true },
+          artifact_path: { type: "string" },
           api: objectSchema2(
             {
               id: { type: "string", required: true },
@@ -270,6 +276,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       render: (_args: unknown, value: unknown) => {
         const v = value as {
           workspace_id: string;
+          artifact_path?: string;
           api: { name: string };
           technicalText?: string;
           downstreamCount?: number;
@@ -283,6 +290,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
           text: [
             `workspace ${v.workspace_id}: api=${v.api.name} downstream=${v.downstreamCount ?? 0} impact=${v.impactCount ?? 0}`,
             `reference=${v.businessReference?.join(", ") || "none"}`,
+            `artifact=${v.artifact_path ?? "unknown"}`,
           ].join("\n"),
         }];
       },
@@ -292,10 +300,11 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       const args = rawArgs as { workspace_id: string; query: string };
       const ici = ctx.get("iciEngine") as unknown as IciEngineExplainFace | undefined;
       if (!ici) return { workspace_id: args.workspace_id, error: { code: "cli-error" } };
-      const res = await ici.explainContext({ workspaceId: args.workspace_id, query: args.query });
+      const res = await ici.explainContext({ workspaceId: args.workspace_id, query: args.query }, exec.signal);
       if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
       return {
         workspace_id: args.workspace_id,
+        ...(res.value.artifactPath === undefined ? {} : { artifact_path: res.value.artifactPath }),
         api: { ...res.value.api },
         technicalText: res.value.technicalText,
         downstreamCount: res.value.downstream.length,
@@ -338,11 +347,11 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       if (args.mode === "search-index") {
         const res = await ici.index({ workspaceId: args.workspace_id, ...(args.rebuild === undefined ? {} : { rebuild: args.rebuild }) }, { signal });
         if (!res.ok) return { workspace_id: args.workspace_id, kind: "inline", error: { code: res.error.code } };
-        return { workspace_id: args.workspace_id, kind: "inline", detail: summarizeIndex(res.value) };
+        return { workspace_id: args.workspace_id, kind: "inline", ...(res.value.artifactPath === undefined ? {} : { artifact_path: res.value.artifactPath }), detail: summarizeIndex(res.value) };
       }
       const res = await ici.build({ workspaceId: args.workspace_id }, { signal });
       if (!res.ok) return { workspace_id: args.workspace_id, kind: "inline", error: { code: res.error.code } };
-      return { workspace_id: args.workspace_id, kind: "inline", detail: summarizeGraph(res.value) };
+      return { workspace_id: args.workspace_id, kind: "inline", ...(res.value.artifactPath === undefined ? {} : { artifact_path: res.value.artifactPath }), detail: summarizeGraph(res.value) };
     }
 
     // Large workspaces run as cancellable host jobs owned by the caller.
@@ -387,7 +396,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         };
       },
     });
-    return { workspace_id: args.workspace_id, kind: "background", jobId, label };
+    return { workspace_id: args.workspace_id, kind: "background", artifact_path: args.mode === "graph" ? ".metadata/icomposer/ici/graph/current" : ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl", jobId, label };
   }
 
   // ici_build execute wiring (replaces the placeholder above).

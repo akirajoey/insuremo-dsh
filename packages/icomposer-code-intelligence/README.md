@@ -14,14 +14,12 @@ Frozen face: `ctx.iciEngine.build({workspaceId}, {signal, onProgress})`,
   - Function→Method / Method→Method via method definitions and `this.xxx()` / instance calls → `CONTAINS` / `CALLS`
   - Platform dependency edges from SDK client usage (`*SdkClient`) → `inferred` confidence (no remote fetch)
 - Output nodes `{id,kind:api|function|method|model|batch,name,path,evidence}` and edges `{from,to,kind:CONTAINS|CALLS,ownerFile,source:static|platform|inferred,confidence}`.
-- Atomic snapshot: `<DSH_HOME>/ici/<workspaceHash>/graph/current/` with a three-phase promote — `rename(current → stale-<ts>)` (skipped when absent), `rename(staging → current)` (rolls the stale copy back on failure so `current` is never half-deleted), then best-effort `rm(stale)` (failure only warns). Manifest `schemaVersion(1)/engineVersion/sourceFingerprint(aggregated sha256)/builtAt/node/edge counts`; cancelled builds keep the previous `current`; promote failures surface as fixed `storage-error`.
-- Storage: `nodes.json` / `edges.json` / `manifest.json` (JSON, no SQLite/zvec).
+- Atomic snapshot: `<workspace>/.metadata/icomposer/ici/graph/current/` with a three-phase promote — `rename(current → stale-<ts>)` (skipped when absent), `rename(staging → current)` (rolls the stale copy back on failure so `current` is never half-deleted), then best-effort `rm(stale)` (failure only warns). Manifest `schemaVersion(1)/engineVersion/sourceFingerprint(aggregated sha256)/builtAt/node/edge counts`; cancelled builds keep the previous `current`; promote failures surface as fixed `storage-error`.
+- Storage: `nodes.json` / `edges.json` / `manifest.json` (JSON, no SQLite/zvec). Legacy `<DSH_HOME>/ici/<workspaceHash>/graph/` snapshots remain read-only fallback and are never returned as artifact paths.
 
 ## Query surface (TASK-024; Rust `query/mod.rs` semantics)
 
-- Queries load the promoted snapshot from `<DSH_HOME>/ici/<hash>/graph/current/`;
-  no snapshot → fixed `no-snapshot`. If the current source fingerprint differs
-  from the manifest, results carry `stale: true` but remain queryable.
+- Queries load the promoted snapshot from `<workspace>/.metadata/icomposer/ici/graph/current/`, falling back to legacy `<DSH_HOME>/ici/<hash>/graph/current/`; no snapshot → fixed `no-snapshot`. If the current source fingerprint differs from the manifest, results carry `stale: true` but remain queryable.
 - `queryApi`: case-insensitive substring match over api nodes (comma-separated
   multi-query, all starts returned; no match → `no-match` with ≤20 candidates).
   Downstream tree nodes `{id,kind,name,path,children[]}` carry per-edge
@@ -50,12 +48,10 @@ Frozen face: `ctx.iciEngine.build({workspaceId}, {signal, onProgress})`,
   16MB and parsed for vectors only — URL/token never escape the lease;
   failures surface as fixed-code errors (`invalid-auth` on 401,
   `embedding-error` otherwise).
-- Vector store: JSONL only (`<DSH_HOME>/ici/<hash>/graph/search/
-  api_embeddings.jsonl`), written atomically (three-phase promote). Lines
-  carry `text_hash` + `source_hash`; indexing reuses cached vectors per api
-  unless the source/text changed (`rebuild: true` forces full re-embed).
+- Vector store: JSONL only (`<workspace>/.metadata/icomposer/ici/graph/search/api_embeddings.jsonl`), written atomically (three-phase promote). Lines carry `text_hash` + `source_hash`; indexing reuses cached vectors per api unless the source/text changed (`rebuild: true` forces full re-embed). Legacy DSH_HOME vectors are read-only fallback.
   zvec is intentionally not migrated (P2 residual).
 - `search`: query vector via the same lease flow, cosine similarity scored
   in memory over the cache, top default 10 cap 50, rows
   `{apiId, apiName, score, evidence≤200, downstream≤5}`; no cache →
   fixed `no-index`; stale sources → `stale: true`.
+- Explain has a write effect: context bundles are written to `explain/<safe-api>/context.json`, deterministic output to `deterministic.json`, and `explain/state.json` records the valid latest artifact kind/path. Writes are atomic and are the success boundary; failures return `storage-error`. These are bounded JSON artifacts with no tokens, profiles, or absolute paths; source files are never modified.
