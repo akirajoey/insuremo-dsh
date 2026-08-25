@@ -94,6 +94,7 @@ interface IssuedLocator {
   readonly whenToUse?: string;
   readonly invocation: SkillInvocationPolicy;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly managedModelOverride?: boolean;
 }
 
 interface InventoryEvent {
@@ -214,10 +215,8 @@ export class InsuremoSkillProvider implements SkillProvider {
               }));
               continue;
             }
-            // An exact-agent provider is a mask-only overlay. Enabled entries
-            // remain available from the global provider and must not steal a
-            // nearer project/preset implementation.
-            if (this.mode === "disabled-mask") continue;
+            // Enabled entries in the exact-agent provider are considered
+            // below, after canonical frontmatter has been inspected.
             const manifest = await resolveManifest(item.path, allowedRootPath, allowedRoot);
             this.throwIfCancelled(cancellation.signal);
             if (manifest === undefined) {
@@ -227,11 +226,21 @@ export class InsuremoSkillProvider implements SkillProvider {
             const frontmatter = await readFrontmatterPrefix(manifest, cancellation.signal);
             this.throwIfCancelled(cancellation.signal);
             if (this.#disposed || this.#control.signal.aborted) return { candidates, complete: false };
-            if (frontmatter.invalid) complete = false;
-            const description = item.description.trim().length > 0
-              ? item.description
-              : `InsureMO skill ${item.name}`;
-            const invocation = Object.freeze(frontmatter.invocation ?? defaultInvocation());
+            if (frontmatter.invalid) {
+              complete = false;
+              if (frontmatter.canonicalInvalid === true) continue;
+            }
+            const description = frontmatter.description?.trim().length
+              ? frontmatter.description
+              : item.description.trim().length > 0
+                ? item.description
+                : `InsureMO skill ${item.name}`;
+            const managedModelOverride = this.mode === "disabled-mask" && frontmatter.disableModelInvocation === true;
+            if (this.mode === "disabled-mask" && !managedModelOverride) continue;
+            const canonicalInvocation = frontmatter.invocation ?? defaultInvocation();
+            const invocation = Object.freeze(managedModelOverride
+              ? { modelInvocable: true, userInvocable: canonicalInvocation.userInvocable }
+              : canonicalInvocation);
             const resourceBase = Object.freeze({ kind: "directory" as const, path: item.path });
             const locator: IssuedLocator = Object.freeze({
               directory: item.path,
@@ -241,6 +250,7 @@ export class InsuremoSkillProvider implements SkillProvider {
               ...(frontmatter.whenToUse === undefined ? {} : { whenToUse: frontmatter.whenToUse }),
               invocation,
               ...(frontmatter.metadata === undefined ? {} : { metadata: frontmatter.metadata }),
+              ...(managedModelOverride ? { managedModelOverride: true } : {}),
             });
             this.#issued.add(locator);
             candidates.push(Object.freeze({
@@ -255,6 +265,7 @@ export class InsuremoSkillProvider implements SkillProvider {
               locator,
               path: manifest,
               ...(frontmatter.metadata === undefined ? {} : { metadata: frontmatter.metadata }),
+              ...(managedModelOverride ? { managedModelOverride: true } : {}),
             }));
           }
           return complete ? candidates : { candidates, complete: false };
@@ -319,7 +330,9 @@ export class InsuremoSkillProvider implements SkillProvider {
       name: candidate.name,
       description: candidate.description,
       ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }),
-      invocation: parsed.invocation ?? defaultInvocation(),
+      invocation: locator.managedModelOverride === true
+        ? { modelInvocable: true, userInvocable: parsed.invocation?.userInvocable ?? true }
+        : parsed.invocation ?? defaultInvocation(),
       source: INSUREMO_SKILL_SOURCE,
       provider: INSUREMO_SKILL_PROVIDER,
       resourceBase: { kind: "directory", path: locator.directory },
@@ -382,7 +395,7 @@ export function mountInsuremoSkillProvider(
   ));
 }
 
-/** Register only disabled rank-0 masks in an exact agent scope. */
+/** Register exact-agent disabled masks plus explicit managed opt-out overrides. */
 export function mountInsuremoSkillMaskProvider(
   ctx: Context,
   agentCtx: Context,

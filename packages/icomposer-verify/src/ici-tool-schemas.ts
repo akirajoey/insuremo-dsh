@@ -1,7 +1,12 @@
 /** Canonical JSON output schemas for the iComposer Agent tools (dsh-tools DSL). */
 
 function objectSchema(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
-  return { type: "object", additionalProperties: false, properties, required };
+  const requiredSet = new Set(required);
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, requiredSet.has(key) ? { ...(value as Record<string, unknown>), required: true } : value])),
+  };
 }
 
 const errorProperty: Record<string, unknown> = {
@@ -22,7 +27,7 @@ export function catalogListOutputSchema(): Record<string, unknown> {
           model: { type: "integer" },
           total: { type: "integer" },
         },
-        [],
+        ["api", "function", "batch", "model", "total"],
       ),
       truncated: { type: "boolean" },
       entries: {

@@ -1,5 +1,5 @@
 import { IcomposerVerifyService } from "./service.ts";
-import { registerIcomposerTools } from "./tools.ts";
+import { IcomposerVerifyToolService } from "./tool-service.ts";
 import type { Context } from "@deepseek-ai/cordis";
 import type {
   IcomposerVerifyFace,
@@ -14,6 +14,9 @@ import type {
   VerifyUtilsInput,
 } from "./types.ts";
 
+export { IciContextService, ICI_CONTEXT_PLUGIN, ICI_CONTEXT_POLICY_VERSION } from "./ici-context-service.ts";
+export { registerIcomposerTools } from "./tools.ts";
+export { IcomposerVerifyToolService } from "./tool-service.ts";
 export type {
   IcomposerVerifyFace,
   SearchMatch,
@@ -28,18 +31,13 @@ export type {
 };
 
 export const name = "@icomposer/icomposer-verify";
-export const inject = ["subprocess", "workspaceBinding", "imoAuth", "tools"] as const;
+export const inject = ["subprocess", "workspaceBinding", "imoAuth", "tools", "systemPrompt"] as const;
 
 export function apply(ctx: Context, config: unknown = {}): void {
+  // Keep both the face and tool registrations persistent for standalone
+  // package mounts; aggregate mounts may additionally order these services.
   ctx.plugin(IcomposerVerifyService, config);
-  // Register at mount; `tools.register` hands back the exact unregister
-  // disposer, so scope exit removes the three tools again.
-  ctx.effect(() => {
-    const disposers = registerIcomposerTools(ctx);
-    return () => {
-      for (const dispose of disposers) dispose();
-    };
-  }, "icomposerVerify.tools");
+  ctx.plugin(IcomposerVerifyToolService, config);
 }
 
 declare module "@deepseek-ai/cordis" {

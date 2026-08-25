@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
 import type { SubprocessHandle, SubprocessRuntime } from "@deepseek-ai/dsh-subprocess";
 import { IcomposerVerifyService } from "../src/service.ts";
+import * as verifyPlugin from "../src/index.ts";
 
 const validEnv = "env1";
 
@@ -116,6 +117,34 @@ async function harness(opts: {
 const fileKey = "icomposer verify utils --json --profile portal:demo src/dev/T/G/api/Api1/Api1.groovy";
 const listKey = "icomposer verify utils --json --profile portal:demo --list";
 const searchKey = "icomposer verify utils --json --profile portal:demo --search json";
+
+test("apply mounts all eight tools persistently and disposes them with the plugin", async () => {
+  const ctx = new Context();
+  ctx.provide("subprocess", fakeSubprocess() as never);
+  ctx.provide("imoAuth" as never, stubAuth("ok") as never);
+  ctx.provide("workspaceBinding", fakeBinding("bound", "/tmp/verify-apply") as never);
+  const names = new Set<string>();
+  const sections = new Set<string>();
+  ctx.provide("tools", {
+    register(definition: { name: string }) {
+      names.add(definition.name);
+      return () => names.delete(definition.name);
+    },
+  } as never);
+  ctx.provide("systemPrompt", {
+    section(section: { name: string }) {
+      sections.add(section.name);
+      return () => sections.delete(section.name);
+    },
+  } as never);
+  const fiber = await ctx.plugin(verifyPlugin as never);
+  await fiber.await();
+  assert.equal(names.size, 8);
+  assert.equal(sections.size, 8);
+  await fiber.dispose();
+  assert.equal(names.size, 0);
+  assert.equal(sections.size, 0);
+});
 
 test("verifyUtils file variant: exact argv with relative path, cwd=canonicalPath, report projection uses requested relative path", async () => {
   const reportJson = JSON.stringify({

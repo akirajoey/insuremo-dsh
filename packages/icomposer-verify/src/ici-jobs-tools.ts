@@ -78,7 +78,8 @@ function errorText(code: string): string {
 }
 
 function objectSchema2(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
-  return { type: "object", additionalProperties: false, properties, required };
+  const requiredSet = new Set(required);
+  return { type: "object", additionalProperties: false, properties: Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, requiredSet.has(key) ? { ...(value as Record<string, unknown>), required: true } : value])) };
 }
 
 /**
@@ -90,21 +91,21 @@ function objectSchema2(properties: Record<string, unknown>, required: string[]):
  */
 export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
   const disposers: Array<() => void> = [];
-  ctx.systemPrompt.section({
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_build",
     order: 150,
     text: "ici_build rebuilds the iComposer Code Intelligence graph and/or embedding index for a bound workspace. Small workspaces complete inline; larger ones run as cancellable background jobs. First use may return workspace-not-bound with guidance: newly added iComposer projects are auto-detected/auto-bound; follow the guidance to bind the workspace, then retry.",
-  });
-  ctx.systemPrompt.section({
+  }));
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_explain",
     order: 150,
     text: "ici_explain assembles a read-only context bundle (technical text, downstream tree, upstream impact, reference hints) for one api so the current Agent can write its business explanation. Read-only: it never writes files.",
-  });
-  ctx.systemPrompt.section({
+  }));
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_status",
     order: 150,
     text: "ici_status reports iComposer Code Intelligence diagnostics for a bound workspace: snapshot counts, index vectors, staleness, and required-file presence. Read-only: it never writes files.",
-  });
+  }));
 
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_build",

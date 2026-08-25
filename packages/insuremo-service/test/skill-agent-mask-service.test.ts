@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
 import { InsuremoAgentSkillMaskService } from "../src/skill-agent-mask-service.ts";
+import { InsuremoSkillProvider } from "../src/skill-provider.ts";
+import { readFrontmatterPrefix } from "../src/skill-document.ts";
 
 interface ProviderControl { readonly signal: AbortSignal; invalidate(): void }
 interface Candidate { readonly name: string; readonly rank: number; readonly invocation: { modelInvocable?: boolean; userInvocable?: boolean } }
@@ -48,6 +52,45 @@ test("TASK-045 B exact-agent mask registers once and contributes disabled-only r
   assert.equal(candidates[0]?.rank, 0);
   assert.equal(candidates[0]?.invocation.modelInvocable, false);
   assert.equal(candidates[0]?.invocation.userInvocable, false);
+});
+
+test("TASK-048 canonical disable-model-invocation is overridden only in exact managed-agent scope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-tony-policy-"));
+  try {
+    const tony = join(root, "insuremo-design-with-tony");
+    const ordinary = join(root, "ordinary");
+    const malformed = join(root, "malformed");
+    await mkdir(tony, { recursive: true });
+    await mkdir(ordinary, { recursive: true });
+    await mkdir(malformed, { recursive: true });
+    await writeFile(join(tony, "SKILL.md"), "---\ndescription: Official Tony design workflow\ndisable-model-invocation: true\nuser-invocable: true\n---\n# Tony\n");
+    await writeFile(join(ordinary, "SKILL.md"), "---\ndescription: Ordinary managed skill\n---\n# Ordinary\n");
+    await writeFile(join(malformed, "SKILL.md"), "---\ndisable-model-invocation: maybe\n---\n# Malformed\n");
+    assert.deepEqual(await readFrontmatterPrefix(join(malformed, "SKILL.md")), { invalid: true, canonicalInvalid: true });
+    const ctx = new Context();
+    const skills = { skillsAllowedRoot: root, validate: async () => ({ ok: true, value: { scope: "global", inventoryComplete: true, checkedAt: "now", items: [
+      { name: "insuremo-design-with-tony", description: ">", path: tony, valid: true, reasons: [] },
+      { name: "ordinary", description: "CLI description", path: ordinary, valid: true, reasons: [] },
+      { name: "malformed", description: "malformed", path: malformed, valid: true, reasons: [] },
+    ] } }) };
+    ctx.provide("imoSkills" as never, skills as never);
+    ctx.provide("imoSkillActivation" as never, { ensureInitialized: async () => ({ initialized: true, installed: ["insuremo-design-with-tony", "ordinary"], enabled: ["insuremo-design-with-tony", "ordinary"], disabled: [], stale: [], revision: 1 }), snapshot: async () => ({ initialized: true, installed: ["insuremo-design-with-tony", "ordinary"], enabled: ["insuremo-design-with-tony", "ordinary"], disabled: [], stale: [], revision: 1 }) } as never);
+    const control = { signal: new AbortController().signal, invalidate() {} };
+    const provider = new InsuremoSkillProvider(ctx, control, skills, "global", undefined, "disabled-mask");
+    const listed = await provider.list();
+    const candidates = Array.isArray(listed) ? listed : listed.candidates;
+    assert.deepEqual(candidates.map(item => item.name), ["insuremo-design-with-tony", "malformed"]);
+    assert.equal(candidates[0]?.description, "Official Tony design workflow");
+    assert.deepEqual(candidates[0]?.invocation, { modelInvocable: true, userInvocable: true });
+    assert.equal(candidates[1]?.invocation.modelInvocable, false);
+    const definition = await provider.get(candidates[0]! as never);
+    assert.equal(definition?.content, "# Tony\n");
+    const global = new InsuremoSkillProvider(ctx, control, skills, "global");
+    const globalListed = await global.list();
+    const globalCandidates = Array.isArray(globalListed) ? globalListed : globalListed.candidates;
+    assert.equal(globalCandidates.find(item => item.name === "malformed")?.invocation.modelInvocable, false);
+    assert.equal(globalCandidates.find(item => item.name === "insuremo-design-with-tony")?.invocation.modelInvocable, false);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("TASK-045 B dual ownership: service reload cleans a live agent, then remounts without duplicate", async () => {

@@ -79,21 +79,21 @@ function errorText(code: string): string {
  */
 export function registerIcomposerToolsWith(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
   const disposers: Array<() => void> = [];
-  ctx.systemPrompt.section({
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:icomposer_catalog_list",
     order: 150,
     text: "icomposer_catalog_list lists the local iComposer asset catalog of a bound workspace (api/function/batch/model, join status vs server metadata). Read-only: it never writes files.",
-  });
-  ctx.systemPrompt.section({
+  }));
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:icomposer_sdk_query",
     order: 150,
     text: "icomposer_sdk_query searches SDK client operations of a bound workspace by client name or keyword. Read-only: it never writes files.",
-  });
-  ctx.systemPrompt.section({
+  }));
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:icomposer_verify_utils",
     order: 150,
     text: "icomposer_verify_utils lists utility classes or searches utility methods of a bound workspace. Read-only: it never writes files.",
-  });
+  }));
 
   disposers.push(...registerIciTools(ctx, defineTool as never));
   disposers.push(...registerIciSearchTool(ctx, defineTool as never));

@@ -24,8 +24,10 @@ import * as workspaceBinding from "../../workspace-binding/src/index.ts";
 import * as catalog from "../../icomposer-catalog/src/index.ts";
 import * as reference from "../../icomposer-reference/src/index.ts";
 import * as lifecycle from "../../icomposer-lifecycle/src/index.ts";
-import * as verify from "../../icomposer-verify/src/index.ts";
-import * as codeIntelligence from "../../icomposer-code-intelligence/src/index.ts";
+import { IcomposerVerifyService } from "../../icomposer-verify/src/service.ts";
+import { IcomposerVerifyToolService } from "../../icomposer-verify/src/tool-service.ts";
+import { IciContextService } from "../../icomposer-verify/src/ici-context-service.ts";
+import { IciEngineService } from "../../icomposer-code-intelligence/src/service.ts";
 import * as write from "../../icomposer-write/src/index.ts";
 import * as insuremoService from "../../insuremo-service/src/index.ts";
 
@@ -42,6 +44,7 @@ export const inject = [
   "tools",
   "jobs",
   "agents",
+  "systemPrompt",
 ] as const;
 
 /** Per-package config overrides keyed by package id (all optional). */
@@ -72,8 +75,10 @@ export class WorkbenchDistService extends Service {
     await ctx.plugin(catalog as never);
     await ctx.plugin(reference as never);
     await ctx.plugin(lifecycle as never, this.#config.lifecycle);
-    await ctx.plugin(verify as never, this.#config.verify);
-    await ctx.plugin(codeIntelligence as never);
+    await ctx.plugin(IcomposerVerifyService as never, this.#config.verify);
+    await ctx.plugin(IciContextService as never);
+    await ctx.plugin(IciEngineService as never);
+    await ctx.plugin(IcomposerVerifyToolService as never);
     await ctx.plugin(write as never, this.#config.write);
   }
 }

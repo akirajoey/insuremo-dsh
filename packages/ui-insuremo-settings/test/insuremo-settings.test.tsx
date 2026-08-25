@@ -248,25 +248,15 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     await vi.waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
   });
 
-  it("skill remove button posts skill-remove (auth radio removed with the Auth region)", async () => {
-    const posts: string[] = [];
-    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/actions/")) {
-        posts.push(url.split("/actions/")[1]);
-        return jsonResponse({ ok: true, result: { status: "completed", revision: 9 } });
-      }
-      return jsonResponse(fixtureView);
-    });
+  it("skill rows expose only name + native toggle, never description or remove action", async () => {
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("settings.plugin.item", {});
     await expand(view);
     await view.view.findByText(zh.skillsUpdateAll);
-    (await view.view.findByRole("button", { name: "remove imo-audit-helper" })).click();
-    await vi.waitFor(() => {
-      expect(posts).toContain("skill-remove");
-      expect(posts).not.toContain("default-profile");
-    });
+    expect(view.view.getByText("imo-audit-helper")).toBeTruthy();
+    expect(view.view.queryByText("audit")).toBeNull();
+    expect(view.view.queryByRole("button", { name: "remove imo-audit-helper" })).toBeNull();
   });
 
   it("switches locale: English copy renders", async () => {

@@ -227,16 +227,6 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
     if (outcome.ok) this.props.onChanged();
   }
 
-  private async remove(name: string): Promise<void> {
-    const outcome = await postAction<{ status: string }>("skill-remove", { name });
-    if (outcome.ok) this.props.onChanged();
-    else {
-      const network = outcome.error.code === "network";
-      const message = network ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
-      this.setState(prev => ({ rows: { ...prev.rows, [name]: { error: message } } }));
-    }
-  }
-
   override render(): ReactNode {
     const { t, skills } = this.props;
     const entries = skills.entries ?? [];
@@ -274,8 +264,6 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
                     <span className={css.controlTrack} aria-hidden="true"><span className={css.controlThumb} /></span>
                   </button>
                   <code>{entry.name}</code>
-                  <span className={css.meta}>{entry.description}</span>
-                  <button type="button" className={css.small} onClick={() => void this.remove(entry.name)} aria-label={`remove ${entry.name}`}>×</button>
                   {row.error !== undefined ? <span role="alert" className={css.error}>{row.error}{row.retry === true ? ` · ${t("skillsRetryHint")}` : ""}</span> : null}
                 </li>
               );

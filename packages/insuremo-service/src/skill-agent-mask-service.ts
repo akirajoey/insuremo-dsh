@@ -17,8 +17,9 @@ interface PreStepPayload {
  * at rank. This persistent service therefore waits until the first pre-step
  * of each agent and registers a mask through that agent's own `ctx.skills`
  * registry. Registration is owned by the agent context and is automatically
- * disposed with that agent. Enabled skills are intentionally omitted by the
- * mask provider, leaving nearer project/preset overrides intact.
+ * disposed with that agent. Enabled skills are omitted unless their managed
+ * canonical frontmatter explicitly opts out of model invocation; that narrow
+ * case gets a managed override so settings enablement is honored.
  */
 export class InsuremoAgentSkillMaskService extends Service {
   static inject = ["agents", "skills", "imoSkills", "imoSkillActivation"] as const;

@@ -92,7 +92,8 @@ function errorText(code: string): string {
 }
 
 function objectSchema2(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
-  return { type: "object", additionalProperties: false, properties, required };
+  const requiredSet = new Set(required);
+  return { type: "object", additionalProperties: false, properties: Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, requiredSet.has(key) ? { ...(value as Record<string, unknown>), required: true } : value])) };
 }
 
 interface IciQueryApiResult {
@@ -168,16 +169,16 @@ interface IciSearchFace {
  */
 export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
   const disposers: Array<() => void> = [];
-  ctx.systemPrompt.section({
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_query",
     order: 150,
     text: "ici_query runs iComposer Code Intelligence read-only graph queries over a bound workspace: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Read-only: it never writes files. First use on a workspace may return workspace-not-bound with guidance: newly added iComposer projects are auto-detected (and auto-bound when a default auth profile carries env/tenant); follow the listed workspaces and ask the user to say '绑定工作区 <id> 用 profile <name>' to bind, then retry.",
-  });
-  ctx.systemPrompt.section({
+  }));
+  disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_search",
     order: 150,
     text: "ici_search ranks a bound workspace's APIs by semantic similarity of the query against their iComposer Code Intelligence embeddings. Read-only: it never writes files.",
-  });
+  }));
 
   disposers.push(ctx.tools.register(defineTool({
     name: "icomposer_catalog_list",

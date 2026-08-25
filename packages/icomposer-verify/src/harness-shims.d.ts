@@ -10,6 +10,7 @@ declare module "@deepseek-ai/cordis" {
     provide(name: string, value: unknown): () => void;
     effect(execute: () => () => void | Promise<void>, label?: string): () => Promise<void>;
     plugin(plugin: unknown, config?: unknown): { await(): Promise<unknown>; dispose(): Promise<void> };
+    on(event: string, listener: (...args: any[]) => unknown, options?: unknown): () => boolean;
   }
 }
 declare module "@deepseek-ai/dsh-workspace" {
@@ -41,6 +42,9 @@ declare module "@deepseek-ai/dsh-jobs" {
     owner?: unknown;
     run(): JobHooks;
   }
+}
+declare module "@deepseek-ai/dsh-llm" {
+  export function createUserMessage(input: unknown): any;
 }
 declare module "@deepseek-ai/dsh-tools" {
   export interface ToolTextBlock { readonly type: "text"; readonly text: string }

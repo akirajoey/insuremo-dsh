@@ -49,10 +49,11 @@ test("host entry aggregates nine packages in dependency order with union inject"
   const names = ["insuremo-service", "operation-log", "workspace-binding", "catalog", "reference", "lifecycle", "verify", "code-intelligence", "write"];
   assert.equal(names.length, 9, "aggregate must mount nine packages");
   for (const name of names) {
-    assert.ok(source.includes(`as ${requireAlias(name)}`), `aggregate missing import for ${name}`);
+    const alias = requireAlias(name);
+    assert.ok(source.includes(name === "verify" || name === "code-intelligence" ? alias : `as ${alias}`), `aggregate missing import for ${name}`);
   }
   // APPLY order (P0): service first, then registries, then imoAuth injectors
-  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "verify", "codeIntelligence", "write"];
+  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "IcomposerVerifyService", "IciContextService", "IciEngineService", "IcomposerVerifyToolService", "write"];
   let lastApply = -1;
   for (const alias of applyOrder) {
     const idx = source.indexOf(`ctx.plugin(${alias} as never`);
@@ -62,18 +63,18 @@ test("host entry aggregates nine packages in dependency order with union inject"
   }
   // apply order: insuremo-service before every imoAuth injector
   const serviceApply = source.indexOf("ctx.plugin(insuremoService as never");
-  for (const injector of ["lifecycle", "verify", "codeIntelligence", "write"]) {
+  for (const injector of ["lifecycle", "IcomposerVerifyService", "IciEngineService", "write"]) {
     const injectorApply = source.indexOf(`ctx.plugin(${injector} as never`);
     assert.ok(serviceApply >= 0 && injectorApply > serviceApply, `${injector} must mount after insuremo-service (imoAuth)`);
   }
   // write still after code-intelligence
   const writeApply = source.indexOf("ctx.plugin(write as never");
-  const iciApply = source.indexOf("ctx.plugin(codeIntelligence as never");
+  const iciApply = source.indexOf("ctx.plugin(IciEngineService as never");
   assert.ok(iciApply < writeApply, "write mount position wrong");
   // the interactive test plugin is excluded
   assert.equal(source.includes("plugin-workbench-test"), false);
   function requireAlias(name) {
-    const map = { "operation-log": "operationLog", "workspace-binding": "workspaceBinding", "code-intelligence": "codeIntelligence", "insuremo-service": "insuremoService" };
+    const map = { "operation-log": "operationLog", "workspace-binding": "workspaceBinding", "code-intelligence": "IciEngineService", "insuremo-service": "insuremoService", verify: "IcomposerVerifyService" };
     return map[name] ?? name;
   }
 

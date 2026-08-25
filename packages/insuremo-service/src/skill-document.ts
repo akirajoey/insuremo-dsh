@@ -6,9 +6,13 @@ const MAX_FRONTMATTER_BYTES = 64 * 1024;
 const MAX_SKILL_FILE_BYTES = 1024 * 1024;
 const MAX_FRONTMATTER_VALUE_BYTES = 4 * 1024;
 const FRONTMATTER_METADATA_KEYS = new Set(["title", "version", "category", "tags", "license"]);
+const CANONICAL_DESCRIPTION_MAX_BYTES = 4 * 1024;
 
 export interface ParsedFrontmatter {
   readonly metadata?: Readonly<Record<string, string>>;
+  readonly description?: string;
+  /** Canonical Harness opt-out marker; only true enables managed override policy. */
+  readonly disableModelInvocation?: boolean;
   readonly whenToUse?: string;
   readonly invocation?: {
     readonly modelInvocable: boolean;
@@ -20,7 +24,7 @@ export interface ParsedDocument extends ParsedFrontmatter {
   readonly content: string;
 }
 
-export async function readFrontmatterPrefix(path: string, signal?: AbortSignal): Promise<ParsedFrontmatter & { readonly invalid: boolean }> {
+export async function readFrontmatterPrefix(path: string, signal?: AbortSignal): Promise<ParsedFrontmatter & { readonly invalid: boolean; readonly canonicalInvalid?: boolean }> {
   throwIfSkillAborted(signal);
   let file: FileHandle | undefined;
   try {
@@ -42,7 +46,9 @@ export async function readFrontmatterPrefix(path: string, signal?: AbortSignal):
     const match = frontmatterMatch(text);
     if (match === undefined || Buffer.byteLength(match[0], "utf8") > MAX_FRONTMATTER_BYTES) return { invalid: true };
     const parsed = parseFrontmatter(match[1]);
-    return parsed === undefined ? { invalid: true } : { ...parsed, invalid: false };
+    return parsed === undefined
+      ? { invalid: true, ...(hasCanonicalPolicyKey(match[1]) ? { canonicalInvalid: true } : {}) }
+      : { ...parsed, invalid: false };
   } catch (error) {
     if (isSkillAbortError(error)) throw error;
     return { invalid: true };
@@ -71,6 +77,10 @@ export async function readSkillDocument(path: string, signal?: AbortSignal): Pro
   }
 }
 
+function hasCanonicalPolicyKey(block: string): boolean {
+  return /(?:^|\n)\s*(?:disable-model-invocation|user-invocable|description)\s*:/.test(block);
+}
+
 function frontmatterMatch(text: string): RegExpExecArray | undefined {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
   return match === null ? undefined : match;
@@ -85,6 +95,15 @@ function parseFrontmatter(block: string): ParsedFrontmatter | undefined {
       const item = value[key];
       if (typeof item === "string" && Buffer.byteLength(item, "utf8") <= MAX_FRONTMATTER_VALUE_BYTES) metadata[key] = item;
     }
+    const descriptionValue = value.description;
+    if (descriptionValue !== undefined && (typeof descriptionValue !== "string" || Buffer.byteLength(descriptionValue, "utf8") > CANONICAL_DESCRIPTION_MAX_BYTES)) return undefined;
+    const description = typeof descriptionValue === "string" ? descriptionValue : undefined;
+    const hasDisableModel = Object.prototype.hasOwnProperty.call(value, "disable-model-invocation");
+    const disableModel = value["disable-model-invocation"];
+    if (hasDisableModel && typeof disableModel !== "boolean") return undefined;
+    const hasUserInvocable = Object.prototype.hasOwnProperty.call(value, "user-invocable");
+    const userInvocable = value["user-invocable"];
+    if (hasUserInvocable && typeof userInvocable !== "boolean") return undefined;
     const whenToUse = typeof value.whenToUse === "string" && Buffer.byteLength(value.whenToUse, "utf8") <= MAX_FRONTMATTER_VALUE_BYTES
       ? value.whenToUse
       : undefined;
@@ -93,11 +112,16 @@ function parseFrontmatter(block: string): ParsedFrontmatter | undefined {
     const model = value.modelInvocable;
     const user = value.userInvocable;
     if ((hasModel && typeof model !== "boolean") || (hasUser && typeof user !== "boolean")) return undefined;
-    const invocation = hasModel || hasUser
-      ? Object.freeze({ modelInvocable: hasModel ? model as boolean : true, userInvocable: hasUser ? user as boolean : true })
+    const invocation = hasDisableModel || hasUserInvocable || hasModel || hasUser
+      ? Object.freeze({
+        modelInvocable: hasDisableModel ? !(disableModel as boolean) : hasModel ? model as boolean : true,
+        userInvocable: hasUserInvocable ? userInvocable as boolean : hasUser ? user as boolean : true,
+      })
       : undefined;
     return {
       ...(Object.keys(metadata).length === 0 ? {} : { metadata: Object.freeze(metadata) }),
+      ...(description === undefined ? {} : { description }),
+      ...(disableModel === true ? { disableModelInvocation: true } : {}),
       ...(whenToUse === undefined ? {} : { whenToUse }),
       ...(invocation === undefined ? {} : { invocation }),
     };
