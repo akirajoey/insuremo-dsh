@@ -1,6 +1,6 @@
 import type { VerifyErrorCode, Result } from "./types.ts";
 
-/** Auth profiles come from a workspace binding and must never inject argv. */
+/** Auth profiles come from the Workbench Active Profile and must never inject argv. */
 export function isValidAuthProfile(value: string): boolean {
   return /^[A-Za-z0-9._:-]{1,128}$/.test(value);
 }

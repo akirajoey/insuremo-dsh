@@ -1,6 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { DefineToolFn } from "./tool-defs.ts";
-import { notBoundError } from "./ici-guidance.ts";
 
 interface ToolExecContext {
   readonly signal: AbortSignal;
@@ -49,9 +48,9 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
   const disposers: Array<() => void> = [];
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_search",
-    description: "Semantic search over a bound workspace's API embeddings (iComposer Code Intelligence). Effect: none.",
+    description: "Semantic search over registered workspace API embeddings (iComposer Code Intelligence). Uses the Workbench Active Profile for authentication and fails closed when unavailable.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       query: { type: "string", required: true, description: "Natural-language query text." },
       mode: { type: "string", enum: ["technical", "business", "all"], description: "Which embedding space to score; default all." },
       top: { type: "number", description: "Maximum results (default 10, cap 50)." },
@@ -109,7 +108,7 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
         ...(args.mode === undefined ? {} : { mode: args.mode }),
         ...(args.top === undefined ? {} : { top: args.top }),
       }, exec.signal);
-      if (!res.ok) return { workspace_id: args.workspace_id, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
+      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
       return {
         workspace_id: args.workspace_id,
         truncated: res.value.truncated,

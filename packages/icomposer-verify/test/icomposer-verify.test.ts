@@ -92,6 +92,7 @@ type Verify = {
 async function harness(opts: {
   io?: ReturnType<typeof fakeSubprocess>;
   auth?: AuthMode;
+  activeProfile?: unknown;
   bindingMode?: "bound" | "unbound" | "not-found";
   root?: string;
 } = {}) {
@@ -101,6 +102,9 @@ async function harness(opts: {
   ctx.provide("subprocess", io as never);
   ctx.provide("imoAuth" as never, stubAuth(opts.auth ?? "ok") as never);
   ctx.provide("workspaceBinding", fakeBinding(opts.bindingMode ?? "bound", root) as never);
+  ctx.provide("imoActiveProfile" as never, opts.activeProfile === undefined ? {
+    get: async () => ({ ok: true, value: { status: "active", activeProfileName: "portal:demo", profile: { profileName: "portal:demo" } } }),
+  } : opts.activeProfile as never);
   const fiber = await ctx.plugin(IcomposerVerifyService, { command: "imo", timeoutMs: 5000 });
   await fiber.await();
   const verify = ctx.get("icomposerVerify") as unknown as Verify;
@@ -302,12 +306,25 @@ test("auth passthrough: invalid-auth / forbidden / prepare-invalidated / lease-r
   }
 });
 
-test("gates: unbound / not-found / invalid workspace id / dispose / cancel; cli failure maps to command-failed", async () => {
+test("active profile missing/unavailable fails closed without CLI default lookup", async () => {
+  for (const activeProfile of [null, { get: async () => ({ ok: true, value: { status: "none", activeProfileName: null } }) }, { get: async () => ({ ok: false, error: { code: "unavailable" } }) }]) {
+    const h = await harness({ activeProfile });
+    try {
+      const result: any = await h.verify.listUtils({ workspaceId: "ws1" });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.error.code, "invalid-auth");
+    } finally {
+      await h.dispose();
+    }
+  }
+});
+
+test("gates: unbound local auth / not-found / invalid workspace id / dispose / cancel; cli failure maps to command-failed", async () => {
   const h1 = await harness({ bindingMode: "unbound" });
   try {
     const unbound: any = await h1.verify.listUtils({ workspaceId: "ws1" });
     assert.equal(unbound.ok, false);
-    if (!unbound.ok) assert.equal(unbound.error.code, "workspace-not-bound");
+    if (!unbound.ok) assert.equal(unbound.error.code, "parse-error");
   } finally {
     await h1.dispose();
   }
@@ -402,7 +419,10 @@ test("real project smoke (read-only + transient-cache restore): list/search agai
   };
   ctx.provide("imoAuth" as never, imoAuthStub as never);
   ctx.provide("workspaceBinding", {
-    get: async () => ({ ok: true, value: { binding: { authProfile: PROFILE, environmentId: ENV }, canonicalPath: projectRoot } }),
+    get: async () => ({ ok: true, value: { binding: null, canonicalPath: projectRoot, detectedIcomposer: true } }),
+  } as never);
+  ctx.provide("imoActiveProfile" as never, {
+    get: async () => ({ ok: true, value: { status: "active", activeProfileName: PROFILE, profile: { profileName: PROFILE } } }),
   } as never);
   const fiber = await ctx.plugin(IcomposerVerifyService, { command: "imo", timeoutMs: 60_000 });
   await fiber.await();
@@ -440,7 +460,7 @@ test("real project smoke (read-only + transient-cache restore): list/search agai
 
 test("tools: 3 read-only tools registered at mount, unregistered on dispose, execute smoke via fake faces", async () => {
   const ctx = new Context();
-  const registered = new Map<string, { name: string; execute: (args: Record<string, unknown>, exec: { signal: AbortSignal }) => Promise<unknown> }>();
+  const registered = new Map<string, { name: string; output: { render: (args: unknown, value: unknown) => unknown }; execute: (args: Record<string, unknown>, exec: { signal: AbortSignal }) => Promise<unknown> }>();
   const removed: string[] = [];
   ctx.provide("subprocess", fakeSubprocess() as never);
   ctx.provide("workspaceBinding", fakeBinding("bound", await mkdtemp(join(tmpdir(), "verify-tools-"))) as never);
@@ -518,7 +538,7 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     }),
   } as never);
   ctx.provide("tools", {
-    register(definition: { name: string; execute: (args: Record<string, unknown>, exec: { signal: AbortSignal }) => Promise<unknown> }) {
+    register(definition: { name: string; output: { render: (args: unknown, value: unknown) => unknown }; execute: (args: Record<string, unknown>, exec: { signal: AbortSignal }) => Promise<unknown> }) {
       registered.set(definition.name, definition);
       return () => { registered.delete(definition.name); removed.push(definition.name); };
     },
@@ -546,12 +566,13 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     searchUtils: async () => ({ ok: true, value: { matches: [{ className: "IComposerJsonUtils", method: "fromJSON" }], count: 1, truncated: false } }),
   } as never);
 
-  // Mount through the dsh-tools-free definition builder with a pass-through
-  // defineTool; the stub registry above plays ctx.tools.register.
+  // Use the real Harness dsh-tools materializer, not a pass-through shim.
+  const { defineTool } = await import("@deepseek-ai/dsh-tools");
   const { registerIcomposerToolsWith } = await import("../src/tool-defs.ts");
-  const disposers = registerIcomposerToolsWith(ctx, (options) => options);
+  const disposers = registerIcomposerToolsWith(ctx, defineTool as never);
   try {
     assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+    assert.equal([...registered.values()].every(tool => typeof tool.output.render === "function"), true);
     assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150, 150, 150, 150, 150]);
     assert.equal(sections.every(x => x.name.startsWith("tool:")), true);
     const exec = { signal: new AbortController().signal };
@@ -595,6 +616,7 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     assert.equal(buildInline.detail.nodeCount, 3);
     assert.equal(buildInline.detail.edgeCount, 2);
     assert.equal(buildInline.error, undefined);
+    assert.doesNotThrow(() => registered.get("ici_build")!.output.render({}, buildInline));
     // ici_build search-index mode
     const indexInline: any = await registered.get("ici_build")!.execute({ workspace_id: "ws1", mode: "search-index", rebuild: true }, exec);
     assert.equal(indexInline.kind, "inline");
@@ -603,6 +625,7 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     const status: any = await registered.get("ici_status")!.execute({ workspace_id: "ws1" }, exec);
     assert.equal(status.workspace_id, "ws1");
     assert.ok(status.requiredFiles.manifest === false || status.requiredFiles.manifest === true);
+    assert.doesNotThrow(() => registered.get("ici_status")!.output.render({}, status));
     // ici_explain context bundle
     const explainOut: any = await registered.get("ici_explain")!.execute({ workspace_id: "ws1", query: "TestAPI" }, exec);
     assert.equal(explainOut.api.id, "api:TestAPI");
@@ -610,6 +633,7 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     assert.equal(explainOut.impactCount, 1);
     assert.deepEqual(explainOut.businessReference, ["IComposerPaymentUtils"]);
     assert.equal(explainOut.error, undefined);
+    assert.doesNotThrow(() => registered.get("ici_explain")!.output.render({}, explainOut));
   } finally {
     for (const dispose of disposers) dispose();
   }

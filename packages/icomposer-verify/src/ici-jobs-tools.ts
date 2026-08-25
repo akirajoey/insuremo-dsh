@@ -1,6 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { DefineToolFn } from "./tool-defs.ts";
-import { notBoundError } from "./ici-guidance.ts";
 
 interface ToolExecContext {
   readonly signal: AbortSignal;
@@ -94,7 +93,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_build",
     order: 150,
-    text: "ici_build rebuilds the iComposer Code Intelligence graph and/or embedding index for a bound workspace. Small workspaces complete inline; larger ones run as cancellable background jobs. First use may return workspace-not-bound with guidance: newly added iComposer projects are auto-detected/auto-bound; follow the guidance to bind the workspace, then retry.",
+    text: "ici_build builds the local iComposer Code Intelligence graph from a registered workspace canonical path; search-index mode uses the Workbench Active Profile for authentication and fails closed when it is unavailable. Small workspaces complete inline; larger ones run as cancellable background jobs.",
   }));
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_explain",
@@ -104,14 +103,14 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_status",
     order: 150,
-    text: "ici_status reports iComposer Code Intelligence diagnostics for a bound workspace: snapshot counts, index vectors, staleness, and required-file presence. Read-only: it never writes files.",
+    text: "ici_status reports local iComposer Code Intelligence diagnostics for a registered workspace: snapshot counts, index vectors, staleness, and required-file presence. No InsureMO binding is required."
   }));
 
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_build",
-    description: "Rebuild iComposer Code Intelligence graph and/or embedding index for a bound workspace. Runs inline for small workspaces, otherwise as a cancellable background job.",
+    description: "Build the local iComposer Code Intelligence graph or authenticated embedding index for a registered workspace. Graph mode needs no binding; search-index mode uses the Workbench Active Profile and fails closed when unavailable.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       mode: { type: "string", enum: ["graph", "search-index"], description: "What to build; default graph." },
       rebuild: { type: "boolean", description: "search-index only: force full re-embedding." },
     },
@@ -137,25 +136,25 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         },
         ["workspace_id", "kind"],
       ),
-    },
-    render: (_args: unknown, value: unknown) => {
-      const v = value as {
-        workspace_id: string;
-        kind: "inline" | "background";
-        jobId?: string;
-        label?: string;
-        detail?: { nodeCount?: number; edgeCount?: number; builtAt?: string; total?: number; embedded?: number; reused?: number };
-        error?: { code: string };
-      };
-      if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
-      if (v.kind === "background") {
-        return [{ type: "text", text: `workspace ${v.workspace_id}: background job ${v.jobId} (${v.label}) started` }];
-      }
-      const d = v.detail ?? {};
-      const parts: string[] = [];
-      if (d.nodeCount !== undefined) parts.push(`nodes=${d.nodeCount} edges=${d.edgeCount ?? 0}`);
-      if (d.total !== undefined) parts.push(`vectors total=${d.total} embedded=${d.embedded ?? 0} reused=${d.reused ?? 0}`);
-      return [{ type: "text", text: `workspace ${v.workspace_id}: done — ${parts.join("; ")}` }];
+      render: (_args: unknown, value: unknown) => {
+        const v = value as {
+          workspace_id: string;
+          kind: "inline" | "background";
+          jobId?: string;
+          label?: string;
+          detail?: { nodeCount?: number; edgeCount?: number; builtAt?: string; total?: number; embedded?: number; reused?: number };
+          error?: { code: string };
+        };
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
+        if (v.kind === "background") {
+          return [{ type: "text", text: `workspace ${v.workspace_id}: background job ${v.jobId} (${v.label}) started` }];
+        }
+        const d = v.detail ?? {};
+        const parts: string[] = [];
+        if (d.nodeCount !== undefined) parts.push(`nodes=${d.nodeCount} edges=${d.edgeCount ?? 0}`);
+        if (d.total !== undefined) parts.push(`vectors total=${d.total} embedded=${d.embedded ?? 0} reused=${d.reused ?? 0}`);
+        return [{ type: "text", text: `workspace ${v.workspace_id}: done — ${parts.join("; ")}` }];
+      },
     },
     isConcurrencySafe: () => true,
     async execute(rawArgs: Record<string, unknown>, exec: ToolExecContext) {
@@ -170,9 +169,9 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
 
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_status",
-    description: "Read-only iComposer Code Intelligence diagnostics for a bound workspace: snapshot counts, staleness, index vectors, required files. Effect: none.",
+    description: "Read-only local iComposer Code Intelligence diagnostics for a registered workspace: snapshot counts, staleness, index vectors, and required files. No InsureMO binding is required.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
     },
     output: {
       schema: objectSchema2(
@@ -197,27 +196,27 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         },
         ["workspace_id"],
       ),
-    },
-    render: (_args: unknown, value: unknown) => {
-      const v = value as {
-        workspace_id: string;
-        builtAt?: string;
-        nodeCount?: number;
-        edgeCount?: number;
-        searchVectors?: number;
-        stale?: boolean;
-        requiredFiles?: { nodes: boolean; edges: boolean; manifest: boolean };
-        error?: { code: string };
-      };
-      if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
-      const rf = v.requiredFiles ?? { nodes: false, edges: false, manifest: false };
-      return [{
-        type: "text",
-        text: [
-          `workspace ${v.workspace_id}: nodes=${v.nodeCount ?? 0} edges=${v.edgeCount ?? 0} vectors=${v.searchVectors ?? 0} stale=${v.stale ?? false}`,
-          `builtAt=${v.builtAt ?? "never"} files(nodes/edges/manifest)=${rf.nodes}/${rf.edges}/${rf.manifest}`,
-        ].join("\n"),
-      }];
+      render: (_args: unknown, value: unknown) => {
+        const v = value as {
+          workspace_id: string;
+          builtAt?: string;
+          nodeCount?: number;
+          edgeCount?: number;
+          searchVectors?: number;
+          stale?: boolean;
+          requiredFiles?: { nodes: boolean; edges: boolean; manifest: boolean };
+          error?: { code: string };
+        };
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
+        const rf = v.requiredFiles ?? { nodes: false, edges: false, manifest: false };
+        return [{
+          type: "text",
+          text: [
+            `workspace ${v.workspace_id}: nodes=${v.nodeCount ?? 0} edges=${v.edgeCount ?? 0} vectors=${v.searchVectors ?? 0} stale=${v.stale ?? false}`,
+            `builtAt=${v.builtAt ?? "never"} files(nodes/edges/manifest)=${rf.nodes}/${rf.edges}/${rf.manifest}`,
+          ].join("\n"),
+        }];
+      },
     },
     isConcurrencySafe: () => true,
     async execute(rawArgs: Record<string, unknown>) {
@@ -225,7 +224,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       const ici = ctx.get("iciEngine") as unknown as IciEngineJobsFace | undefined;
       if (!ici) return { workspace_id: args.workspace_id, error: { code: "cli-error" } };
       const res = await ici.diagnostics({ workspaceId: args.workspace_id });
-      if (!res.ok) return { workspace_id: args.workspace_id, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
+      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
       return {
         workspace_id: args.workspace_id,
         builtAt: res.value.builtAt ?? "never",
@@ -242,9 +241,9 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
 
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_explain",
-    description: "Build a bounded context bundle for one api of a bound workspace: technical text, downstream tree, upstream impact, and reference-doc hints. The current Agent writes the {technical,business,method} explanation from this bundle. Effect: none.",
+    description: "Build a bounded local context bundle for one API of a registered workspace: technical text, downstream tree, upstream impact, and reference-doc hints. No InsureMO binding is required.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       query: { type: "string", required: true, description: "Api name or id substring." },
     },
     output: {
@@ -268,25 +267,25 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         },
         ["workspace_id", "api"],
       ),
-    },
-    render: (_args: unknown, value: unknown) => {
-      const v = value as {
-        workspace_id: string;
-        api: { name: string };
-        technicalText?: string;
-        downstreamCount?: number;
-        impactCount?: number;
-        businessReference?: readonly string[];
-        error?: { code: string };
-      };
-      if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
-      return [{
-        type: "text",
-        text: [
-          `workspace ${v.workspace_id}: api=${v.api.name} downstream=${v.downstreamCount ?? 0} impact=${v.impactCount ?? 0}`,
-          `reference=${v.businessReference?.join(", ") || "none"}`,
-        ].join("\n"),
-      }];
+      render: (_args: unknown, value: unknown) => {
+        const v = value as {
+          workspace_id: string;
+          api: { name: string };
+          technicalText?: string;
+          downstreamCount?: number;
+          impactCount?: number;
+          businessReference?: readonly string[];
+          error?: { code: string };
+        };
+        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
+        return [{
+          type: "text",
+          text: [
+            `workspace ${v.workspace_id}: api=${v.api.name} downstream=${v.downstreamCount ?? 0} impact=${v.impactCount ?? 0}`,
+            `reference=${v.businessReference?.join(", ") || "none"}`,
+          ].join("\n"),
+        }];
+      },
     },
     isConcurrencySafe: () => true,
     async execute(rawArgs: Record<string, unknown>, exec: ToolExecContext) {
@@ -294,7 +293,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
       const ici = ctx.get("iciEngine") as unknown as IciEngineExplainFace | undefined;
       if (!ici) return { workspace_id: args.workspace_id, error: { code: "cli-error" } };
       const res = await ici.explainContext({ workspaceId: args.workspace_id, query: args.query });
-      if (!res.ok) return { workspace_id: args.workspace_id, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
+      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
       return {
         workspace_id: args.workspace_id,
         api: { ...res.value.api },

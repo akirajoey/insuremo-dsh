@@ -52,7 +52,8 @@ export class IcomposerCatalogService extends Service {
         return err("storage-error");
       }
       const entry = res.value!;
-      if (!entry.binding) return err("workspace-not-bound", "workspace is not bound");
+      // Local catalog scans use the registered canonical workspace path; an
+      // InsureMO binding is only required by remote/write operations.
       const canonicalPath = entry.canonicalPath;
       const scan = await scanWorkspace(canonicalPath, input.type, signal);
       const counts: Record<string, number> = { api: 0, function: 0, batch: 0, model: 0, total: scan.entries.length };

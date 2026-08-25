@@ -167,9 +167,9 @@ test("cancel signal returns cancelled", async () => {
   }
 });
 
-test("gate: unbound and not-found and invalid id", async () => {
+test("gate: unbound local build, not-found and invalid id", async () => {
   const h1 = await harness({ bindingMode: "unbound" });
-  try { const r: any = await h1.engine.build({ workspaceId: "ws1" }); assert.equal(r.error.code, "workspace-not-bound"); } finally { await h1.dispose(); }
+  try { const r: any = await h1.engine.build({ workspaceId: "ws1" }); assert.equal(r.ok, true); } finally { await h1.dispose(); }
   const h2 = await harness({ bindingMode: "not-found" });
   try { const r: any = await h2.engine.build({ workspaceId: "ws1" }); assert.equal(r.error.code, "workspace-not-found"); } finally { await h2.dispose(); }
   const h3 = await harness({});

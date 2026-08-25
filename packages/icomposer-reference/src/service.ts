@@ -149,7 +149,8 @@ export class IcomposerReferenceService extends Service {
         return err("storage-error");
       }
       const entry = res.value!;
-      if (!entry.binding) return err("workspace-not-bound");
+      // SDK/reference scans are local and authoritative from the registered
+      // canonical path; no remote binding is needed.
       return run(entry.canonicalPath);
     });
   }

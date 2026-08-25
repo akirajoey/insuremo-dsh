@@ -34,6 +34,9 @@ export async function harness(opts: { root?: string; bindingMode?: "bound" | "un
   ctx.provide("imoAuth" as never, opts.imoAuth ?? {
     prepare: async () => ({ ok: false, error: { code: "invalid-auth" } }),
   } as never);
+  ctx.provide("imoActiveProfile" as never, {
+    get: async () => ({ ok: true, value: { status: "active", activeProfileName: "portal:demo", profile: { profileName: "portal:demo" } } }),
+  } as never);
   // Jobs are started by Agent tools, never by the engine itself; tests that
   // exercise job lifecycles drive their own registry.
   ctx.provide("jobs" as never, {

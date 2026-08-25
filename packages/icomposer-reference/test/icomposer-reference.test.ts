@@ -154,13 +154,13 @@ test("extractMethods: dedupe, skip Sample and util-name H1", () => {
   assert.deepEqual(extractMethods(text, "IComposerFoo"), ["a", "b", "c"]);
 });
 
-test("gates: unbound, not-found, storage-error fallback, dispose, cancelled signal", async () => {
+test("gates: unbound local scan, not-found, storage-error fallback, dispose, cancelled signal", async () => {
   const root = await mkdtemp(join(tmpdir(), "ref-g-"));
   await buildFixture(root);
   const unboundHarness = await harness(root, null);
   const unbound = await unboundHarness.ref.listSdkClients({ workspaceId: "ws1" });
-  assert.equal(unbound.ok, false);
-  if (!unbound.ok) assert.equal(unbound.error.code, "workspace-not-bound");
+  assert.equal(unbound.ok, true);
+  if (unbound.ok) assert.equal(unbound.value.clients.length, 4);
   const binding = bindingFor("ws1", root);
   const h2 = await harness(root, binding, async (id: string) => {
     if (id === "wtf") return { ok: false, error: { code: "weird-internal-code", message: "opaque" } };

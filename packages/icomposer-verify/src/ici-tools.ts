@@ -1,6 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { DefineToolFn } from "./tool-defs.ts";
-import { notBoundError } from "./ici-guidance.ts";
 import { catalogListOutputSchema, sdkQueryOutputSchema, verifyUtilsOutputSchema } from "./ici-tool-schemas.ts";
 
 interface ToolExecContext {
@@ -172,19 +171,19 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_query",
     order: 150,
-    text: "ici_query runs iComposer Code Intelligence read-only graph queries over a bound workspace: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Read-only: it never writes files. First use on a workspace may return workspace-not-bound with guidance: newly added iComposer projects are auto-detected (and auto-bound when a default auth profile carries env/tenant); follow the listed workspaces and ask the user to say '绑定工作区 <id> 用 profile <name>' to bind, then retry.",
+    text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. No InsureMO binding is required and the operation is read-only.",
   }));
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_search",
     order: 150,
-    text: "ici_search ranks a bound workspace's APIs by semantic similarity of the query against their iComposer Code Intelligence embeddings. Read-only: it never writes files.",
+    text: "ici_search ranks registered workspace APIs by semantic similarity against iComposer Code Intelligence embeddings. It uses the Workbench Active Profile for authentication and fails closed when unavailable."
   }));
 
   disposers.push(ctx.tools.register(defineTool({
     name: "icomposer_catalog_list",
-    description: "List the read-only iComposer asset catalog (api/function/batch/model) of a bound workspace with join status. Effect: none.",
+    description: "List the read-only local iComposer asset catalog (api/function/batch/model) of a registered workspace with join status. No InsureMO binding is required.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       type: { type: "string", enum: ["api", "function", "batch", "model"], description: "Optional asset type filter." },
     },
     output: {
@@ -224,9 +223,9 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
 
   disposers.push(ctx.tools.register(defineTool({
     name: "icomposer_sdk_query",
-    description: "Query SDK client operations of a bound workspace by client name and/or keyword. Effect: none.",
+    description: "Query local SDK client operations of a registered workspace by client name and/or keyword. No InsureMO binding is required.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       client: { type: "string", description: "Exact SDK client name filter." },
       keyword: { type: "string", description: "Case-insensitive keyword over client/path/operationId/summary/tag." },
       limit: { type: "number", description: "Maximum operations to scan (service cap 200)." },
@@ -274,9 +273,9 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
 
   disposers.push(ctx.tools.register(defineTool({
     name: "icomposer_verify_utils",
-    description: "List known iComposer utility classes or search their methods in a bound workspace. Effect: none.",
+    description: "List known iComposer utility classes or search their methods in a registered workspace using the Workbench Active Profile for CLI authentication. Fails closed when that profile is unavailable.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       keyword: { type: "string", description: "Search keyword; omitted lists all utility classes." },
     },
     output: {
@@ -337,9 +336,9 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
 
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_query",
-    description: "Run iComposer Code Intelligence read-only graph queries on a bound workspace: mode api-chain walks an API's downstream call tree; mode impact traces upstream callers of a function/method to APIs. Effect: none.",
+    description: "Run local iComposer Code Intelligence graph queries on a registered workspace: mode api-chain walks an API's downstream call tree; mode impact traces upstream callers of a function/method to APIs. No InsureMO binding is required.",
     parameters: {
-      workspace_id: { type: "string", required: true, description: "Bound workspace id." },
+      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       mode: { type: "string", enum: ["api-chain", "impact"], required: true, description: "Query direction." },
       query: { type: "string", required: true, description: "Node name or id substring (comma-separated for multiple)." },
       depth: { type: "number", description: "api-chain only: maximum tree depth (default 10, cap 50)." },
@@ -409,7 +408,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
       if (!ici) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: "cli-error" } };
       if (args.mode === "impact") {
         const res = await ici.queryImpact({ workspaceId: args.workspace_id, query: args.query }, exec.signal);
-        if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
+        if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: res.error.code } };
         return {
           workspace_id: args.workspace_id,
           mode: args.mode,
@@ -429,7 +428,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
         ...(args.depth === undefined ? {} : { depth: args.depth }),
         ...(args.max_nodes === undefined ? {} : { max_nodes: args.max_nodes }),
       }, exec.signal);
-      if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, ...(res.error.code === "workspace-not-bound" ? { error: await notBoundError(ctx, args.workspace_id) } : { error: { code: res.error.code } }) };
+      if (!res.ok) return { workspace_id: args.workspace_id, mode: args.mode, error: { code: res.error.code } };
       // Flatten the tree into bounded depth/label lines for canonical output.
       const lines: IciTreeLine[] = [];
       const visit = (node: unknown, depth: number): void => {

@@ -68,6 +68,7 @@ async function fixture(opts: {
   profile?: { profileName: string; envId?: string; tenantCode?: string } | null;
   workspaces?: ReadonlyArray<{ id: string; path: string; title: string }>;
   bindResult?: { ok: boolean; error?: { code: string } };
+  legacyAuth?: unknown;
 } = {}): Promise<Fixture> {
   const ctx = new Context();
   const storage = new Storage(ctx);
@@ -90,12 +91,14 @@ async function fixture(opts: {
       return opts.bindResult ?? { ok: true, value: {} };
     },
   };
-  const imoAuth = opts.profile === undefined ? undefined : {
-    defaultProfile: async () => ({ ok: true, value: { profileName: opts.profile?.profileName ?? null } }),
-    listProfiles: async () => ({ ok: true, value: { profiles: opts.profile === null ? [] : [opts.profile] } }),
+  const activeProfile = opts.profile === undefined ? undefined : {
+    get: async () => opts.profile === null
+      ? { ok: true, value: { status: "none", activeProfileName: null } }
+      : { ok: true, value: { status: "active", activeProfileName: opts.profile.profileName, profile: opts.profile } },
   };
   ctx.provide("workspaceBinding", workspaceBinding as never);
-  if (imoAuth !== undefined) ctx.provide("imoAuth" as never, imoAuth as never);
+  if (activeProfile !== undefined) ctx.provide("imoActiveProfile" as never, activeProfile as never);
+  if (opts.legacyAuth !== undefined) ctx.provide("imoAuth" as never, opts.legacyAuth as never);
   ctx.provide("workspaceRegistry" as never, {
     list: () => opts.workspaces ?? [],
     get: (id: string) => (opts.workspaces ?? []).find(w => w.id === id),
@@ -112,7 +115,7 @@ async function fixture(opts: {
   };
 }
 
-test("auto-bind: iComposer put with complete default profile binds and emits the durable event", async () => {
+test("auto-bind: iComposer put with complete Active Profile binds and emits the durable event", async () => {
   const root = await mkdtemp(join(tmpdir(), "w037-ab-"));
   const dir = await makeIcomposerDir(root, "metadata-api");
   const h = await fixture({
@@ -174,13 +177,29 @@ test("auto-bind: missing identity pieces stay pending (no bind call)", async () 
   } finally { await h.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("auto-bind: no default profile / no auth face at all stays pending", async () => {
+test("auto-bind: no Active Profile stays pending without CLI default reads", async () => {
   const root = await mkdtemp(join(tmpdir(), "w037-noauth-"));
   const dir = await makeIcomposerDir(root, "metadata-api");
   const h = await fixture({ profile: null, workspaces: [{ id: "ws-n", path: dir, title: "n" }] });
   try {
     h.emitChange({ domain: "workspace", table: "workspaces", operation: "put", value: { path: dir } });
     await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(h.bindingCalls.bindInputs.length, 0);
+  } finally { await h.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("auto-bind: never reads the CLI default profile", async () => {
+  const root = await mkdtemp(join(tmpdir(), "w037-no-default-read-"));
+  const dir = await makeIcomposerDir(root, "metadata-api");
+  let defaultReads = 0;
+  const h = await fixture({
+    legacyAuth: { defaultProfile: async () => { defaultReads += 1; throw new Error("must not be called"); } },
+    workspaces: [{ id: "ws-no-default", path: dir, title: "no-default" }],
+  });
+  try {
+    h.emitChange({ domain: "workspace", table: "workspaces", operation: "put", value: { path: dir } });
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(defaultReads, 0);
     assert.equal(h.bindingCalls.bindInputs.length, 0);
   } finally { await h.dispose(); await rm(root, { recursive: true, force: true }); }
 });

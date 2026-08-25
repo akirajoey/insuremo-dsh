@@ -16,23 +16,20 @@ export interface EmbeddingLeaseDeps {
       error?: { code?: string };
     }>;
   };
-  readonly binding: { authProfile?: string; environmentId?: string };
+  readonly profile: { profileName: string };
   readonly subprocess: unknown;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
 }
 
-/** Run `run` inside an imoAuth.prepare lease (binding profile/env). */
+/** Run `run` inside an imoAuth.prepare lease from Workbench Active Profile. */
 export async function embeddingLease<T>(
   deps: EmbeddingLeaseDeps,
   run: (rt: unknown, token: string) => Promise<T | { __failure: IciErrorCode }>,
 ): Promise<Result<T>> {
   const auth = deps.auth;
   if (!auth) return err2("embedding-error");
-  const leaseResult = await auth.prepare({
-    profile: deps.binding.authProfile,
-    env: deps.binding.environmentId,
-  }, deps.signal);
+  const leaseResult = await auth.prepare({ profile: deps.profile.profileName }, deps.signal);
   if (!leaseResult.ok) {
     const code = (leaseResult.error as { code?: string } | undefined)?.code;
     if (code === "invalid-auth" || code === "forbidden" || code === "prepare-invalidated" || code === "lease-revoked") {

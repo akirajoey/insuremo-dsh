@@ -22,10 +22,9 @@ interface BindingFaceLike {
   bind(input: { workspaceId: string; environmentId: string; tenantCode: string; authProfile: string; writeMode: "read-only" | "read-write"; expectedRevision: number }, signal?: AbortSignal): Promise<{ ok: boolean; value?: unknown; error?: { code?: string } }>;
 }
 
-/** Minimal imoAuth shape the auto-bind consumes (both optional at runtime). */
-interface ImoAuthLike {
-  listProfiles(signal?: AbortSignal): Promise<{ ok: boolean; value?: { profiles: ReadonlyArray<{ profileName: string; envId?: string; tenantCode?: string; isDefault?: boolean }> } }>;
-  defaultProfile(signal?: AbortSignal): Promise<{ ok: boolean; value?: { profileName: string | null } }>;
+/** Minimal Active Profile shape the auto-bind consumes (optional at runtime). */
+interface ActiveProfileLike {
+  get(signal?: AbortSignal): Promise<{ ok: boolean; value?: { activeProfileName: string | null; status: string; profile?: { profileName: string; envId?: string; tenantCode?: string } } }>;
 }
 
 interface WorkspaceRegistryLike {
@@ -45,11 +44,10 @@ export interface AutoBindModule {
  *  - listens to `domain/changed` puts on the workspace registry table;
  *  - detects iComposer projects by strong signatures only (`.metadata/{kind}/*.metadata.json`
  *    or `src/dev/**.groovy`); plain directories are never touched;
- *  - with a default profile carrying a complete identity triple
+ *  - with the Workbench Active Profile carrying a complete identity triple
  *    (envId + tenantCode + profileName) it binds as read-only and emits
  *    `workspace/icomposer-auto-bound`;
- *  - any missing piece leaves the workspace `pending` (detected, unbound) so
- *    the ici tools guide the user through the explicit bind;
+ *  - any missing piece leaves the workspace `pending` (detected, unbound);
  *  - failures never throw or retry; already-bound/pending workspaces are
  *    skipped (idempotent).
  */
@@ -99,19 +97,17 @@ async function maybeAutoBind(ctx: Context, deps: { binding: () => BindingFaceLik
   if (existing?.ok === true && existing.value?.binding != null) return; // already bound
   const detected = await detectIcomposerProject(canonicalPath).catch(() => false);
   if (!detected) return; // plain directory: zero interference
-  // identity triple from the default profile
-  const auth = ctx.get("imoAuth" as never) as unknown as ImoAuthLike | undefined;
+  // Identity triple comes only from Workbench Active Profile. Never consult
+  // or mutate the CLI default pointer on the workspace-binding path.
+  const active = ctx.get("imoActiveProfile" as never) as unknown as ActiveProfileLike | undefined;
   let profile: { profileName: string; envId?: string; tenantCode?: string } | null = null;
-  if (auth !== undefined) {
+  if (active !== undefined) {
     try {
-      const def = await auth.defaultProfile();
-      if (def.ok === true && typeof def.value?.profileName === "string" && def.value.profileName.length > 0) {
-        const list = await auth.listProfiles();
-        profile = list.ok === true
-          ? list.value!.profiles.find(candidate => candidate.profileName === def.value!.profileName) ?? null
-          : null;
+      const current = await active.get();
+      if (current.ok === true && current.value?.status === "active" && current.value.profile !== undefined) {
+        profile = current.value.profile;
       }
-    } catch { /* auth unavailable → pending */ }
+    } catch { /* active profile unavailable → pending */ }
   }
   const identity = deriveBindIdentity(profile);
   if (identity === null) return; // pending: detection recorded via stateOf, ici tools guide

@@ -124,7 +124,7 @@ test("nested batch discovery: step/stepitem ignored, batch projected with batchJ
   await rm(root, { recursive: true, force: true });
 });
 
-test("truncated at 5000 and unbound gate", async () => {
+test("truncated at 5000 and unbound local scan", async () => {
   const root = await mkdtemp(join(tmpdir(), "catalog-trunc-"));
   for (let i = 0; i < 5002; i++) {
     await writeMeta(root, "api", `API${i}`, { Name: `API${i}`, AppName: "test" });
@@ -136,8 +136,8 @@ test("truncated at 5000 and unbound gate", async () => {
   const wsRoot = await mkdtemp(join(tmpdir(), "catalog-unbound-"));
   const { catalog } = await catalogHarness(wsRoot, null);
   const res = await catalog.listAssets({ workspaceId: "ws1" });
-  assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.error.code, "workspace-not-bound");
+  assert.equal(res.ok, true);
+  if (res.ok) assert.equal(res.value.entries.length, 0);
   await rm(wsRoot, { recursive: true, force: true });
 });
 

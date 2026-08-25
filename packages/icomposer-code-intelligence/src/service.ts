@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
 import { embeddingLease, loadSearchDocs } from "./search-runtime.ts";
+import { resolveActiveProfileAuth } from "./active-profile-auth.ts";
 import { getDshHome, graphBaseDir, loadSnapshot, writeAtomic, writeFileAtomic, writeExplainState } from "./storage.ts";
 import { applyCleanup, buildDiagnosticsView, collectFileFacts, planCleanup } from "./maintenance.ts";
 import { buildDownstreamTrees, buildImpactPaths, candidatesOf, DEFAULT_DEPTH, DEFAULT_MAX_NODES, MAX_DEPTH, MAX_MAX_NODES, resolveFocusId, resolveQueryNodes } from "./query.ts";
@@ -130,7 +131,7 @@ export class IciEngineService extends Service {
     return this.enqueue(async () => {
       if (this.#disposed) return err("service-disposed");
       if (signal?.aborted) return err("cancelled");
-      const binding = await this.bindingEntry(input.workspaceId);
+      const binding = await this.workspaceEntry(input.workspaceId);
       if (!binding.ok) return binding as Result<never>;
       const { canonicalPath } = binding.value;
       const catalogRes = await this.listCatalog(input.workspaceId, signal);
@@ -195,7 +196,7 @@ export class IciEngineService extends Service {
     if (this.#disposed) return { ok: false, result: err("service-disposed") };
     if (signal?.aborted) return { ok: false, result: err("cancelled") };
     if (typeof workspaceId !== "string" || !workspaceId) return { ok: false, result: err("invalid-workspace-id") };
-    const binding = await this.bindingEntry(workspaceId);
+    const binding = await this.workspaceEntry(workspaceId);
     if (!binding.ok) return { ok: false, result: binding as Result<never> };
     const { canonicalPath } = binding.value;
     const base = graphBaseDir(canonicalPath, workspaceId);
@@ -291,9 +292,9 @@ export class IciEngineService extends Service {
       const { graph, canonicalPath, stale } = ctxLoad;
       const docs = await loadSearchDocs(canonicalPath, graph);
       const cachePath = join(graphBaseDir(canonicalPath, input.workspaceId), "search", "api_embeddings.jsonl");
-      const bindingInfo = await this.bindingEntry(input.workspaceId);
-      if (!bindingInfo.ok) return bindingInfo as Result<never>;
-      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), binding: bindingInfo.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
+      const profile = await resolveActiveProfileAuth(this.ctx, signal);
+      if (!profile.ok) return profile as Result<never>;
+      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), profile: profile.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
         indexEmbeddings({ rt, token, cachePath, docs, rebuild: input.rebuild === true, timeoutMs: this.#timeoutMs, signal, embeddingUrl: this.#embeddingUrl }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
@@ -327,9 +328,9 @@ export class IciEngineService extends Service {
       const cachePath = join(graphBaseDir(canonicalPath, input.workspaceId), "search", "api_embeddings.jsonl");
       const mode: EmbeddingMode = input.mode ?? "all";
       const top = clampInt(input.top, 10, 1, 50);
-      const bindingInfo = await this.bindingEntry(input.workspaceId);
-      if (!bindingInfo.ok) return bindingInfo as Result<never>;
-      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), binding: bindingInfo.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
+      const profile = await resolveActiveProfileAuth(this.ctx, signal);
+      if (!profile.ok) return profile as Result<never>;
+      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), profile: profile.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
         searchEmbeddings({ rt, token, cachePath, query: input.query, mode, top, graph, timeoutMs: this.#timeoutMs, signal, embeddingUrl: this.#embeddingUrl }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
@@ -345,7 +346,7 @@ export class IciEngineService extends Service {
   async diagnostics(input: { readonly workspaceId: string }): Promise<Result<DiagnosticsResult>> {
     if (this.#disposed) return err("service-disposed");
     if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
-    const binding = await this.bindingEntry(input.workspaceId);
+    const binding = await this.workspaceEntry(input.workspaceId);
     if (!binding.ok) return binding as Result<never>;
     const { canonicalPath } = binding.value;
     const workspaceDir = join(graphBaseDir(canonicalPath, input.workspaceId), "..");
@@ -371,7 +372,7 @@ export class IciEngineService extends Service {
   async cleanupPlan(input: { readonly workspaceId: string }): Promise<Result<CleanupPlan>> {
     if (this.#disposed) return err("service-disposed");
     if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
-    const binding = await this.bindingEntry(input.workspaceId);
+    const binding = await this.workspaceEntry(input.workspaceId);
     if (!binding.ok) return binding as Result<never>;
     const { canonicalPath } = binding.value;
     const workspaceDir = join(graphBaseDir(canonicalPath, input.workspaceId), "..");
@@ -383,7 +384,7 @@ export class IciEngineService extends Service {
     if (this.#disposed) return err("service-disposed");
     if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
     if (!Array.isArray(input.expectedPaths)) return err("invalid-workspace-id", "expectedPaths must be an array");
-    const binding = await this.bindingEntry(input.workspaceId);
+    const binding = await this.workspaceEntry(input.workspaceId);
     if (!binding.ok) return binding as Result<never>;
     const { canonicalPath } = binding.value;
     const workspaceDir = join(graphBaseDir(canonicalPath, input.workspaceId), "..");
@@ -469,32 +470,23 @@ export class IciEngineService extends Service {
     return { ok: true, value: result };
   }
 
-  private async bindingEntry(
-    workspaceId: string): Promise<Result<{ canonicalPath: string; workspaceId: string; authProfile?: string; environmentId?: string }>> {
+  private async workspaceEntry(
+    workspaceId: string): Promise<Result<{ canonicalPath: string; workspaceId: string }>> {
     const svc = this.ctx.get("workspaceBinding" as never) as unknown as {
-      get(id: string): Promise<{ ok: boolean; value?: { canonicalPath: string; workspaceId: string; binding: { authProfile: string; environmentId: string } | null }; error?: { code?: unknown } }>;
+      get(id: string): Promise<{ ok: boolean; value?: { canonicalPath: string; workspaceId: string }; error?: { code?: unknown } }>;
     } | undefined;
     if (!svc) return err("storage-error");
     const res = await svc.get(workspaceId);
     if (!res.ok) {
       const raw = (res.error as { code?: unknown } | undefined)?.code;
       const code = typeof raw === "string" ? (raw as IciErrorCode) : undefined;
-      if (code === "workspace-not-found") return err("workspace-not-found", "workspace does not exist");
-      if (code && PASSTHROUGH_CODES.has(code)) return err(code);
-      if (raw === "workspace-not-bound" || raw === "not-found") return err("workspace-not-bound");
+      if (code === "workspace-not-found" || raw === "not-found" || raw === "workspace-not-bound") return err("workspace-not-found", "workspace does not exist");
+      if (code && code !== "workspace-not-bound" && PASSTHROUGH_CODES.has(code)) return err(code);
       return err("storage-error");
     }
     const v = res.value!;
-    if (!v.binding) return err("workspace-not-bound");
-    return {
-      ok: true,
-      value: {
-        canonicalPath: v.canonicalPath,
-        workspaceId: v.workspaceId,
-        authProfile: v.binding.authProfile,
-        environmentId: v.binding.environmentId,
-      },
-    };
+    // Local operations use only the registered canonical workspace path.
+    return { ok: true, value: { canonicalPath: v.canonicalPath, workspaceId: v.workspaceId } };
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {

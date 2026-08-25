@@ -24,10 +24,6 @@ function err(code: VerifyErrorCode, message: string = code): Result<never> {
   return { ok: false, error: { code, message } };
 }
 
-type BindingEntry = {
-  binding: { authProfile: string; environmentId: string } | null;
-  canonicalPath: string;
-};
 
 export class IcomposerVerifyService extends Service {
   static inject = ["subprocess", "workspaceBinding", "imoAuth"] as const;
@@ -105,13 +101,14 @@ export class IcomposerVerifyService extends Service {
     if (this.#disposed) return err("service-disposed");
     if (signal?.aborted) return err("cancelled");
     const started = Date.now();
-    const entry = await this.bindingEntry(workspaceId, signal);
+    const entry = await this.workspaceEntry(workspaceId, signal);
     if (!entry.ok) return entry;
-    const { binding, canonicalPath } = entry.value;
-    if (!binding) return err("workspace-not-bound");
-    if (!isValidAuthProfile(binding.authProfile)) return err("cli-error");
-    if (!isValidEnvironmentId(binding.environmentId)) return err("cli-error");
-    const args = buildVerifyArgs(mode, binding.authProfile, payload);
+    const { canonicalPath } = entry.value;
+    const active = await this.activeProfileAuth(signal);
+    if (!active.ok) return active;
+    const { profileName } = active.value;
+    if (!isValidAuthProfile(profileName)) return err("invalid-auth");
+    const args = buildVerifyArgs(mode, profileName, payload);
 
     const auth = this.ctx.get("imoAuth" as never) as unknown as {
       prepare(request: { profile?: string; env?: string }, signal?: AbortSignal): Promise<{
@@ -121,7 +118,7 @@ export class IcomposerVerifyService extends Service {
       }>;
     } | undefined;
     if (!auth) return err("cli-error");
-    const leaseResult = await auth.prepare({ profile: binding.authProfile, env: binding.environmentId }, signal);
+    const leaseResult = await auth.prepare({ profile: profileName }, signal);
     if (!leaseResult.ok) return this.mapAuthError(leaseResult.error);
     try {
       return await leaseResult.value!.use(async (secret) => {
@@ -149,25 +146,41 @@ export class IcomposerVerifyService extends Service {
     }
   }
 
-  private async bindingEntry(
+  private async activeProfileAuth(signal?: AbortSignal): Promise<Result<{ profileName: string }>> {
+    if (signal?.aborted) return err("cancelled");
+    const active = this.ctx.get("imoActiveProfile" as never) as unknown as {
+      get(signal?: AbortSignal): Promise<{ ok: boolean; value?: { status: string; activeProfileName: string | null; profile?: { profileName: string; envId?: string } } }>;
+    } | undefined;
+    if (active === undefined || active === null) return err("invalid-auth", "active profile is unavailable");
+    let result: { ok: boolean; value?: { status: string; activeProfileName: string | null; profile?: { profileName: string; envId?: string } } };
+    try { result = await active.get(signal); } catch { return err("invalid-auth", "active profile is unavailable"); }
+    if (!result.ok || result.value?.status !== "active" || result.value.profile === undefined) return err("invalid-auth", "active profile is unavailable");
+    const profileName = result.value.activeProfileName ?? result.value.profile.profileName;
+    if (typeof profileName !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(profileName)) return err("invalid-auth", "active profile is unavailable");
+    return { ok: true, value: { profileName } };
+  }
+
+  private async workspaceEntry(
     workspaceId: string,
     signal?: AbortSignal,
-  ): Promise<Result<{ binding: BindingEntry["binding"]; canonicalPath: string }>> {
+  ): Promise<Result<{ canonicalPath: string }>> {
     const bindingSvc = this.ctx.get("workspaceBinding" as never) as unknown as {
-      get(id: string, signal?: AbortSignal): Promise<{ ok: boolean; value?: BindingEntry; error?: { code?: unknown } }>;
+      get(id: string, signal?: AbortSignal): Promise<{ ok: boolean; value?: { canonicalPath: string }; error?: { code?: unknown } }>;
     } | undefined;
     if (!bindingSvc) return err("cli-error");
     const res = await bindingSvc.get(workspaceId, signal);
     if (!res.ok) {
       const raw = (res.error as { code?: unknown } | undefined)?.code;
       const code = typeof raw === "string" ? (raw as VerifyErrorCode) : undefined;
-      if (code === "workspace-not-found") return err("workspace-not-found", "workspace does not exist");
+      if (code === "workspace-not-found" || raw === "not-found") return err("workspace-not-found", "workspace does not exist");
       if (code && PASSTHROUGH_CODES.has(code)) return err(code);
       return err("cli-error");
     }
     const value = res.value;
     if (!value) return err("workspace-not-found");
-    return { ok: true, value: { binding: value.binding, canonicalPath: value.canonicalPath } };
+    // Verification uses the registered local path, while auth is resolved
+    // independently from the Workbench Active Profile above.
+    return { ok: true, value: { canonicalPath: value.canonicalPath } };
   }
 
   private mapAuthError(error: { code?: string } | undefined): Result<never> {

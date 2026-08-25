@@ -6,7 +6,7 @@ import { createUserMessage } from "./msg-shim.ts";
 export const ICI_CONTEXT_PLUGIN = "icomposer-code-intelligence-context" as const;
 export const ICI_CONTEXT_SECTION = "icomposer-code-intelligence" as const;
 export const ICI_CONTEXT_DIGEST_SECTION = "icomposer-code-intelligence-digest" as const;
-export const ICI_CONTEXT_POLICY_VERSION = "1" as const;
+export const ICI_CONTEXT_POLICY_VERSION = "2" as const;
 const COMPACT_PLUGIN = "compact";
 
 interface BindingEntry {
@@ -124,7 +124,6 @@ function shouldInject(events: readonly unknown[], digest: string, policyVersion 
   return false;
 }
 
-function renderContext(workspaceId: string, state: ContextState): string {
-  const binding = state === "bound" ? "The workspace is bound to an InsureMO environment." : "The workspace is detected but not bound; ICI tools will return workspace-not-bound guidance until it is bound.";
-  return `This is iComposer workspace ${workspaceId}. ${binding} ICI provides graph build/status, graph query (api-chain and impact), semantic search, and deterministic explain. Real tools are: ici_build, ici_status, ici_query, ici_search, ici_explain; supporting read-only tools are icomposer_catalog_list, icomposer_sdk_query, and icomposer_verify_utils. Use the injected workspace_id; never guess one. Read each registered tool schema and description for exact parameters, enums, and output before calling it; those schemas are the source of truth. Do not invent CLI commands. Build/index may schedule jobs and write ICI cache; query/search/explain are read-only. If a tool reports workspace-not-bound, follow its binding guidance and retry.`;
+function renderContext(workspaceId: string, _state: ContextState): string {
+  return `This is iComposer workspace ${workspaceId}. It is detected and registered; local graph/catalog/reference operations use its canonical path without requiring an InsureMO binding. Local tools ici_build (graph mode), ici_status, ici_query, ici_explain, icomposer_catalog_list, and icomposer_sdk_query do not require a binding. Embedding index/search and icomposer_verify_utils resolve the Workbench Active Profile explicitly for authentication and fail closed when it is missing or unavailable. Real tools are: ici_build, ici_status, ici_query, ici_search, ici_explain; supporting read-only tools are icomposer_catalog_list, icomposer_sdk_query, and icomposer_verify_utils. Use the injected workspace_id; never guess one. Read each registered tool schema and description for exact parameters, enums, and output before calling it; those schemas are the source of truth. Do not invent CLI commands. Graph build/index may schedule jobs and write ICI cache; query/search/explain/catalog/reference are read-only. Authentication uses only the Workbench Active Profile and never the CLI default pointer.`;
 }
