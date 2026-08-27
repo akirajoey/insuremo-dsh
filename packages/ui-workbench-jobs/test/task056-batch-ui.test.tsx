@@ -9,11 +9,20 @@ const batchId = "fedcba9876543210";
 const jobA = "0123456789abcdef";
 const jobB = "abcdef0123456789";
 
-type Phase = "awaiting-input" | "scheduled" | "failed" | "cancelled";
+type Phase = "awaiting-input" | "scheduled" | "failed" | "cancelled" | "mixed-failed-awaiting" | "mixed-final-awaiting" | "mixed-running-awaiting" | "mixed-final-failed";
 function batchStatus(phase: Phase) {
-  const jobs = phase === "failed" ? [
+  const jobs = phase === "failed" || phase === "mixed-final-failed" ? [
     { jobId: jobA, apiName: "AlphaAPI", status: "failed", error: "model-failed", promptBaseBytes: 1024, sourceBytes: 512 },
     { jobId: jobB, apiName: "BetaAPI", status: "final", artifactPath: ".metadata/icomposer/ici/explain/BetaAPI/finals/abcdef0123456789.json", promptBaseBytes: 1024, sourceBytes: 512 },
+  ] : phase === "mixed-failed-awaiting" ? [
+    { jobId: jobA, apiName: "AlphaAPI", status: "failed", error: "model-failed", promptBaseBytes: 1024, sourceBytes: 512 },
+    { jobId: jobB, apiName: "BetaAPI", status: "awaiting-input", promptBaseBytes: 1024, sourceBytes: 512 },
+  ] : phase === "mixed-final-awaiting" ? [
+    { jobId: jobA, apiName: "AlphaAPI", status: "final", artifactPath: ".metadata/icomposer/ici/explain/AlphaAPI/finals/0123456789abcdef.json", promptBaseBytes: 1024, sourceBytes: 512 },
+    { jobId: jobB, apiName: "BetaAPI", status: "awaiting-input", promptBaseBytes: 1024, sourceBytes: 512 },
+  ] : phase === "mixed-running-awaiting" ? [
+    { jobId: jobA, apiName: "AlphaAPI", status: "running", promptBaseBytes: 1024, sourceBytes: 512 },
+    { jobId: jobB, apiName: "BetaAPI", status: "awaiting-input", promptBaseBytes: 1024, sourceBytes: 512 },
   ] : [
     { jobId: jobA, apiName: "AlphaAPI", status: phase, promptBaseBytes: 1024, sourceBytes: 512 },
     { jobId: jobB, apiName: "BetaAPI", status: phase, promptBaseBytes: 1024, sourceBytes: 512 },
@@ -32,5 +41,20 @@ describe("TASK-056 batch ICI toolview", () => {
     const folder = await view.findByRole("button", { name: zh["explain.chooseDirectory"] }); folder.click(); await vi.waitFor(() => expect(view.findByText("ref_doc/selected")).toBeTruthy()); const start = await view.findByRole("button", { name: zh["explain.start"] }); start.click(); await vi.waitFor(() => expect(phase).toBe("scheduled")); expect(calls.filter(url => url.includes(`/batches/${batchId}/confirm`))).toHaveLength(1); expect(await view.findByText(zh["status.scheduled"])).toBeTruthy();
     phase = "failed"; await new Promise(resolve => setTimeout(resolve, 1100)); const retry = await view.findByRole("button", { name: zh["explain.batchRetryFailed"] }); expect(retry).toBeTruthy(); retry.click(); await vi.waitFor(() => expect(calls.some(url => url.includes(`/batches/${batchId}/retry`))).toBe(true));
     const cancel = await view.findByRole("button", { name: zh["explain.batchCancelAll"] }); cancel.click(); await vi.waitFor(() => expect(calls.some(url => url.includes(`/batches/${batchId}/cancel`))).toBe(true)); expect(await view.findAllByTestId("ici-explain-card")).toHaveLength(1);
+  });
+
+  it("TASK-059 shows retry instead of Start for a legacy failed-plus-awaiting batch", async () => {
+    const phase: Phase = "mixed-failed-awaiting"; const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus(phase)), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull()); expect(view.getByText(zh["status.failed"])).toBeTruthy(); expect(view.getByRole("button", { name: zh["explain.batchRetryFailed"] })).toBeTruthy(); expect(view.queryByRole("button", { name: zh["explain.start"] })).toBeNull();
+  });
+
+  it("TASK-059 keeps final members untouched while showing confirmation for final-plus-awaiting", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus("mixed-final-awaiting")), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/BetaAPI/)).not.toBeNull()); expect(view.getByRole("button", { name: zh["explain.start"] })).toBeTruthy(); expect(view.queryByRole("button", { name: zh["explain.batchRetryFailed"] })).toBeNull();
+  });
+
+  it("TASK-059 shows running progress and cancel, not retry, for running-plus-awaiting", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus("mixed-running-awaiting")), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull()); expect(view.getByText(zh["status.running"])).toBeTruthy(); expect(view.getByRole("button", { name: zh["explain.batchCancelAll"] })).toBeTruthy(); expect(view.queryByRole("button", { name: zh["explain.batchRetryFailed"] })).toBeNull(); expect(view.queryByRole("button", { name: zh["explain.start"] })).toBeNull();
   });
 });

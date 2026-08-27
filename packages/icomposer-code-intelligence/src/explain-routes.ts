@@ -4,7 +4,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { graphBaseDir, readManifest } from "./storage.ts";
-import { assertReferenceTarget, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, supportedFolderPath, updateBatchJobIds, updateJobRecord, withExplainJobLocks, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
+import { assertReferenceTarget, batchRecordRelativePath, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, supportedFolderPath, updateJobRecord, withExplainJobLocks, writeBatchRecordUnderLock, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
+import { withExplainFileLock } from "@icomposer/workbench-contracts/ici-explain";
 import { pickNativeFile, type NativePickerKind } from "./native-picker.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
@@ -88,7 +89,8 @@ export class ExplainRoutesService extends Service {
       const batch = await readBatchRecord(entry.canonicalPath, batchId);
       if (!batch || batch.workspaceId !== entry.workspaceId) continue;
       const jobs: ExplainJobRecord[] = [];
-      for (const jobId of batch.jobIds) { const job = await readJobRecord(entry.canonicalPath, jobId); if (job && job.workspaceId === batch.workspaceId) jobs.push(job); }
+      for (const jobId of batch.jobIds) { const job = await readJobRecord(entry.canonicalPath, jobId); if (!job || job.workspaceId !== batch.workspaceId) { jobs.length = 0; break; } jobs.push(job); }
+      if (jobs.length !== batch.jobIds.length) continue;
       return { root: entry.canonicalPath, batch, jobs };
     }
     return null;
@@ -153,8 +155,11 @@ export class ExplainRoutesService extends Service {
   }
   private async batchConfirm(located: BatchLocated, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
     const members = located.batch.jobIds.map(jobId => located.jobs.find(job => job.jobId === jobId));
-    if (members.some(job => !job || job.status !== "awaiting-input")) { fail(res, 409, "revision-conflict"); return; }
-    const awaiting = members as ExplainJobRecord[];
+    if (members.some(job => !job)) { fail(res, 409, "revision-conflict"); return; }
+    const typedMembers = members as ExplainJobRecord[];
+    if (typedMembers.some(job => !["awaiting-input", "final"].includes(job.status))) { fail(res, 409, "revision-conflict"); return; }
+    const awaiting = typedMembers.filter(job => job.status === "awaiting-input");
+    if (awaiting.length === 0) { fail(res, 409, "revision-conflict"); return; }
     const notBeforeValue = body.notBefore ?? body.not_before; const target = targetFromBody(body, awaiting[0]);
     if (Object.prototype.hasOwnProperty.call(body, "folderPath") && Object.prototype.hasOwnProperty.call(body, "folder_path") || Object.prototype.hasOwnProperty.call(body, "notBefore") && Object.prototype.hasOwnProperty.call(body, "not_before")) { fail(res, 422, "confirmation-invalid"); return; }
     if (!hasOnly(body, ["provider", "model", "docs", "folderPath", "folder_path", "referenceTarget", "reference_target", "target", "consent", "notBefore", "not_before"]) || body.consent !== true || !safeProvider(body.provider) || !safeModel(body.model) || !Array.isArray(body.docs) || body.docs.length > 50 || target === null) { fail(res, 422, "confirmation-invalid"); return; }
@@ -166,11 +171,13 @@ export class ExplainRoutesService extends Service {
     try { await assertReferenceTarget(located.root, target); } catch { fail(res, 422, "confirmation-invalid"); return; }
     if (llm?.resolveModelInfo) { try { await llm.resolveModelInfo(body.provider as string, body.model as string, signal); } catch { fail(res, 422, "confirmation-invalid"); return; } }
     try {
-      const result = await withExplainJobLocks(located.root, awaiting.map(job => job.jobId), async () => {
+      const result = await withExplainJobLocks(located.root, typedMembers.map(job => job.jobId), async () => {
         const validated: Array<{ before: ExplainJobRecord; prepare: any }> = [];
-        for (const job of awaiting) {
+        for (const job of typedMembers) {
           const current = await readJobRecord(located.root, job.jobId);
-          if (!current || current.workspaceId !== located.batch.workspaceId || current.status !== "awaiting-input" || current.revision !== job.revision) throw new Error("revision-conflict");
+          if (!current || current.workspaceId !== located.batch.workspaceId || current.revision !== job.revision) throw new Error("revision-conflict");
+          if (current.status === "final") continue;
+          if (current.status !== "awaiting-input") throw new Error("revision-conflict");
           let prepare: Awaited<ReturnType<typeof loadPrepare>>; try { prepare = await loadPrepare(located.root, current.prepareArtifactPath); } catch { throw new Error("stale-snapshot"); } const manifest = await readManifest(graphBaseDir(located.root, current.workspaceId));
           if (!manifest || current.engineVersion !== ICI_ENGINE_VERSION || manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || manifest.sourceFingerprint !== current.sourceFingerprint || manifest.graphDigest !== current.graphDigest || prepare.manifest.sourceFingerprint !== current.sourceFingerprint || prepare.manifest.graphDigest !== current.graphDigest || prepare.prepareId !== current.prepareId) throw new Error("stale-snapshot");
           if (docs.some(doc => !prepare.references.some(ref => ref.readable && ref.path === doc!.path && ref.sha256 === doc!.sha256))) throw new Error("confirmation-invalid");
@@ -205,17 +212,34 @@ export class ExplainRoutesService extends Service {
   private async batchRetry(located: BatchLocated, res: ServerResponse, signal: AbortSignal): Promise<void> {
     const engine = this.ctx.get("iciEngine") as Engine | undefined; if (!engine) { fail(res, 500, "storage-error"); return; }
     const jobIds = [...located.batch.jobIds]; const retried: Array<{ from: string; to: string; apiName: string }> = []; const created: string[] = [];
+    const retryable = new Set(["failed", "cancelled", "interrupted"]); const runnable = new Set(["scheduled", "confirmed", "running"]); const quiescent = new Set(["awaiting-input", "final", "failed", "cancelled", "interrupted"]);
+    if (located.jobs.length !== jobIds.length || jobIds.some(jobId => !located.jobs.some(job => job.jobId === jobId))) { fail(res, 409, "revision-conflict"); return; }
+    if (located.jobs.some(job => runnable.has(job.status))) { fail(res, 409, "job-active"); return; }
+    if (located.jobs.some(job => !quiescent.has(job.status))) { fail(res, 409, "revision-conflict"); return; }
     const cleanupCreated = async (): Promise<void> => { for (const jobId of created) { const current = await readJobRecord(located.root, jobId); if (current && ["awaiting-input", "scheduled", "confirmed", "running"].includes(current.status)) await updateJobRecord(located.root, jobId, current.revision, { status: "cancelled", error: "storage-error" }).catch(() => undefined); } };
-    for (const job of located.jobs) {
-      if (!["failed", "cancelled", "interrupted"].includes(job.status)) continue;
-      try {
-        const result = await engine.explainPrepare({ workspaceId: job.workspaceId, query: job.apiName }, signal);
-        if (!result.ok || typeof result.value?.jobId !== "string") { await cleanupCreated(); const code = result.error?.code ?? "storage-error"; fail(res, statusCode(code), code); return; }
-        const index = jobIds.indexOf(job.jobId); if (index < 0) continue; jobIds[index] = result.value.jobId; created.push(result.value.jobId); retried.push({ from: job.jobId, to: result.value.jobId, apiName: job.apiName });
-      } catch { await cleanupCreated(); fail(res, 500, "storage-error"); return; }
+    try {
+      const updated = await withExplainFileLock(located.root, batchRecordRelativePath(located.batch.batchId), async () => {
+        const currentBatch = await readBatchRecord(located.root, located.batch.batchId);
+        if (!currentBatch || currentBatch.workspaceId !== located.batch.workspaceId || currentBatch.jobIds.length !== located.batch.jobIds.length || currentBatch.jobIds.some((jobId, index) => jobId !== located.batch.jobIds[index])) throw new Error("revision-conflict");
+        return withExplainJobLocks(located.root, jobIds, async () => {
+          const currentJobs: ExplainJobRecord[] = [];
+          for (const jobId of jobIds) { const expected = located.jobs.find(job => job.jobId === jobId); const current = await readJobRecord(located.root, jobId); if (!expected || !current || current.workspaceId !== located.batch.workspaceId || current.revision !== expected.revision) throw new Error("revision-conflict"); if (runnable.has(current.status)) throw new Error("job-active"); if (!quiescent.has(current.status)) throw new Error("revision-conflict"); currentJobs.push(current); }
+          for (const job of currentJobs) {
+            if (!retryable.has(job.status)) continue;
+            const result = await engine.explainPrepare({ workspaceId: job.workspaceId, query: job.apiName }, signal);
+            if (!result.ok || typeof result.value?.jobId !== "string") throw new Error(result.error?.code ?? "storage-error");
+            if (jobIds.includes(result.value.jobId)) throw new Error("revision-conflict");
+            const index = jobIds.indexOf(job.jobId); if (index < 0) throw new Error("revision-conflict");
+            jobIds[index] = result.value.jobId; created.push(result.value.jobId); retried.push({ from: job.jobId, to: result.value.jobId, apiName: job.apiName });
+          }
+          const committed: ExplainBatchRecord = { ...currentBatch, jobIds: [...jobIds], updatedAt: new Date().toISOString() };
+          await writeBatchRecordUnderLock(located.root, committed); return committed;
+        });
+      });
+      ok(res, { batchId: updated.batchId, jobIds: updated.jobIds, retried });
+    } catch (cause) {
+      await cleanupCreated(); const message = cause instanceof Error ? cause.message : "storage-error"; const code = message === "job-active" || message === "revision-conflict" ? message : signal.aborted ? "cancelled" : message; fail(res, statusCode(code), code);
     }
-    try { const updated = await updateBatchJobIds(located.root, located.batch.batchId, jobIds); ok(res, { batchId: updated.batchId, jobIds: updated.jobIds, retried }); }
-    catch { await cleanupCreated(); fail(res, 409, "revision-conflict"); }
   }
   private async folder(located: Located, url: URL, res: ServerResponse): Promise<void> { const selected = referenceTargetOf(located.job); const folderPath = url.searchParams.get("path") ?? (selected.kind === "directory" ? selected.path : selected.path.slice(0, selected.path.lastIndexOf("/"))); if (!validFolderPath(folderPath)) { fail(res, 422, "folder-forbidden"); return; } try { const entries = await listFolderEntries(located.root, folderPath); const slash = folderPath.lastIndexOf("/"); ok(res, { folderPath, parentPath: slash > 0 ? folderPath.slice(0, slash) : null, entries: entries.filter(entry => entry.kind === "directory" || entry.supported === true), unsupportedCount: entries.filter(entry => entry.kind === "file" && entry.supported === false).length }); } catch { fail(res, 422, "folder-forbidden"); } }
   private async confirm(located: Located, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
