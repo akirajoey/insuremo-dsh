@@ -28,6 +28,7 @@ const explainBatchOutput = obj({
   } } },
   default_provider: { type: "string" }, default_model: { type: "string" },
 });
+const INLINE_CARD_GUIDANCE = "confirmation card is inline in this current DSH Web conversation at this ici_explain call; ask the user to configure it here.";
 
 /**
  * Register the single agent-facing explain tool. TASK-051 B redesign:
@@ -39,14 +40,14 @@ const explainBatchOutput = obj({
  */
 export function registerIciExplainTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
   const ds: Array<() => void> = [];
-  ds.push(ctx.systemPrompt.section({ name: "tool:ici_explain", order: 150, text: "ici_explain prepares bounded source-backed explanation plans: it validates the local graph is fresh, then persists schema-3 prepare metadata (complete bounded call chains, exact source ranges with hashes, reference candidates) and awaiting-input job records under .metadata/icomposer/ici/explain/. It does not call any model, read source contents into the transcript, or mark readiness. For a group or multiple APIs, make ONE ici_explain call with the queries array (2-10 entries); never call ici_explain repeatedly once per API. The user confirms one workspace-relative reference file or directory target, model, and earliest not-before time in the Workbench batch card; the Host queues fresh restricted background Explain Agents during idle maintenance." }));
+  ds.push(ctx.systemPrompt.section({ name: "tool:ici_explain", order: 150, text: "ici_explain prepares bounded source-backed explanation plans: it validates the local graph is fresh, then persists schema-3 prepare metadata (complete bounded call chains, exact source ranges with hashes, reference candidates) and awaiting-input job records under .metadata/icomposer/ici/explain/. It does not call any model, read source contents into the transcript, or mark readiness. For a group or multiple APIs, make ONE ici_explain call with the queries array (2-10 entries); never call ici_explain repeatedly once per API. After success, the confirmation card is inline at this ici_explain tool call in the current DSH Web conversation on the active 3080 server; ask the user to configure it there, not in a separate Workbench app, CLI, or desktop. Do not use bash or cat to inspect job files to find or advance the card. The user confirms one workspace-relative reference file or directory target, model, and earliest not-before time in the Workbench batch card; the Host queues fresh restricted background Explain Agents during idle maintenance." }));
   ds.push(ctx.tools.register(defineTool({
     name: "ici_explain",
     description: "Prepare (only) a source-backed explanation plan for one API, or one batch of 2-10 APIs, in a registered workspace. Pass exactly one of query and queries. No model call and no readiness change.",
     parameters: { workspace_id: { type: "string", required: true }, query: { type: "string" }, queries: { type: "array", items: { type: "string" } } },
     output: {
       schema: { oneOf: [explainSingleOutput, explainBatchOutput, explainErrorOutput] },
-      render: (_a: unknown, v: any) => v?.error ? err(v.error.code, v.error.message) : v?.batch_id ? [{ type: "text", text: `batch=${v.batch_id} jobs=${v.jobs_count}` }] : [{ type: "text", text: `prepare=${v.artifact_path} job=${v.job_id} status=${v.status}; chain=${v.chain_nodes} nodes/${v.chain_edges} edges${v.truncated ? " (truncated)" : ""}, sources=${v.source_files}, refs=${v.references}${v.default_provider && v.default_model ? ` default=${v.default_provider}/${v.default_model}` : ""}. Select a workspace-relative file or directory and confirm the explicit model in the Workbench card, then Start.` }],
+      render: (_a: unknown, v: any) => v?.error ? err(v.error.code, v.error.message) : v?.batch_id ? [{ type: "text", text: `batch=${v.batch_id} jobs=${v.jobs_count}; ${INLINE_CARD_GUIDANCE}` }] : [{ type: "text", text: `prepare=${v.artifact_path} job=${v.job_id} status=${v.status}; chain=${v.chain_nodes} nodes/${v.chain_edges} edges${v.truncated ? " (truncated)" : ""}, sources=${v.source_files}, refs=${v.references}${v.default_provider && v.default_model ? ` default=${v.default_provider}/${v.default_model}` : ""}. Select a workspace-relative file or directory and confirm the explicit model in the Workbench card, then Start. ${INLINE_CARD_GUIDANCE}` }],
     },
     isConcurrencySafe: () => true,
     async execute(raw: Record<string, unknown>, e: Exec) {
