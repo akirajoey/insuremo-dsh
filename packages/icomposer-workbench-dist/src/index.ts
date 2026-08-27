@@ -47,6 +47,7 @@ export const inject = [
   "jobs",
   "llm",
   "agents",
+  "directoryPicker",
   "systemPrompt",
 ] as const;
 

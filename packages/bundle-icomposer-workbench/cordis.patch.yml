@@ -28,7 +28,7 @@
 
     - id: icomposer-code-intelligence
       name: '@icomposer/icomposer-code-intelligence'
-      inject: [workspaceBinding, icomposerCatalog, imoAuth, jobs, webServer, llm, agents]
+      inject: [workspaceBinding, icomposerCatalog, imoAuth, jobs, webServer, llm, agents, directoryPicker]
 
     - id: icomposer-write
       name: '@icomposer/icomposer-write'

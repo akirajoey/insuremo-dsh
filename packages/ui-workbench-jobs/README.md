@@ -5,8 +5,8 @@ existing keyed `conversation.chat.node` projection for generic Harness jobs
 and also owns the `tool.call.toolview` key `ici_explain`.
 
 The ICI card is an interactive, localized Prepare → confirmation surface. It
-opens a workspace-only modal picker for workspace-relative supported text
-files or directories through same-origin Host routes, defaults to `ref_doc`,
+offers separate native Host actions for a workspace-relative supported text
+file or directory through same-origin routes (no in-card tree/modal), defaults to `ref_doc`,
 lets the user select an explicit provider/model and not-before time, and
 renders scheduled/running/final/failed/interrupted states. Catalogued models
 use a full select; providers with an unavailable/empty catalog still accept an

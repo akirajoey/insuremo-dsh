@@ -24,6 +24,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-native-command": "*",
     "@icomposer/workspace-binding": "*",
     "@icomposer/workbench-contracts": "*",
     "@icomposer/icomposer-catalog": "*"

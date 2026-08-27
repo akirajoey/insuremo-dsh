@@ -55,7 +55,7 @@ overview 200 断言持续守护。开发调试请使用分发包安装路径。
 # == @icomposer/workbench
 - id: icomposer-workbench
   name: '@icomposer/workbench'
-  inject: [subprocess, storageDomain, workspaceRegistry, skills, webServer, tools, jobs]
+  inject: [subprocess, storageDomain, workspaceRegistry, skills, webServer, tools, jobs, directoryPicker]
 ```
 
 移除:`dsh plugin --profile web remove @icomposer/workbench`。
@@ -65,6 +65,7 @@ overview 200 断言持续守护。开发调试请使用分发包安装路径。
 - Harness 基线:99f6f02(@deepseek-ai/* rc.7 系列);peer 版本声明为
   `*`,在基线内解析,超出基线未经测试。
 - react ^18.2.0(客户端 UI)。
+- Host Web 组合提供 `directoryPicker`；解释卡片的原生文件选择使用 Harness 的 `@deepseek-ai/dsh-native-command`（argv-only、无 shell、支持 abort）。
 - `zod` 已内联进产物,无需单独安装。
 
 ## 内容

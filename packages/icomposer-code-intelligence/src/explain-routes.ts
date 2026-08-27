@@ -1,8 +1,11 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { lstat, realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { graphBaseDir, readManifest } from "./storage.ts";
-import { assertReferenceTarget, listFolderEntries, loadPrepare, readJobRecord, readPreparedSources, referenceTargetOf, updateJobRecord, validFolderPath, validReferenceTarget, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
+import { assertReferenceTarget, listFolderEntries, loadPrepare, readJobRecord, readPreparedSources, referenceTargetOf, supportedFolderPath, updateJobRecord, validFolderPath, validReferenceTarget, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
+import { pickNativeFile, type NativePickerKind } from "./native-picker.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 
@@ -15,6 +18,9 @@ const SECRET_PATTERN = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-
 interface Binding { list(): Promise<{ ok: boolean; value?: readonly { workspaceId: string; canonicalPath: string }[] }>; }
 interface Engine { explainPrepare(input: { workspaceId: string; query: string }, signal?: AbortSignal): Promise<{ ok: boolean; value?: any; error?: { code?: string } }>; }
 interface Llm { listProviders(): readonly { id: string }[]; listModels?(provider: string): Promise<readonly { id: string; name?: string }[]>; resolveModelInfo?(provider: string, model: string, signal?: AbortSignal): Promise<unknown>; }
+interface DirectoryPicker { capability(): { kind: string; pick?: (signal: AbortSignal) => Promise<string | null> } | undefined; }
+export interface NativeFilePicker { pick(signal: AbortSignal): Promise<string | null>; }
+export interface ExplainRoutesConfig { readonly nativeFilePicker?: NativeFilePicker; }
 interface Scheduler { cancelJob(jobId: string): Promise<boolean>; poke(): void; }
 interface WebServer { register(route: { kind: "prefix"; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }): () => void; }
 
@@ -37,11 +43,29 @@ function hasOnly(value: Record<string, unknown>, keys: readonly string[]): boole
 function validDocPath(value: unknown): value is string { return typeof value === "string" && value.length <= 512 && value.startsWith("ref_doc/") && !value.includes("\\") && !value.split("/").includes("..") && !value.includes("\0"); }
 function statusCode(code: string): number { return code === "job-missing" ? 404 : code === "job-active" || code === "revision-conflict" || code === "stale-snapshot" || code === "source-changed" || code === "folder-changed" ? 409 : code === "storage-error" ? 500 : 422; }
 function targetFromBody(body: Record<string, unknown>, current: ExplainJobRecord): ExplainReferenceTarget | null { const fields = ["referenceTarget", "reference_target", "target"].filter(key => Object.prototype.hasOwnProperty.call(body, key)); if (fields.length > 1) return null; const legacy = body.folderPath ?? body.folder_path; const target = fields.length === 1 ? (validReferenceTarget(body[fields[0]]) ? body[fields[0]] as ExplainReferenceTarget : null) : legacy === undefined ? referenceTargetOf(current) : validFolderPath(legacy) ? { path: legacy, kind: "directory" as const } : null; if (!target) return null; if (legacy !== undefined && (typeof legacy !== "string" || legacy !== target.path)) return null; return target; }
+const PICKER_CODES = new Set(["picker-cancelled", "picker-aborted", "picker-unavailable", "picker-failed", "reference-outside-workspace", "reference-symlink", "reference-unsupported"]);
+function isOutside(relativePath: string): boolean { return relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath); }
+/** Convert a native absolute selection into a workspace-relative target without exposing the absolute path. */
+export async function normalizeNativePickedTarget(root: string, selected: unknown, kind: NativePickerKind): Promise<ExplainReferenceTarget> {
+  if (typeof selected !== "string" || !isAbsolute(selected) || selected.includes("\0") || /[\u0000-\u001f\u007f]/.test(selected) || selected.split(/[\\/]/).some(part => part === "." || part === "..")) throw new Error("reference-outside-workspace");
+  try {
+    const rootInfo = await lstat(root); if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw new Error("picker-failed");
+    const rootAbsolute = resolve(root); const rootReal = await realpath(root); const selectedAbsolute = resolve(selected); const lexical = relative(rootAbsolute, selectedAbsolute);
+    if (isOutside(lexical)) throw new Error("reference-outside-workspace");
+    let cursor = rootAbsolute;
+    for (const part of lexical === "" ? [] : lexical.split(sep)) { if (part === "" || part === "." || part === "..") throw new Error("reference-outside-workspace"); cursor = join(cursor, part); if ((await lstat(cursor)).isSymbolicLink()) throw new Error("reference-symlink"); }
+    const selectedReal = await realpath(selectedAbsolute); const actual = relative(rootReal, selectedReal); if (isOutside(actual)) throw new Error("reference-outside-workspace");
+    const info = await lstat(selectedReal); if (kind === "directory" ? !info.isDirectory() : !info.isFile()) throw new Error("reference-unsupported");
+    const path = actual.split(sep).join("/"); if (kind === "file" && !supportedFolderPath(path)) throw new Error("reference-unsupported");
+    const target: ExplainReferenceTarget = { path, kind }; await assertReferenceTarget(rootReal, target); return target;
+  } catch (cause) { if (cause instanceof Error && PICKER_CODES.has(cause.message)) throw cause; throw new Error("picker-failed"); }
+}
 
 export class ExplainRoutesService extends Service {
   static inject = ["webServer", "workspaceBinding", "iciEngine", "llm", "iciExplainScheduler"] as const;
   #dispose: (() => void) | undefined;
-  constructor(ctx: Context) { super(ctx, "iciExplainRoutes" as never); }
+  #nativeFilePicker: NativeFilePicker | undefined;
+  constructor(ctx: Context, config: ExplainRoutesConfig = {}) { super(ctx, "iciExplainRoutes" as never); this.#nativeFilePicker = config.nativeFilePicker; }
   protected [Service.init](): void {
     const web = this.ctx.get("webServer") as WebServer | undefined;
     if (!web) return;
@@ -101,6 +125,24 @@ export class ExplainRoutesService extends Service {
       (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke(); ok(res, { jobId: updated.jobId, status: updated.status, revision: updated.revision, notBefore: updated.notBefore, folderPath: updated.folderPath, referenceTarget: referenceTargetOf(updated) });
     } catch (cause) { const code = cause instanceof Error && ["revision-conflict", "stale-snapshot", "confirmation-invalid", "folder-forbidden", "folder-changed"].includes(cause.message) ? cause.message : "storage-error"; fail(res, statusCode(code), code); }
   }
+  private async nativePick(located: Located, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    if (!["awaiting-input", "scheduled"].includes(located.job.status)) { fail(res, 409, "revision-conflict"); return; }
+    if (!hasOnly(body, ["kind"]) || (body.kind !== "file" && body.kind !== "directory")) { fail(res, 422, "confirmation-invalid"); return; }
+    try {
+      const kind = body.kind as NativePickerKind; let selected: string | null;
+      if (kind === "directory") {
+        const picker = this.ctx.get("directoryPicker") as DirectoryPicker | undefined; const capability = picker?.capability?.();
+        if (!capability || capability.kind !== "native" || typeof capability.pick !== "function") throw new Error("picker-unavailable");
+        selected = await capability.pick(signal);
+      } else selected = await (this.#nativeFilePicker ?? { pick: (abort: AbortSignal) => pickNativeFile(abort, { defaultDirectory: located.root }) }).pick(signal);
+      if (signal.aborted) { fail(res, 409, "picker-aborted"); return; }
+      if (selected === null) { fail(res, 409, "picker-cancelled"); return; }
+      const target = await normalizeNativePickedTarget(located.root, selected, kind); ok(res, target);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : ""; const code = signal.aborted ? "picker-aborted" : PICKER_CODES.has(message) ? message : /unsupported|no supported|ENOENT|Cannot find (?:package|module)/i.test(message) ? "picker-unavailable" : "picker-failed";
+      fail(res, code === "picker-failed" ? 500 : 409, code); return;
+    }
+  }
   private async retry(located: Located, res: ServerResponse, signal: AbortSignal): Promise<void> {
     if (!["failed", "cancelled", "interrupted"].includes(located.job.status)) { fail(res, 409, "job-active"); return; }
     const engine = this.ctx.get("iciEngine") as Engine | undefined; if (!engine) { fail(res, 500, "storage-error"); return; }
@@ -113,10 +155,11 @@ export class ExplainRoutesService extends Service {
     const located = await this.locate(jobId); if (!located) { fail(res, 404, "job-missing"); return; }
     if (req.method === "GET" && action === "status") { await this.getJob(located, res); return; }
     if (req.method === "GET" && action === "folder") { await this.folder(located, url, res); return; }
-    if (req.method !== "POST" || !["confirm", "cancel", "retry"].includes(action) || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
-    if (action === "confirm" && typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "confirmation-invalid"); return; }
+    if (req.method !== "POST" || !["confirm", "cancel", "retry", "native-pick"].includes(action) || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
+    if ((action === "confirm" || action === "native-pick") && typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "confirmation-invalid"); return; }
     const controller = new AbortController(); req.on("aborted", () => controller.abort()); const body = await readBody(req); if (body === null) { fail(res, 413, "input-too-large"); return; }
     if (action === "confirm") { await this.confirm(located, body, res, controller.signal); return; }
+    if (action === "native-pick") { await this.nativePick(located, body, res, controller.signal); return; }
     if (action === "cancel") { const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined; const cancelled = scheduler ? await scheduler.cancelJob(jobId) : await updateJobRecord(located.root, jobId, located.job.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); if (!cancelled) fail(res, 409, "revision-conflict"); else ok(res, { jobId, status: "cancelled" }); return; }
     await this.retry(located, res, controller.signal);
   }

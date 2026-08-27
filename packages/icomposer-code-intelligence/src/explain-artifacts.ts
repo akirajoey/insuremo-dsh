@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath, rm } from "node:fs/promises";
-import { isAbsolute, join, normalize } from "node:path";
+import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import type { IciEdge, IciNode } from "./types.ts";
 import type { LoadedGraph } from "./query.ts";
 import { readContainedExplainJson, readValidatedExplainFinal, setExplainWriterFailpoint, withExplainFileLock, writeExplainFile } from "@icomposer/workbench-contracts/ici-explain";
@@ -46,7 +46,8 @@ function digest(value: unknown): string { return createHash("sha256").update(JSO
 function safeRel(value: string): boolean { return value !== "" && value.length <= 512 && !isAbsolute(value) && !value.startsWith("../") && !value.split("/").includes("..") && !value.includes("\\") && !value.includes("*") && !value.startsWith("."); }
 function safeRefStem(value: string): boolean { return value.length > 0 && value.length <= 256 && value.endsWith(".md") && !value.includes("/") && !value.includes("\\") && value !== ".md" && value !== ".."; }
 export function validFolderPath(value: unknown): value is string { return value === "" || typeof value === "string" && value.length <= 512 && !value.startsWith("/") && !value.includes("\\") && !value.includes("\0") && !value.split("/").some(part => part === "" || part === "." || part === "..") && !value.startsWith(".metadata"); }
-async function containedDirectory(root: string, folderPath: string): Promise<string> { if (!validFolderPath(folderPath)) throw new Error("folder-forbidden"); const rootReal = await realpath(root); let current = rootReal; for (const part of folderPath === "" ? [] : folderPath.split("/")) { current = join(current, part); const info = await lstat(current); if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("folder-forbidden"); } const target = await realpath(current); if (target !== rootReal && !target.startsWith(`${rootReal}/`)) throw new Error("folder-forbidden"); return target; }
+function isContainedPath(root: string, target: string): boolean { const child = relative(root, target); return child === "" || child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child); }
+async function containedDirectory(root: string, folderPath: string): Promise<string> { if (!validFolderPath(folderPath)) throw new Error("folder-forbidden"); const rootReal = await realpath(root); let current = rootReal; for (const part of folderPath === "" ? [] : folderPath.split("/")) { current = join(current, part); const info = await lstat(current); if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("folder-forbidden"); } const target = await realpath(current); if (!isContainedPath(rootReal, target)) throw new Error("folder-forbidden"); return target; }
 export async function listFolderEntries(root: string, folderPath: string): Promise<readonly { path: string; kind: "file" | "directory"; supported?: boolean }[]> { const target = await containedDirectory(root, folderPath); const entries = await readdir(target, { withFileTypes: true }); const result: Array<{ path: string; kind: "file" | "directory"; supported?: boolean }> = []; for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name)).slice(0, 200)) { if (!validFolderPath(entry.name) || entry.name.includes("/")) continue; if (entry.isSymbolicLink()) throw new Error("folder-forbidden"); if (entry.isDirectory()) result.push({ path: folderPath === "" ? entry.name : `${folderPath}/${entry.name}`, kind: "directory" }); else if (entry.isFile()) result.push({ path: folderPath === "" ? entry.name : `${folderPath}/${entry.name}`, kind: "file", supported: supportedFolderFile(entry.name) }); } return result; }
 const FOLDER_EXTENSIONS = new Set([".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".log"]);
 function supportedFolderFile(path: string): boolean { const dot = path.lastIndexOf("."); return dot > 0 && FOLDER_EXTENSIONS.has(path.slice(dot).toLowerCase()); }
@@ -68,9 +69,9 @@ export async function restoreExplainPublicationState(root: string, state: unknow
 async function containedFile(root: string, path: string): Promise<string> {
   if (!safeRel(path)) throw new Error("source-forbidden");
   const rootReal = await realpath(root); let current = rootReal;
-  for (const part of normalize(path).split("/")) { current = join(current, part); if ((await lstat(current)).isSymbolicLink()) throw new Error("source-forbidden"); }
+  for (const part of normalize(path).split(/[\\/]+/)) { current = join(current, part); if ((await lstat(current)).isSymbolicLink()) throw new Error("source-forbidden"); }
   const target = await realpath(join(rootReal, normalize(path)));
-  if (target !== rootReal && !target.startsWith(`${rootReal}/`)) throw new Error("source-forbidden");
+  if (!isContainedPath(rootReal, target)) throw new Error("source-forbidden");
   if (!(await lstat(target)).isFile()) throw new Error("source-forbidden");
   return target;
 }

@@ -13,6 +13,10 @@ declare module "@deepseek-ai/dsh-workspace" {
   export interface Workspace { readonly id: string; readonly path: string; readonly title: string; status(): Promise<"ok" | "missing-dir">; }
   export class WorkspaceRegistry { list(): Workspace[]; get(id: string): Workspace | undefined; }
 }
+declare module "@deepseek-ai/dsh-native-command" {
+  export type NativeCommandRunner = (command: string, args: readonly string[], signal: AbortSignal) => Promise<{ stdout: string; stderr: string }>;
+  export const runNativeCommand: NativeCommandRunner;
+}
 declare module "@deepseek-ai/dsh-subprocess" {
   export interface SubprocessOutputRead { text: string; nextOffset: number; lossy: boolean; spillPath?: string; }
   export interface SubprocessOutputReader { readFrom(fromByte: number): SubprocessOutputRead; }

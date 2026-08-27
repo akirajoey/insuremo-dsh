@@ -19,6 +19,10 @@ import type {
 } from "./types.ts";
 
 export { ExplainRoutesService, EXPLAIN_ROUTES_PREFIX, ExplainScheduler, ICI_ENGINE_VERSION };
+export { normalizeNativePickedTarget } from "./explain-routes.ts";
+export { pickNativeFile } from "./native-picker.ts";
+export type { ExplainRoutesConfig, NativeFilePicker } from "./explain-routes.ts";
+export type { NativeCommandRunner, NativeFilePickerInternals, NativePickerKind } from "./native-picker.ts";
 export type {
   CleanupApplyResult,
   CleanupPlan,

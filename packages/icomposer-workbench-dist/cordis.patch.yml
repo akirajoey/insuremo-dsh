@@ -1,4 +1,4 @@
 - insert:
     - id: icomposer-workbench
       name: '@icomposer/workbench'
-      inject: [subprocess, storageDomain, workspaceRegistry, skills, webServer, tools, jobs, llm, agents]
+      inject: [subprocess, storageDomain, workspaceRegistry, skills, webServer, tools, jobs, llm, agents, directoryPicker]

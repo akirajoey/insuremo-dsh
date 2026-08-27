@@ -743,6 +743,7 @@ packages:
     resolution: {directory: packages/icomposer-code-intelligence, type: directory}
     peerDependencies:
       '@deepseek-ai/cordis': '*'
+      '@deepseek-ai/dsh-native-command': '*'
       '@icomposer/icomposer-catalog': '*'
       '@icomposer/workbench-contracts': '*'
       '@icomposer/workspace-binding': '*'

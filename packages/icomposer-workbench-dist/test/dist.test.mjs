@@ -24,7 +24,7 @@ test("dist package metadata declares the full dsh contract", async () => {
   // files whitelist ships the payload
   assert.deepEqual(manifest.files, ["lib", "cordis.patch.yml", "README.md"]);
   // peers: harness packages + react, all loose (baseline documented in README)
-  for (const peer of ["@deepseek-ai/cordis", "@deepseek-ai/dsh-subprocess", "@deepseek-ai/dsh-storage-domain", "@deepseek-ai/dsh-workspace", "@deepseek-ai/dsh-skill", "@deepseek-ai/dsh-storage", "@deepseek-ai/dsh-tools", "@deepseek-ai/dsh-jobs", "@deepseek-ai/schemastery", "@deepseek-ai/dsh-client-ui-primitives", "react"]) {
+  for (const peer of ["@deepseek-ai/cordis", "@deepseek-ai/dsh-native-command", "@deepseek-ai/dsh-subprocess", "@deepseek-ai/dsh-storage-domain", "@deepseek-ai/dsh-workspace", "@deepseek-ai/dsh-skill", "@deepseek-ai/dsh-storage", "@deepseek-ai/dsh-tools", "@deepseek-ai/dsh-jobs", "@deepseek-ai/schemastery", "@deepseek-ai/dsh-client-ui-primitives", "react"]) {
     assert.ok(manifest.peerDependencies[peer] !== undefined, `peerDependencies missing ${peer}`);
   }
 });
@@ -38,7 +38,7 @@ test("cordis.patch.yml is a single insert with the inject union", async () => {
   const injectMatch = text.match(/inject: \[([^\]]+)\]/);
   assert.ok(injectMatch !== undefined);
   const inject = injectMatch[1].split(",").map(s => s.trim());
-  assert.deepEqual([...inject].sort(), ["agents", "jobs", "llm", "skills", "storageDomain", "subprocess", "tools", "webServer", "workspaceRegistry"]);
+  assert.deepEqual([...inject].sort(), ["agents", "directoryPicker", "jobs", "llm", "skills", "storageDomain", "subprocess", "tools", "webServer", "workspaceRegistry"]);
   assert.equal(text.includes("config:"), false, "patch must not carry config");
 });
 

@@ -42,6 +42,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-native-command": "*",
     "@deepseek-ai/dsh-client-ui-primitives": "*",
     "@deepseek-ai/dsh-jobs": "*",
     "@deepseek-ai/dsh-skill": "*",
