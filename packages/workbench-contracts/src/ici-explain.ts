@@ -163,7 +163,7 @@ function validFinal(value: any, state: any): boolean {
   if (!exact(value, FINAL_KEYS) || value.schemaVersion !== 3 || value.kind !== "final" || value.generatedBy !== "current-agent" || value.verified !== false || value.needsBusinessReview !== true) return false;
   if (value.sourceFingerprint !== state.sourceFingerprint || value.graphDigest !== state.graphDigest || value.contextHash !== state.contextHash || value.finalSemanticDigest !== undefined) return false;
   if (!/^[a-f0-9]{32}$/.test(value.prepareId) || !text(value.workspaceId, 256) || !text(value.api?.id, 512) || !text(value.api?.name, 512) || value.api.id !== `api:${state.apiName}` || value.api.name !== state.apiName) return false;
-  if (!exact(value.manifest, ["sourceFingerprint", "graphDigest", "promptVersion"]) || value.manifest.sourceFingerprint !== state.sourceFingerprint || value.manifest.graphDigest !== state.graphDigest || value.manifest.promptVersion !== "explain-mvp-v1") return false;
+  if (!allowed(value.manifest, ["sourceFingerprint", "graphDigest", "promptVersion", "engineVersion"], ["sourceFingerprint", "graphDigest", "promptVersion"]) || value.manifest.sourceFingerprint !== state.sourceFingerprint || value.manifest.graphDigest !== state.graphDigest || value.manifest.promptVersion !== "explain-mvp-v1" || (value.manifest.engineVersion !== undefined && !text(value.manifest.engineVersion, 64))) return false;
   if (!validChain(value.callChain) || !exact(value.apiAnalysis, ["technical", "business", "flow", "evidence"]) || !text(value.apiAnalysis.technical, 12000) || !text(value.apiAnalysis.business, 12000) || !Array.isArray(value.apiAnalysis.flow) || value.apiAnalysis.flow.length > 64 || !value.apiAnalysis.flow.every((item: unknown) => text(item, 500) && !String(item).startsWith("/") && !String(item).includes("..")) || !validEvidence(value.apiAnalysis.evidence)) return false;
   return digest({ ...value, generatedAt: undefined }) === state.finalDigest;
 }
@@ -177,7 +177,7 @@ export async function readValidatedExplainFinal(root: string, expectedApiName?: 
     const final = await readArtifact(root, state.artifactPath);
     if (!validFinal(final, state) || (expectedWorkspaceId !== undefined && final.workspaceId !== expectedWorkspaceId)) return null;
     const manifest = await readArtifact(root, `${ROOT}graph/current/manifest.json`);
-    if (typeof manifest?.sourceFingerprint !== "string" || typeof manifest?.graphDigest !== "string" || manifest.sourceFingerprint !== state.sourceFingerprint || manifest.graphDigest !== state.graphDigest) return null;
+    if (typeof manifest?.sourceFingerprint !== "string" || typeof manifest?.graphDigest !== "string" || manifest.sourceFingerprint !== state.sourceFingerprint || manifest.graphDigest !== state.graphDigest || (final.manifest.engineVersion !== undefined && final.manifest.engineVersion !== manifest.engineVersion)) return null;
     return { state, final, artifactPath: state.artifactPath };
   } catch { return null; }
 }

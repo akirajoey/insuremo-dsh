@@ -1,6 +1,7 @@
-import { IciEngineService } from "./service.ts";
+import { IciEngineService, ICI_ENGINE_VERSION } from "./service.ts";
 import { ExplainScheduler } from "./explain-scheduler.ts";
 import { ExplainRoutesService, EXPLAIN_ROUTES_PREFIX } from "./explain-routes.ts";
+import type { ExplainJobInput, ExplainJobRecord, ExplainReferenceTarget, ExplainReferenceTargetKind } from "./explain-artifacts.ts";
 import type { Context } from "@deepseek-ai/cordis";
 import type {
   CleanupApplyResult,
@@ -17,7 +18,7 @@ import type {
   SearchResult,
 } from "./types.ts";
 
-export { ExplainRoutesService, EXPLAIN_ROUTES_PREFIX, ExplainScheduler };
+export { ExplainRoutesService, EXPLAIN_ROUTES_PREFIX, ExplainScheduler, ICI_ENGINE_VERSION };
 export type {
   CleanupApplyResult,
   CleanupPlan,
@@ -31,6 +32,10 @@ export type {
   Result,
   SearchIndexResult,
   SearchResult,
+  ExplainJobInput,
+  ExplainJobRecord,
+  ExplainReferenceTarget,
+  ExplainReferenceTargetKind,
 };
 
 export const name = "@icomposer/icomposer-code-intelligence";

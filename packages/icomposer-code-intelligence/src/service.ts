@@ -6,6 +6,7 @@ import { auditGraph, buildGraph, collectSources, fingerprintSources } from "./gr
 import { runExplainContext, runExplainDeterministic } from "./explain-runtime.ts";
 import { runFinalize, runPrepare, runSource, type NativeExplainDeps } from "./explain-native.ts";
 import { computeGraphDigest } from "./explain-artifacts.ts";
+import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
 import { embeddingLease, loadSearchDocs } from "./search-runtime.ts";
 import { resolveActiveProfileAuth } from "./active-profile-auth.ts";
@@ -90,11 +91,13 @@ interface ApiSearchDocLike {
   manifest: IciManifest;
 }
 
+export { ICI_ENGINE_VERSION } from "./engine-version.ts";
+
 export class IciEngineService extends Service {
   static inject = ["workspaceBinding", "icomposerCatalog", "imoAuth", "jobs"] as const;
   #disposed = false;
   #queue: Promise<void> = Promise.resolve();
-  readonly #engineVersion = "0.1.0";
+  readonly #engineVersion = ICI_ENGINE_VERSION;
   readonly #timeoutMs: number;
 
   readonly #embeddingUrl: string | undefined;
@@ -216,7 +219,7 @@ export class IciEngineService extends Service {
       edges: snapshot.edges as unknown as IciEdge[],
       manifest: snapshot.manifest,
     };
-    let stale: true | undefined;
+    let stale: true | undefined = snapshot.manifest.engineVersion !== this.#engineVersion ? true : undefined;
     try {
       const catalogRes = await this.listCatalog(workspaceId, signal);
       if (catalogRes.ok) {
@@ -362,7 +365,8 @@ export class IciEngineService extends Service {
     let isStale = false;
     if (facts.manifest !== null) {
       try {
-        const parsed = JSON.parse(facts.manifest) as { sourceFingerprint?: string };
+        const parsed = JSON.parse(facts.manifest) as { engineVersion?: string; sourceFingerprint?: string };
+        if (parsed.engineVersion !== this.#engineVersion) isStale = true;
         const catalogRes = await this.listCatalog(input.workspaceId);
         if (catalogRes.ok && typeof parsed.sourceFingerprint === "string") {
           const entries = catalogRes.value!.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath }));
@@ -431,7 +435,7 @@ export class IciEngineService extends Service {
       disposed: () => this.#disposed,
       loadBase: async (workspaceId, query) => { const result = await this.loadExplainBase(workspaceId, query); return result.ok ? { ok: true as const, value: result } : result.result; },
       refs: path => this.listRefDocNames(path),
-      current: async id => { const result = await this.loadQueryContext(id); if (!result.ok) return result.result; return { ok: true as const, value: { canonicalPath: result.canonicalPath, sourceFingerprint: result.graph.manifest.sourceFingerprint, graphDigest: computeGraphDigest(result.graph) } }; },
+      current: async id => { const result = await this.loadQueryContext(id); if (!result.ok) return result.result; return { ok: true as const, value: { canonicalPath: result.canonicalPath, sourceFingerprint: result.graph.manifest.sourceFingerprint, graphDigest: computeGraphDigest(result.graph), engineVersion: result.graph.manifest.engineVersion } }; },
     };
   }
   async explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainPrepareResult>> { return runPrepare(this.nativeExplainDeps(), input, options); }

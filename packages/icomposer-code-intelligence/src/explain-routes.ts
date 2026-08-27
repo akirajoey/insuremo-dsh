@@ -2,13 +2,16 @@ import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { graphBaseDir, readManifest } from "./storage.ts";
-import { listFolderEntries, loadPrepare, readJobRecord, readPreparedSources, updateJobRecord, validFolderPath, type ExplainJobRecord } from "./explain-artifacts.ts";
+import { assertReferenceTarget, listFolderEntries, loadPrepare, readJobRecord, readPreparedSources, referenceTargetOf, updateJobRecord, validFolderPath, validReferenceTarget, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
+import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 
 export const EXPLAIN_ROUTES_PREFIX = "/api/icomposer-workbench/ici/explain" as const;
 const JSON_TYPE = "application/json; charset=utf-8";
 const MAX_BODY_BYTES = 64 * 1024;
 const SAFE_NAME = /^[A-Za-z0-9._:-]{1,256}$/;
+const ABSOLUTE_PATH_PATTERN = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
+const SECRET_PATTERN = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
 interface Binding { list(): Promise<{ ok: boolean; value?: readonly { workspaceId: string; canonicalPath: string }[] }>; }
 interface Engine { explainPrepare(input: { workspaceId: string; query: string }, signal?: AbortSignal): Promise<{ ok: boolean; value?: any; error?: { code?: string } }>; }
 interface Llm { listProviders(): readonly { id: string }[]; listModels?(provider: string): Promise<readonly { id: string; name?: string }[]>; resolveModelInfo?(provider: string, model: string, signal?: AbortSignal): Promise<unknown>; }
@@ -33,6 +36,7 @@ function normalizeNotBefore(value: unknown): string | null { const now = Date.no
 function hasOnly(value: Record<string, unknown>, keys: readonly string[]): boolean { return Object.keys(value).every(key => keys.includes(key)); }
 function validDocPath(value: unknown): value is string { return typeof value === "string" && value.length <= 512 && value.startsWith("ref_doc/") && !value.includes("\\") && !value.split("/").includes("..") && !value.includes("\0"); }
 function statusCode(code: string): number { return code === "job-missing" ? 404 : code === "job-active" || code === "revision-conflict" || code === "stale-snapshot" || code === "source-changed" || code === "folder-changed" ? 409 : code === "storage-error" ? 500 : 422; }
+function targetFromBody(body: Record<string, unknown>, current: ExplainJobRecord): ExplainReferenceTarget | null { const fields = ["referenceTarget", "reference_target", "target"].filter(key => Object.prototype.hasOwnProperty.call(body, key)); if (fields.length > 1) return null; const legacy = body.folderPath ?? body.folder_path; const target = fields.length === 1 ? (validReferenceTarget(body[fields[0]]) ? body[fields[0]] as ExplainReferenceTarget : null) : legacy === undefined ? referenceTargetOf(current) : validFolderPath(legacy) ? { path: legacy, kind: "directory" as const } : null; if (!target) return null; if (legacy !== undefined && (typeof legacy !== "string" || legacy !== target.path)) return null; return target; }
 
 export class ExplainRoutesService extends Service {
   static inject = ["webServer", "workspaceBinding", "iciEngine", "llm", "iciExplainScheduler"] as const;
@@ -58,7 +62,7 @@ export class ExplainRoutesService extends Service {
     for (const item of listed) {
       if (!safeProvider(item.id)) continue;
       let models: { id: string; name: string }[] = [];
-      try { models = (await llm.listModels?.(item.id) ?? []).filter(model => safeModel(model.id)).map(model => ({ id: model.id, name: typeof model.name === "string" && model.name.length > 0 && model.name.length <= 256 && !/[\u0000-\u001f\u007f]/.test(model.name) ? model.name : model.id })); } catch { /* unavailable catalog */ }
+      try { models = (await llm.listModels?.(item.id) ?? []).filter(model => safeModel(model.id)).map(model => ({ id: model.id, name: typeof model.name === "string" && model.name.length > 0 && model.name.length <= 256 && !/[\u0000-\u001f\u007f]/.test(model.name) && !SECRET_PATTERN.test(model.name) && !ABSOLUTE_PATH_PATTERN.test(model.name) ? model.name : model.id })); } catch { /* unavailable catalog */ }
       output.push({ id: item.id, models });
     }
     return output;
@@ -68,19 +72,20 @@ export class ExplainRoutesService extends Service {
     const final = await readValidatedExplainFinal(located.root, located.job.apiName, located.job.workspaceId);
     const committed = final?.final?.prepareId === located.job.prepareId && final.artifactPath.endsWith(`${located.job.jobId}.json`) ? final : null;
     ok(res, {
-      job: { jobId: located.job.jobId, workspaceId: located.job.workspaceId, apiId: located.job.apiId, apiName: located.job.apiName, provider: located.job.provider, model: located.job.model, status: located.job.status, revision: located.job.revision, docs: located.job.docs, error: located.job.error, notBefore: located.job.notBefore, folderPath: located.job.folderPath, artifactPath: committed?.artifactPath },
+      job: { jobId: located.job.jobId, workspaceId: located.job.workspaceId, apiId: located.job.apiId, apiName: located.job.apiName, provider: located.job.provider, model: located.job.model, engineVersion: located.job.engineVersion, status: located.job.status, revision: located.job.revision, docs: located.job.docs, error: located.job.error, notBefore: located.job.notBefore, folderPath: located.job.folderPath, referenceTarget: referenceTargetOf(located.job), artifactPath: committed?.artifactPath },
       summary: { nodes: prepare.callChain.nodes.length, edges: prepare.callChain.edges.length, sourceFiles: prepare.sources.length, readableSources: prepare.sources.filter((ref: any) => ref.readable).length, references: prepare.references.filter((ref: any) => ref.readable).length, sourceBytes: prepare.sources.reduce((sum: number, ref: any) => sum + (ref.readable ? ref.bytes : 0), 0), promptBaseBytes: Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + prepare.sources.reduce((sum: number, ref: any) => sum + (ref.readable ? ref.bytes : 0), 0) + 1024, truncated: prepare.callChain.truncated === true },
       references: prepare.references.map((ref: any) => ({ path: ref.path, sha256: ref.sha256, bytes: ref.bytes, readable: ref.readable })),
       folderPath: located.job.folderPath,
+      referenceTarget: referenceTargetOf(located.job),
       sourceBytes: prepare.sources.reduce((sum: number, ref: any) => sum + (ref.readable ? ref.bytes : 0), 0),
       providers: await this.providers(),
-      consent: "The background AI will read only the selected workspace-relative directory and send selected source excerpts and directory material to the chosen model."
+      consent: "The background AI will read only the selected workspace-relative reference target and send selected source excerpts and directory material to the chosen model."
     });
   }
-  private async folder(located: Located, url: URL, res: ServerResponse): Promise<void> { const folderPath = url.searchParams.get("path") ?? located.job.folderPath; if (!validFolderPath(folderPath)) { fail(res, 422, "folder-forbidden"); return; } try { const entries = await listFolderEntries(located.root, folderPath); const slash = folderPath.lastIndexOf("/"); ok(res, { folderPath, parentPath: slash > 0 ? folderPath.slice(0, slash) : null, entries: entries.filter(entry => entry.kind === "directory" || entry.supported === true), unsupportedCount: entries.filter(entry => entry.kind === "file" && entry.supported === false).length }); } catch { fail(res, 422, "folder-forbidden"); } }
+  private async folder(located: Located, url: URL, res: ServerResponse): Promise<void> { const selected = referenceTargetOf(located.job); const folderPath = url.searchParams.get("path") ?? (selected.kind === "directory" ? selected.path : selected.path.slice(0, selected.path.lastIndexOf("/"))); if (!validFolderPath(folderPath)) { fail(res, 422, "folder-forbidden"); return; } try { const entries = await listFolderEntries(located.root, folderPath); const slash = folderPath.lastIndexOf("/"); ok(res, { folderPath, parentPath: slash > 0 ? folderPath.slice(0, slash) : null, entries: entries.filter(entry => entry.kind === "directory" || entry.supported === true), unsupportedCount: entries.filter(entry => entry.kind === "file" && entry.supported === false).length }); } catch { fail(res, 422, "folder-forbidden"); } }
   private async confirm(located: Located, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
     if (!["awaiting-input", "scheduled"].includes(located.job.status)) { fail(res, 409, "revision-conflict"); return; }
-    const folderValue = body.folderPath ?? body.folder_path; const notBeforeValue = body.notBefore ?? body.not_before; if (Object.prototype.hasOwnProperty.call(body, "folderPath") && Object.prototype.hasOwnProperty.call(body, "folder_path") || Object.prototype.hasOwnProperty.call(body, "notBefore") && Object.prototype.hasOwnProperty.call(body, "not_before")) { fail(res, 422, "confirmation-invalid"); return; } if (!hasOnly(body, ["provider", "model", "docs", "folderPath", "folder_path", "consent", "notBefore", "not_before"]) || body.consent !== true || !safeProvider(body.provider) || !safeModel(body.model) || !Array.isArray(body.docs) || body.docs.length > 50 || !validFolderPath(folderValue)) { fail(res, 422, "confirmation-invalid"); return; }
+    const notBeforeValue = body.notBefore ?? body.not_before; const target = targetFromBody(body, located.job); if (Object.prototype.hasOwnProperty.call(body, "folderPath") && Object.prototype.hasOwnProperty.call(body, "folder_path") || Object.prototype.hasOwnProperty.call(body, "notBefore") && Object.prototype.hasOwnProperty.call(body, "not_before")) { fail(res, 422, "confirmation-invalid"); return; } if (!hasOnly(body, ["provider", "model", "docs", "folderPath", "folder_path", "referenceTarget", "reference_target", "target", "consent", "notBefore", "not_before"]) || body.consent !== true || !safeProvider(body.provider) || !safeModel(body.model) || !Array.isArray(body.docs) || body.docs.length > 50 || target === null) { fail(res, 422, "confirmation-invalid"); return; }
     const docs = body.docs.map(item => typeof item === "object" && item !== null ? item as Record<string, unknown> : null);
     if (docs.some(doc => doc === null || !validDocPath(doc.path) || typeof doc.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(doc.sha256))) { fail(res, 422, "confirmation-invalid"); return; }
     const notBefore = normalizeNotBefore(notBeforeValue); if (notBefore === null) { fail(res, 422, "confirmation-invalid"); return; }
@@ -88,13 +93,12 @@ export class ExplainRoutesService extends Service {
     if (!providerValid) { fail(res, 422, "confirmation-invalid"); return; }
     try {
       const prepare = await loadPrepare(located.root, located.job.prepareArtifactPath); const manifest = await readManifest(graphBaseDir(located.root, located.job.workspaceId));
-      if (!manifest || manifest.sourceFingerprint !== located.job.sourceFingerprint || manifest.graphDigest !== located.job.graphDigest || prepare.prepareId !== located.job.prepareId) { fail(res, 409, "stale-snapshot"); return; }
+      if (!manifest || located.job.engineVersion !== ICI_ENGINE_VERSION || manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || manifest.sourceFingerprint !== located.job.sourceFingerprint || manifest.graphDigest !== located.job.graphDigest || prepare.prepareId !== located.job.prepareId) { fail(res, 409, "stale-snapshot"); return; }
       if (docs.some(doc => !prepare.references.some(ref => ref.readable && ref.path === doc!.path && ref.sha256 === doc!.sha256))) { fail(res, 422, "confirmation-invalid"); return; }
       for (const doc of docs) { const file = (await readPreparedSources(located.root, located.job.workspaceId, located.job.prepareArtifactPath, [], [doc!.path as string], signal))[0]; if (!file || file.sha256 !== doc!.sha256) { fail(res, 409, "source-changed"); return; } }
-      const folderEntries = await listFolderEntries(located.root, folderValue as string); void folderEntries;
-      if (llm?.resolveModelInfo) { try { await llm.resolveModelInfo(body.provider as string, body.model as string, signal); } catch { fail(res, 422, "confirmation-invalid"); return; } }
-      const updated = await updateJobRecord(located.root, located.job.jobId, located.job.revision, { provider: body.provider as string, model: body.model as string, docs: docs.map(doc => ({ path: doc!.path as string, sha256: doc!.sha256 as string })), folderPath: folderValue as string, notBefore, status: "scheduled" });
-      (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke(); ok(res, { jobId: updated.jobId, status: updated.status, revision: updated.revision, notBefore: updated.notBefore, folderPath: updated.folderPath });
+      await assertReferenceTarget(located.root, target); if (llm?.resolveModelInfo) { try { await llm.resolveModelInfo(body.provider as string, body.model as string, signal); } catch { fail(res, 422, "confirmation-invalid"); return; } }
+      const updated = await updateJobRecord(located.root, located.job.jobId, located.job.revision, { provider: body.provider as string, model: body.model as string, docs: docs.map(doc => ({ path: doc!.path as string, sha256: doc!.sha256 as string })), folderPath: target.path, referenceTarget: target, notBefore, status: "scheduled" });
+      (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke(); ok(res, { jobId: updated.jobId, status: updated.status, revision: updated.revision, notBefore: updated.notBefore, folderPath: updated.folderPath, referenceTarget: referenceTargetOf(updated) });
     } catch (cause) { const code = cause instanceof Error && ["revision-conflict", "stale-snapshot", "confirmation-invalid", "folder-forbidden", "folder-changed"].includes(cause.message) ? cause.message : "storage-error"; fail(res, statusCode(code), code); }
   }
   private async retry(located: Located, res: ServerResponse, signal: AbortSignal): Promise<void> {

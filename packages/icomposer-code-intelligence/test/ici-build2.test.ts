@@ -215,7 +215,7 @@ test("diagnostics: counts, staleness, required files, index paths", async () => 
     if (diag.ok) {
       assert.equal(diag.value.workspaceId, "ws1");
       assert.equal(diag.value.schemaVersion, 1);
-      assert.equal(diag.value.engineVersion, "0.1.0");
+      assert.equal(diag.value.engineVersion, "0.2.0");
       assert.ok(diag.value.nodeCount >= 1);
       assert.equal(diag.value.stale, false);
       assert.deepEqual(diag.value.requiredFiles, { nodes: true, edges: true, manifest: true });

@@ -34,7 +34,7 @@ interface WorkspaceBindingListEntryLike {
 }
 
 interface IciDiagnosticsFace {
-  diagnostics(input: { readonly workspaceId: string }): Promise<{ ok: boolean; value?: { requiredFiles?: { manifest?: boolean } } }>;
+  diagnostics(input: { readonly workspaceId: string }): Promise<{ ok: boolean; value?: { requiredFiles?: { manifest?: boolean }; stale?: boolean } }>;
 }
 
 /**
@@ -73,7 +73,7 @@ export async function buildWorkspaceStatuses(ctx: Context): Promise<readonly Wor
     if (ici !== undefined) {
       try {
         const diag = await ici.diagnostics({ workspaceId: row.workspaceId });
-        graphReady = diag.ok === true && diag.value?.requiredFiles?.manifest === true;
+        graphReady = diag.ok === true && diag.value?.requiredFiles?.manifest === true && diag.value?.stale !== true;
       } catch { /* degrade to false */ }
     }
     try {

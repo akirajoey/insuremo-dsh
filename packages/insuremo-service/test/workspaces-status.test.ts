@@ -94,6 +94,11 @@ test("statuses: four-quadrant aggregation (bound×graph×explain joins)", async 
   } finally { await h.dispose(); await rm(dsh, { recursive: true, force: true }); }
 });
 
+test("stale graph diagnostics never report graphReady", async () => {
+  const h = await fixture({ rows: [{ workspaceId: "ws-stale", canonicalPath: "/stale", detectedIcomposer: true, autoBindState: "bound" }], iciDiagnostics: () => ({ ok: true, value: { requiredFiles: { manifest: true }, stale: true } }) });
+  try { const statuses = await buildWorkspaceStatuses(h.ctx as never); assert.equal(statuses[0]?.graphReady, false); } finally { await h.dispose(); }
+});
+
 test("final explain state requires a matching valid artifact and graph fingerprint", async () => {
   const { createHash } = await import("node:crypto"); const root = await mkdtemp(join(tmpdir(), "w038-artifact-")); const stateDir = join(root, ".metadata", "icomposer", "ici", "explain"); const graphDir = join(root, ".metadata", "icomposer", "ici", "graph", "current"); await mkdir(stateDir, { recursive: true }); await mkdir(graphDir, { recursive: true });
   const fp = "f".repeat(64); const gd = "d".repeat(64); const ch = "c".repeat(64); const artifactPath = ".metadata/icomposer/ici/explain/Api-b8fb321a557f/finals/aaaaaaaaaaaaaaaa.json"; await mkdir(join(root, ".metadata", "icomposer", "ici", "explain", "Api-b8fb321a557f", "finals"), { recursive: true }); await writeFile(join(graphDir, "manifest.json"), JSON.stringify({ sourceFingerprint: fp, graphDigest: gd }), "utf8");

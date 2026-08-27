@@ -8,7 +8,7 @@ interface Engine {
     manifest: unknown; contextHash: string;
   }>>;
 }
-function err(code: string): Array<{ type: "text"; text: string }> { return [{ type: "text", text: `icomposer tools error: ${code}` }]; }
+function err(code: string, message = code): Array<{ type: "text"; text: string }> { return [{ type: "text", text: `icomposer tools error: ${code}${message === code ? "" : ` — ${message}`}` }]; }
 function get(ctx: Context): Engine | undefined { return ctx.get("iciEngine") as unknown as Engine | undefined; }
 const obj = (properties: Record<string, unknown>): Record<string, unknown> => ({ type: "object", additionalProperties: false, properties });
 
@@ -22,7 +22,7 @@ const obj = (properties: Record<string, unknown>): Record<string, unknown> => ({
  */
 export function registerIciExplainTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
   const ds: Array<() => void> = [];
-  ds.push(ctx.systemPrompt.section({ name: "tool:ici_explain", order: 150, text: "ici_explain prepares a bounded source-backed explanation plan for one API: it validates the local graph is fresh, then persists schema-3 prepare metadata (complete bounded call chain, exact source ranges with hashes, reference candidates) and an awaiting-input job record under .metadata/icomposer/ici/explain/. It does not call any model, read source contents into the transcript, or mark readiness. The user confirms a workspace-relative reference directory, model, and earliest not-before time in the Workbench conversation card; the Host starts a fresh restricted background Explain Agent during idle maintenance." }));
+  ds.push(ctx.systemPrompt.section({ name: "tool:ici_explain", order: 150, text: "ici_explain prepares a bounded source-backed explanation plan for one API: it validates the local graph is fresh, then persists schema-3 prepare metadata (complete bounded call chain, exact source ranges with hashes, reference candidates) and an awaiting-input job record under .metadata/icomposer/ici/explain/. It does not call any model, read source contents into the transcript, or mark readiness. The user confirms a workspace-relative reference file or directory target, model, and earliest not-before time in the Workbench conversation card; the Host starts a fresh restricted background Explain Agent during idle maintenance." }));
   ds.push(ctx.tools.register(defineTool({
     name: "ici_explain",
     description: "Prepare (only) a source-backed explanation plan for one API of a registered workspace. Returns artifact_path plus a compact chain summary; no model call, no readiness change.",
@@ -37,15 +37,15 @@ export function registerIciExplainTools(ctx: Context, defineTool: DefineToolFn):
         source_files: { type: "integer" }, references: { type: "integer" },
         manifest: { type: "object", additionalProperties: false, properties: { source_fingerprint: { type: "string" }, graph_digest: { type: "string" } } },
         default_provider: { type: "string" }, default_model: { type: "string" },
-        error: { type: "object", additionalProperties: false, properties: { code: { type: "string", required: true } } },
+        error: { type: "object", additionalProperties: false, properties: { code: { type: "string", required: true }, message: { type: "string" } } },
       }),
-      render: (_a: unknown, v: any) => v?.error ? err(v.error.code) : [{ type: "text", text: `prepare=${v.artifact_path} job=${v.job_id} status=${v.status}; chain=${v.chain_nodes} nodes/${v.chain_edges} edges${v.truncated ? " (truncated)" : ""}, sources=${v.source_files}, refs=${v.references}${v.default_provider && v.default_model ? ` default=${v.default_provider}/${v.default_model}` : ""}. Select a workspace-relative directory and confirm the explicit model in the Workbench card, then Start.` }],
+      render: (_a: unknown, v: any) => v?.error ? err(v.error.code, v.error.message) : [{ type: "text", text: `prepare=${v.artifact_path} job=${v.job_id} status=${v.status}; chain=${v.chain_nodes} nodes/${v.chain_edges} edges${v.truncated ? " (truncated)" : ""}, sources=${v.source_files}, refs=${v.references}${v.default_provider && v.default_model ? ` default=${v.default_provider}/${v.default_model}` : ""}. Select a workspace-relative file or directory and confirm the explicit model in the Workbench card, then Start.` }],
     },
     isConcurrencySafe: () => true,
     async execute(raw: Record<string, unknown>, e: Exec) {
       const engine = get(ctx); if (!engine) return { error: { code: "cli-error" } };
       const r = await engine.explainPrepare({ workspaceId: String(raw.workspace_id), query: String(raw.query) }, e.signal);
-      if (!r.ok) return { error: { code: r.error.code } };
+      if (!r.ok) return { error: { code: r.error.code, message: r.error.message } };
       const v = r.value as any;
       return {
         artifact_path: v.artifactPath, job_id: v.jobId, status: v.jobStatus,

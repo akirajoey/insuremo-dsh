@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { graphBaseDir, currentDir } from "../src/storage.ts";
+import { ICI_ENGINE_VERSION } from "../src/service.ts";
 
 const REAL_SSAPOCPA = "/Users/junjie.zhang/skills/ssapocpa";
 const HAS_REAL_SSAPOCPA_SOURCE = existsSync(join(REAL_SSAPOCPA, "src", "dev"));
@@ -217,6 +218,13 @@ test("stale detection: content change after build marks queries stale", async ()
     if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
     await rm(dshHome, { recursive: true, force: true });
   }
+});
+
+test("engine-version mismatch marks graph stale and blocks explain prepare until rebuild", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ici-version-stale-")); const dshHome = await mkdtemp(join(tmpdir(), "ici-version-stale-dsh-")); const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome; await writeMeta(root, "api", "VersionAPI"); const source = await writeGroovy(root, "api", "VersionAPI", "class VersionAPI { def execute() { return 1 } } "); const h = await harness({ root, catalogEntries: [{ name: "VersionAPI", type: "api", sourcePath: source }], dshHome });
+  try {
+    assert.equal((await h.engine.build({ workspaceId: "version" })).ok, true); const manifestPath = join(currentDir(graphBaseDir(root, "version")), "manifest.json"); const manifest = JSON.parse(await readFile(manifestPath, "utf8")); await writeFile(manifestPath, JSON.stringify({ ...manifest, engineVersion: "0.1.0" }), "utf8"); const query: any = await h.engine.queryApi({ workspaceId: "version", query: "VersionAPI" }); assert.equal(query.ok, true); assert.equal(query.value.stale, true); const diagnostics: any = await h.engine.diagnostics({ workspaceId: "version" }); assert.equal(diagnostics.ok, true); assert.equal(diagnostics.value.engineVersion, ICI_ENGINE_VERSION); assert.equal(diagnostics.value.stale, true); const prepare: any = await h.engine.explainPrepare({ workspaceId: "version", query: "VersionAPI" }); assert.equal(prepare.ok, false); assert.equal(prepare.error.code, "stale-snapshot"); assert.match(prepare.error.message, /ici_build/); assert.equal((await h.engine.build({ workspaceId: "version" })).ok, true); const fresh: any = await h.engine.explainPrepare({ workspaceId: "version", query: "VersionAPI" }); assert.equal(fresh.ok, true); assert.equal(fresh.value.jobStatus, "awaiting-input");
+  } finally { await h.dispose(); await rm(root, { recursive: true, force: true }); if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev; await rm(dshHome, { recursive: true, force: true }); }
 });
 
 test("real ssapocpa query smoke: known API downstream tree, function impact to api, stale via manifest injection", { skip: !HAS_REAL_SSAPOCPA_SOURCE }, async () => {

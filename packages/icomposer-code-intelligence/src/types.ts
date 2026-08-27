@@ -108,7 +108,7 @@ export interface ExplainContextBundle {
 export interface ExplainPrepareResult {
   readonly artifactPath: string; readonly schemaVersion: 3; readonly kind: "prepare"; readonly workspaceId: string; readonly api: { id: string; name: string };
   readonly callChain: unknown; readonly sources: readonly unknown[]; readonly references: readonly unknown[];
-  readonly manifest: { sourceFingerprint: string; graphDigest: string; promptVersion: "explain-mvp-v1" }; readonly contextHash: string;
+  readonly manifest: { sourceFingerprint: string; graphDigest: string; promptVersion: "explain-mvp-v1"; engineVersion: string }; readonly contextHash: string;
   readonly jobId: string; readonly jobStatus: "awaiting-input";
 }
 export interface ExplainSourceResult { readonly files: readonly { nodeId?: string; path: string; startLine?: number; endLine?: number; content: string; sha256: string }[]; }

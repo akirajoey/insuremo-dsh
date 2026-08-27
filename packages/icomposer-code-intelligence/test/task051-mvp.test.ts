@@ -12,7 +12,7 @@ import AgentRegistry from "@deepseek-ai/dsh-agent";
 import AgentLoop from "@deepseek-ai/dsh-agent-loop";
 import { buildGraph } from "../src/graph.ts";
 import { ExplainScheduler, MAX_EXPLAIN_PROMPT_BYTES, processConfirmedJob } from "../src/explain-scheduler.ts";
-import { computeGraphDigest, createJobRecord, finalizeExplain, listFolderEntries, markRunningJobsInterrupted, prepareExplain, readFolderText, readJobRecord, setExplainFinalizeFailpoint, setExplainWriteFailpoint, updateJobRecord } from "../src/explain-artifacts.ts";
+import { assertReferenceTarget, computeGraphDigest, createJobRecord, finalizeExplain, jobRecordPath, listFolderEntries, listReferenceEntries, markRunningJobsInterrupted, prepareExplain, readFolderText, readJobRecord, readReferenceText, setExplainFinalizeFailpoint, setExplainWriteFailpoint, updateJobRecord } from "../src/explain-artifacts.ts";
 import { runPrepare } from "../src/explain-native.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 
@@ -21,7 +21,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "task051-mvp-")); await mkdir(join(root, "src"), { recursive: true }); await mkdir(join(root, "ref_doc", "nested"), { recursive: true });
   await writeFile(join(root, "src", "MvpAPI.groovy"), "class MvpAPI {\n  def execute() { return 1 }\n}\n"); await writeFile(join(root, "ref_doc", "nested", "meaning.md"), "business meaning\n"); await writeFile(join(root, "ref_doc", "binary.pdf"), "not selected\n");
   const raw = await buildGraph(root, [{ name: "MvpAPI", type: "api", sourcePath: join(root, "src", "MvpAPI.groovy") }]); const graph: any = { nodes: new Map(raw.nodes.map(node => [node.id, node])), edges: raw.edges, manifest: { sourceFingerprint: "f".repeat(64) } };
-  await mkdir(join(root, ".metadata/icomposer/ici/graph/current"), { recursive: true }); await writeFile(join(root, ".metadata/icomposer/ici/graph/current/manifest.json"), JSON.stringify({ sourceFingerprint: graph.manifest.sourceFingerprint, graphDigest: computeGraphDigest(graph) }));
+  await mkdir(join(root, ".metadata/icomposer/ici/graph/current"), { recursive: true }); await writeFile(join(root, ".metadata/icomposer/ici/graph/current/manifest.json"), JSON.stringify({ engineVersion: "0.2.0", sourceFingerprint: graph.manifest.sourceFingerprint, graphDigest: computeGraphDigest(graph) }));
   const start = raw.nodes.find(node => node.id === "api:MvpAPI")!; const prepared = await prepareExplain(root, "mvp", graph, start, []); const job = await createJobRecord(root, { jobId: "0123456789abcdef", workspaceId: "mvp", apiName: "MvpAPI", apiId: "api:MvpAPI", prepareArtifactPath: prepared.artifactPath, contextHash: prepared.artifact.contextHash, prepareId: prepared.artifact.prepareId, sourceFingerprint: prepared.artifact.manifest.sourceFingerprint, graphDigest: prepared.artifact.manifest.graphDigest, provider: "mvp", model: "mvp-model", docs: [], folderPath: "ref_doc" });
   return { root, graph, prepared, job, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
@@ -59,6 +59,14 @@ test("TASK-051 MVP folder browser and reader enforce relative containment, exten
   } finally { await fx.cleanup(); }
 });
 
+test("TASK-054 workspace reference targets enforce file exactness and directory descendants", async () => {
+  const fx = await fixture(); const fileTarget = { path: "ref_doc/nested/meaning.md", kind: "file" as const }; const dirTarget = { path: "ref_doc", kind: "directory" as const };
+  try {
+    await assertReferenceTarget(fx.root, fileTarget); const fileListing = await listReferenceEntries(fx.root, fileTarget); assert.deepEqual(fileListing, [{ path: "meaning.md", kind: "file", supported: true }]); const file = await readReferenceText(fx.root, fileTarget, "meaning.md"); assert.equal(file.path, fileTarget.path); assert.equal(file.content, "business meaning\n"); await assert.rejects(() => readReferenceText(fx.root, fileTarget, "nested/meaning.md")); await assert.rejects(() => readReferenceText(fx.root, fileTarget, "other.md"));
+    const nested = await listReferenceEntries(fx.root, dirTarget, "nested"); assert.ok(nested.some(entry => entry.path === "meaning.md" && entry.kind === "file")); const descendant = await readReferenceText(fx.root, dirTarget, "nested/meaning.md"); assert.equal(descendant.path, "ref_doc/nested/meaning.md"); assert.equal(descendant.content, "business meaning\n"); await assert.rejects(() => assertReferenceTarget(fx.root, { path: "ref_doc/nested/meaning.xml", kind: "file" })); await assert.rejects(() => assertReferenceTarget(fx.root, { path: "../outside", kind: "directory" }));
+  } finally { await fx.cleanup(); }
+});
+
 test("TASK-051 MVP concurrent prepare is serialized per workspace", async () => {
   const fx = await fixture(); const start = fx.graph.nodes.get("api:MvpAPI"); const deps: any = { disposed: () => false, loadBase: async () => ({ ok: true, value: { graph: fx.graph, canonicalPath: fx.root, start } }), current: async () => ({ ok: true, value: { canonicalPath: fx.root, sourceFingerprint: fx.graph.manifest.sourceFingerprint, graphDigest: computeGraphDigest(fx.graph) } }), refs: async () => [] };
   try { const results = await Promise.all([runPrepare(deps, { workspaceId: "parallel", query: "MvpAPI" }), runPrepare(deps, { workspaceId: "parallel", query: "MvpAPI" })]); assert.equal(results.filter(result => result.ok).length, 1); assert.deepEqual(results.filter(result => !result.ok).map(result => result.error.code), ["job-active"]); } finally { await fx.cleanup(); }
@@ -72,6 +80,28 @@ test("TASK-051 MVP restart changes running to interrupted and preserves prior fi
     assert.equal(await readValidatedExplainFinal(fx.root), null);
     await assert.rejects(() => updateJobRecord(fx.root, fx.job.jobId, active.revision, { status: "final" }));
   } finally { await fx.cleanup(); }
+});
+
+test("TASK-054 file reference child reads only the selected file", async () => {
+  const fx = await fixture(); class FileAdapter extends LlmAdapter { calls = 0; override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); } async *stream(): AsyncIterable<any> { const call = this.calls++; if (call === 0) yield* toolCall("list", "ici_explain_list", {}); else if (call === 1) yield* toolCall("read", "ici_explain_read", { path: "meaning.md" }); else yield* toolCall("submit", "ici_explain_submit", { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["ref_doc/nested/meaning.md#1"] }); } }
+  const adapter = new FileAdapter(); const ctx: any = await realHarness(adapter as any); const parent = ctx.agentLoop.create(SessionId("mvp-file-target-parent"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); const prepared = fx.prepared; const created = await createJobRecord(fx.root, { jobId: "fedcba0123456781", workspaceId: "mvp", apiName: "MvpAPI", apiId: "api:MvpAPI", prepareArtifactPath: prepared.artifactPath, contextHash: prepared.artifact.contextHash, prepareId: prepared.artifact.prepareId, sourceFingerprint: fx.job.sourceFingerprint, graphDigest: fx.job.graphDigest, provider: "mvp", model: "mvp-model", docs: [], folderPath: "ref_doc/nested/meaning.md", referenceTarget: { path: "ref_doc/nested/meaning.md", kind: "file" } });
+  try { const scheduled = await updateJobRecord(fx.root, created.jobId, created.revision, { status: "scheduled", notBefore: new Date().toISOString() }); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); assert.equal((await readJobRecord(fx.root, scheduled.jobId))?.status, "final"); assert.equal(adapter.calls, 3); assert.ok(await readValidatedExplainFinal(fx.root, "MvpAPI", "mvp")); } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-054 persisted old-engine scheduled jobs fail closed and preserve the prior final", async () => {
+  const fx = await fixture(); const adapter = new ScriptedAdapter(); const ctx: any = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("mvp-old-engine-parent"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root });
+  try {
+    const analysis = { api: { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/MvpAPI.groovy#1"] } }; await assert.rejects(() => finalizeExplain(fx.root, "mvp", fx.prepared.artifactPath, analysis, { sourceFingerprint: fx.job.sourceFingerprint, graphDigest: fx.job.graphDigest, engineVersion: "0.1.0" }), /stale-snapshot/); const previous = await finalizeExplain(fx.root, "mvp", fx.prepared.artifactPath, analysis, { sourceFingerprint: fx.job.sourceFingerprint, graphDigest: fx.job.graphDigest, engineVersion: "0.2.0" }, undefined, "1111111111111111");
+    const scheduled = await updateJobRecord(fx.root, fx.job.jobId, fx.job.revision, { status: "scheduled", notBefore: new Date().toISOString() }); const persisted = JSON.parse(await readFile(jobRecordPath(fx.root, scheduled.jobId), "utf8")); await writeFile(jobRecordPath(fx.root, scheduled.jobId), JSON.stringify({ ...persisted, engineVersion: "0.1.0" }), "utf8"); const graphManifestPath = join(fx.root, ".metadata/icomposer/ici/graph/current/manifest.json"); const graphManifest = JSON.parse(await readFile(graphManifestPath, "utf8")); await writeFile(graphManifestPath, JSON.stringify({ ...graphManifest, engineVersion: "0.1.0" }), "utf8");
+    await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId); assert.equal(after?.status, "failed"); assert.equal(after?.error, "stale-snapshot"); assert.equal(adapter.calls, 0); assert.match(await readFile(join(fx.root, previous.artifactPath), "utf8"), /MvpAPI/); const retainedState = JSON.parse(await readFile(join(fx.root, ".metadata/icomposer/ici/explain/state.json"), "utf8")); assert.equal(retainedState.artifactPath, previous.artifactPath);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-054 legacy scheduled jobs without an engine version fail closed", async () => {
+  const fx = await fixture(); const adapter = new ScriptedAdapter(); const ctx: any = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("mvp-legacy-engine-parent"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root });
+  try {
+    const scheduled = await updateJobRecord(fx.root, fx.job.jobId, fx.job.revision, { status: "scheduled", notBefore: new Date().toISOString() }); const persisted = JSON.parse(await readFile(jobRecordPath(fx.root, scheduled.jobId), "utf8")); delete persisted.engineVersion; await writeFile(jobRecordPath(fx.root, scheduled.jobId), JSON.stringify(persisted), "utf8"); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId); assert.equal(after?.status, "failed"); assert.equal(after?.error, "stale-snapshot"); assert.equal(adapter.calls, 0);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
 });
 
 test("TASK-051 MVP scheduler keeps future jobs idle and starts once when timer is due", async () => {
@@ -124,7 +154,7 @@ test("TASK-051 MVP child request envelope remains bounded across tool history", 
 });
 
 test("TASK-051 MVP after-state publication fault restores the previous readiness state", async () => {
-  const fx = await fixture(); const analysis = { api: { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/MvpAPI.groovy#1"] } }; try { const first = await finalizeExplain(fx.root, "mvp", fx.prepared.artifactPath, analysis, { sourceFingerprint: fx.job.sourceFingerprint, graphDigest: fx.job.graphDigest }, undefined, "1111111111111111"); const before = await readValidatedExplainFinal(fx.root, "MvpAPI", "mvp"); assert.equal(before?.artifactPath, first.artifactPath); setExplainFinalizeFailpoint(phase => { if (phase === "after-state") throw new Error("boom"); }); await assert.rejects(() => finalizeExplain(fx.root, "mvp", fx.prepared.artifactPath, analysis, { sourceFingerprint: fx.job.sourceFingerprint, graphDigest: fx.job.graphDigest }, undefined, "2222222222222222")); const after = await readValidatedExplainFinal(fx.root, "MvpAPI", "mvp"); assert.equal(after?.artifactPath, before?.artifactPath); } finally { setExplainFinalizeFailpoint(undefined); await fx.cleanup(); }
+  const fx = await fixture(); const analysis = { api: { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/MvpAPI.groovy#1"] } }; try { const first = await finalizeExplain(fx.root, "mvp", fx.prepared.artifactPath, analysis, { sourceFingerprint: fx.job.sourceFingerprint, graphDigest: fx.job.graphDigest, engineVersion: "0.2.0" }, undefined, "1111111111111111"); const before = await readValidatedExplainFinal(fx.root, "MvpAPI", "mvp"); assert.equal(before?.artifactPath, first.artifactPath); setExplainFinalizeFailpoint(phase => { if (phase === "after-state") throw new Error("boom"); }); await assert.rejects(() => finalizeExplain(fx.root, "mvp", fx.prepared.artifactPath, analysis, { sourceFingerprint: fx.job.sourceFingerprint, graphDigest: fx.job.graphDigest, engineVersion: "0.2.0" }, undefined, "2222222222222222")); const after = await readValidatedExplainFinal(fx.root, "MvpAPI", "mvp"); assert.equal(after?.artifactPath, before?.artifactPath); } finally { setExplainFinalizeFailpoint(undefined); await fx.cleanup(); }
 });
 
 test("TASK-051 MVP job publication fault restores the previous readiness state", async () => {
