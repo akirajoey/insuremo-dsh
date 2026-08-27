@@ -12,8 +12,8 @@ const jobB = "abcdef0123456789";
 type Phase = "awaiting-input" | "scheduled" | "failed" | "cancelled" | "mixed-failed-awaiting" | "mixed-final-awaiting" | "mixed-running-awaiting" | "mixed-final-failed";
 function batchStatus(phase: Phase) {
   const jobs = phase === "failed" || phase === "mixed-final-failed" ? [
-    { jobId: jobA, apiName: "AlphaAPI", status: "failed", error: "model-failed", promptBaseBytes: 1024, sourceBytes: 512 },
-    { jobId: jobB, apiName: "BetaAPI", status: "final", artifactPath: ".metadata/icomposer/ici/explain/BetaAPI/finals/abcdef0123456789.json", promptBaseBytes: 1024, sourceBytes: 512 },
+    { jobId: jobA, apiName: "AlphaAPI", status: "failed", provider: "mvp", model: "mvp-model", childSessionId: "123e4567-e89b-12d3-a456-426614174000", startedAt: "2026-08-27T01:02:03.000Z", finishedAt: "2026-08-27T01:03:00.000Z", error: "model-failed", promptBaseBytes: 1024, sourceBytes: 512 },
+    { jobId: jobB, apiName: "BetaAPI", status: "final", provider: "mvp", model: "mvp-model", childSessionId: "223e4567-e89b-12d3-a456-426614174001", startedAt: "2026-08-27T01:04:00.000Z", finishedAt: "2026-08-27T01:05:00.000Z", artifactPath: ".metadata/icomposer/ici/explain/BetaAPI/finals/abcdef0123456789.json", promptBaseBytes: 1024, sourceBytes: 512 },
   ] : phase === "mixed-failed-awaiting" ? [
     { jobId: jobA, apiName: "AlphaAPI", status: "failed", error: "model-failed", promptBaseBytes: 1024, sourceBytes: 512 },
     { jobId: jobB, apiName: "BetaAPI", status: "awaiting-input", promptBaseBytes: 1024, sourceBytes: 512 },
@@ -56,5 +56,20 @@ describe("TASK-056 batch ICI toolview", () => {
   it("TASK-059 shows running progress and cancel, not retry, for running-plus-awaiting", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus("mixed-running-awaiting")), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull()); expect(view.getByText(zh["status.running"])).toBeTruthy(); expect(view.getByRole("button", { name: zh["explain.batchCancelAll"] })).toBeTruthy(); expect(view.queryByRole("button", { name: zh["explain.batchRetryFailed"] })).toBeNull(); expect(view.queryByRole("button", { name: zh["explain.start"] })).toBeNull();
+  });
+
+  it("TASK-060 report rows show session, provider/model, times, and error without absolute paths", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus("failed")), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull());
+    const container = view.container.textContent ?? "";
+    expect(container).toContain("mvp/mvp-model");
+    expect(container).toContain(zh["explain.session"]);
+    expect(container).toContain("123e4567");
+    expect(container).toContain("223e4567");
+    expect(container).toContain(zh["explain.startedAt"]);
+    expect(container).toContain(zh["explain.finishedAt"]);
+    expect(container).toContain("model-failed");
+    expect(container).toContain("abcdef0123456789.json");
+    expect(container).not.toMatch(/\/(Users|home|private|tmp)\/|C:\\/);
   });
 });

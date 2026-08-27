@@ -25,4 +25,8 @@
 .actions button:first-child { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-active); }
 button:disabled, select:disabled, input:disabled { cursor: not-allowed; opacity: .55; }
 .error { color: var(--dsw-alias-state-error-primary); }
+.errorText { color: var(--dsw-alias-state-error-primary); }
 .done { color: var(--dsw-alias-state-success-primary); overflow-wrap: anywhere; }
+.runMeta { margin: 4px 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.session { cursor: pointer; user-select: all; }
+.batchJobRow { margin: 4px 0; overflow-wrap: anywhere; }

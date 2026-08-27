@@ -121,3 +121,40 @@ test("TASK-059 second idle without submit fails model-failed after exactly two t
 test("TASK-059 first-turn tool failure does not receive a corrective retry", async () => {
   const fx = await fixture(); const adapter = new ToolFailureAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task059-tool-failure"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try { const scheduled = await schedule(fx.root, fx.jobs[0].job.jobId, fx.jobs[0].job.revision); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId); assert.equal(adapter.calls, 1); assert.equal(after?.status, "failed"); assert.equal(after?.error, "folder-forbidden"); } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
 });
+
+function abortedFinish(): any[] { return [{ type: "finish", reason: { kind: "aborted", failure: { code: "ABORTED", message: "provider aborted" } } }]; }
+
+class AbortedOnceThenSubmitAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); if (this.calls++ === 0) yield* abortedFinish(); else yield* toolCall("submit", "ici_explain_submit", { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/AlphaAPI.groovy#1"] }); }
+}
+
+class AlwaysAbortedAdapter2 extends LlmAdapter {
+  calls = 0;
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(): AsyncIterable<any> { this.calls++; yield* abortedFinish(); }
+}
+
+test("TASK-060 stream abort is attributed stream-aborted, gets one retry, then submits", async () => {
+  const fx = await fixture(); const adapter = new AbortedOnceThenSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task060-abort-retry"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try { const scheduled = await schedule(fx.root, fx.jobs[0].job.jobId, fx.jobs[0].job.revision); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId); assert.equal(adapter.calls, 2); assert.equal(after?.status, "final"); assert.ok(after?.childSessionId && /^[0-9a-f-]{36}$/i.test(after.childSessionId)); assert.ok(after?.startedAt?.endsWith("Z")); assert.ok(after?.finishedAt?.endsWith("Z")); const correction = String(adapter.requests[1]?.messages?.at(-1)?.content?.[0]?.text ?? ""); assert.match(correction, /aborted/); assert.match(correction, /ici_explain_submit/); } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-060 twice-aborted child fails with stream-aborted after two turns", async () => {
+  const fx = await fixture(); const adapter = new AlwaysAbortedAdapter2(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task060-abort-fail"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try { const scheduled = await schedule(fx.root, fx.jobs[0].job.jobId, fx.jobs[0].job.revision); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId); assert.equal(adapter.calls, 2); assert.equal(after?.status, "failed"); assert.equal(after?.error, "stream-aborted"); assert.ok(after?.childSessionId); assert.ok(after?.finishedAt?.endsWith("Z")); } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-060 status routes expose run metadata without absolute paths", async () => {
+  const fx = await fixture(); const setup = await routeFixture(fx); try {
+    const sessionId = "123e4567-e89b-12d3-a456-426614174000";
+    const startedAt = "2026-08-27T01:02:03.000Z"; const finishedAt = "2026-08-27T01:03:00.000Z";
+    await markFailed(fx.root, jobIds[0]);
+    const failed = await readJobRecord(fx.root, jobIds[0]);
+    await updateJobRecord(fx.root, jobIds[0], failed!.revision, { childSessionId: sessionId, startedAt, finishedAt });
+    const batch = response(); await setup.handler(req("GET", `/api/icomposer-workbench/ici/explain/batches/${batchId}/status`), batch); const view = decode(batch);
+    const row = view.result.jobs.find((job: any) => job.jobId === jobIds[0]);
+    assert.equal(row.childSessionId, sessionId); assert.equal(row.startedAt, startedAt); assert.equal(row.finishedAt, finishedAt); assert.equal(row.provider, null); assert.equal(row.model, null); assert.equal(batch.body.includes(fx.root), false); assert.equal(batch.body.includes(sessionId), true);
+    const single = response(); await setup.handler(req("GET", `/api/icomposer-workbench/ici/explain/jobs/${jobIds[0]}/status`), single); const singleView = decode(single);
+    assert.equal(singleView.result.job.childSessionId, sessionId); assert.equal(singleView.result.job.startedAt, startedAt); assert.equal(singleView.result.job.finishedAt, finishedAt); assert.equal(single.body.includes(fx.root), false);
+  } finally { await setup.fiber.dispose(); await fx.cleanup(); }
+});

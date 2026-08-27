@@ -70,6 +70,9 @@ export const zh = {
   "explain.batchCancelAll": "取消整批",
   "explain.batchRetryFailed": "重试失败任务",
   "explain.batchFailed": "批内部分任务失败",
+  "explain.session": "会话",
+  "explain.startedAt": "开始",
+  "explain.finishedAt": "结束",
 } as const satisfies Record<string, string>;
 
 export type WorkbenchJobLocaleKey = keyof typeof zh;
@@ -145,4 +148,7 @@ export const en = {
   "explain.batchCancelAll": "Cancel batch",
   "explain.batchRetryFailed": "Retry failed jobs",
   "explain.batchFailed": "Some batch jobs failed",
+  "explain.session": "Session",
+  "explain.startedAt": "started",
+  "explain.finishedAt": "finished",
 } as const satisfies Record<WorkbenchJobLocaleKey, string>;
