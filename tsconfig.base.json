@@ -22,6 +22,7 @@
       "@deepseek-ai/dsh-scope": ["../deepseek-harness/packages/core/scope/src/index.ts"],
       "@deepseek-ai/dsh-timeout": ["../deepseek-harness/packages/util/timeout/src/index.ts"],
       "@deepseek-ai/dsh-atomic-write": ["../deepseek-harness/packages/util/atomic-write/src/index.ts"],
+      "@deepseek-ai/dsh-native-command": ["../deepseek-harness/packages/util/native-command/src/index.ts"],
       "@icomposer/workbench-contracts": ["packages/workbench-contracts/src/index.ts"],
       "@icomposer/workbench-contracts/ici-explain": ["packages/workbench-contracts/src/ici-explain.ts"],
       "@deepseek-ai/dsh-storage": ["../deepseek-harness/packages/storage/storage/src/index.ts"],

@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { graphBaseDir, readManifest } from "./storage.ts";
-import { assertReferenceTarget, listFolderEntries, loadPrepare, readJobRecord, readPreparedSources, referenceTargetOf, supportedFolderPath, updateJobRecord, validFolderPath, validReferenceTarget, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
+import { assertReferenceTarget, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, supportedFolderPath, updateBatchJobIds, updateJobRecord, withExplainJobLocks, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
 import { pickNativeFile, type NativePickerKind } from "./native-picker.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
@@ -25,6 +25,7 @@ interface Scheduler { cancelJob(jobId: string): Promise<boolean>; poke(): void; 
 interface WebServer { register(route: { kind: "prefix"; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }): () => void; }
 
 type Located = { readonly root: string; readonly job: ExplainJobRecord };
+type BatchLocated = { readonly root: string; readonly batch: ExplainBatchRecord; readonly jobs: readonly ExplainJobRecord[] };
 function response(res: ServerResponse, status: number, body: unknown): void { if (res.destroyed || res.writableEnded) return; res.writeHead(status, { "Content-Type": JSON_TYPE, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" }); res.end(JSON.stringify(body)); }
 function ok(res: ServerResponse, result: unknown): void { response(res, 200, { ok: true, result }); }
 function fail(res: ServerResponse, status: number, code: string): void { response(res, status, { ok: false, error: { code, message: code } }); }
@@ -79,6 +80,19 @@ export class ExplainRoutesService extends Service {
     for (const entry of listed.value ?? []) { const job = await readJobRecord(entry.canonicalPath, jobId); if (job) return { root: entry.canonicalPath, job }; }
     return null;
   }
+  private async locateBatch(batchId: string): Promise<BatchLocated | null> {
+    if (!/^[a-f0-9]{16}$/.test(batchId)) return null;
+    const binding = this.ctx.get("workspaceBinding") as Binding | undefined; if (!binding) return null;
+    const listed = await binding.list().catch(() => ({ ok: false, value: undefined })); if (!listed.ok) return null;
+    for (const entry of listed.value ?? []) {
+      const batch = await readBatchRecord(entry.canonicalPath, batchId);
+      if (!batch || batch.workspaceId !== entry.workspaceId) continue;
+      const jobs: ExplainJobRecord[] = [];
+      for (const jobId of batch.jobIds) { const job = await readJobRecord(entry.canonicalPath, jobId); if (job && job.workspaceId === batch.workspaceId) jobs.push(job); }
+      return { root: entry.canonicalPath, batch, jobs };
+    }
+    return null;
+  }
   private async providers(): Promise<readonly { id: string; models: readonly { id: string; name: string }[] }[]> {
     const llm = this.ctx.get("llm") as Llm | undefined; if (!llm) return [];
     const output: Array<{ id: string; models: { id: string; name: string }[] }> = [];
@@ -105,6 +119,103 @@ export class ExplainRoutesService extends Service {
       providers: await this.providers(),
       consent: "The background AI will read only the selected workspace-relative reference target and send selected source excerpts and directory material to the chosen model."
     });
+  }
+  private async batchStatus(located: BatchLocated, res: ServerResponse): Promise<void> {
+    let promptBaseBytes = 0; let sourceBytes = 0; let maxPromptBaseBytes = 0;
+    const jobs: Array<Record<string, unknown>> = [];
+    for (const job of located.jobs) {
+      let promptBytes = 0; let jobSourceBytes = 0;
+      try { const prepare = await loadPrepare(located.root, job.prepareArtifactPath); jobSourceBytes = prepare.sources.reduce((sum, ref) => sum + (ref.readable ? ref.bytes : 0), 0); promptBytes = Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + jobSourceBytes + 1024; } catch { /* status remains useful even if an old prepare was invalidated */ }
+      sourceBytes += jobSourceBytes; promptBaseBytes += promptBytes; maxPromptBaseBytes = Math.max(maxPromptBaseBytes, promptBytes);
+      const final = await readValidatedExplainFinal(located.root, job.apiName, job.workspaceId);
+      const artifactPath = final?.final?.prepareId === job.prepareId && final.artifactPath.endsWith(`${job.jobId}.json`) ? final.artifactPath : undefined;
+      jobs.push({ jobId: job.jobId, apiName: job.apiName, status: job.status, revision: job.revision, ...(artifactPath === undefined ? {} : { artifactPath }), ...(job.error === undefined ? {} : { error: job.error }), promptBaseBytes: promptBytes, sourceBytes: jobSourceBytes });
+    }
+    ok(res, { batch: located.batch, jobs, providers: await this.providers(), summary: { promptBaseBytes, sourceBytes, maxPromptBaseBytes, jobCount: jobs.length } });
+  }
+  private async batchNativePick(located: BatchLocated, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    if (!located.jobs.some(job => job.status === "awaiting-input" || job.status === "scheduled")) { fail(res, 409, "revision-conflict"); return; }
+    if (!hasOnly(body, ["kind"]) || (body.kind !== "file" && body.kind !== "directory")) { fail(res, 422, "confirmation-invalid"); return; }
+    try {
+      const kind = body.kind as NativePickerKind; let selected: string | null;
+      if (kind === "directory") {
+        const picker = this.ctx.get("directoryPicker") as DirectoryPicker | undefined; const capability = picker?.capability?.();
+        if (!capability || capability.kind !== "native" || typeof capability.pick !== "function") throw new Error("picker-unavailable");
+        selected = await capability.pick(signal);
+      } else selected = await (this.#nativeFilePicker ?? { pick: (abort: AbortSignal) => pickNativeFile(abort, { defaultDirectory: located.root }) }).pick(signal);
+      if (signal.aborted) { fail(res, 409, "picker-aborted"); return; }
+      if (selected === null) { fail(res, 409, "picker-cancelled"); return; }
+      ok(res, await normalizeNativePickedTarget(located.root, selected, kind));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : ""; const code = signal.aborted ? "picker-aborted" : PICKER_CODES.has(message) ? message : /unsupported|no supported|ENOENT|Cannot find (?:package|module)/i.test(message) ? "picker-unavailable" : "picker-failed";
+      fail(res, code === "picker-failed" ? 500 : 409, code);
+    }
+  }
+  private async batchConfirm(located: BatchLocated, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    const members = located.batch.jobIds.map(jobId => located.jobs.find(job => job.jobId === jobId));
+    if (members.some(job => !job || job.status !== "awaiting-input")) { fail(res, 409, "revision-conflict"); return; }
+    const awaiting = members as ExplainJobRecord[];
+    const notBeforeValue = body.notBefore ?? body.not_before; const target = targetFromBody(body, awaiting[0]);
+    if (Object.prototype.hasOwnProperty.call(body, "folderPath") && Object.prototype.hasOwnProperty.call(body, "folder_path") || Object.prototype.hasOwnProperty.call(body, "notBefore") && Object.prototype.hasOwnProperty.call(body, "not_before")) { fail(res, 422, "confirmation-invalid"); return; }
+    if (!hasOnly(body, ["provider", "model", "docs", "folderPath", "folder_path", "referenceTarget", "reference_target", "target", "consent", "notBefore", "not_before"]) || body.consent !== true || !safeProvider(body.provider) || !safeModel(body.model) || !Array.isArray(body.docs) || body.docs.length > 50 || target === null) { fail(res, 422, "confirmation-invalid"); return; }
+    const docs = body.docs.map(item => typeof item === "object" && item !== null ? item as Record<string, unknown> : null);
+    if (docs.some(doc => doc === null || !validDocPath(doc.path) || typeof doc.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(doc.sha256))) { fail(res, 422, "confirmation-invalid"); return; }
+    const notBefore = normalizeNotBefore(notBeforeValue); if (notBefore === null) { fail(res, 422, "confirmation-invalid"); return; }
+    const llm = this.ctx.get("llm") as Llm | undefined; let providerValid = false; try { providerValid = llm?.listProviders().some(item => item.id === body.provider) === true; } catch { providerValid = false; }
+    if (!providerValid) { fail(res, 422, "confirmation-invalid"); return; }
+    try { await assertReferenceTarget(located.root, target); } catch { fail(res, 422, "confirmation-invalid"); return; }
+    if (llm?.resolveModelInfo) { try { await llm.resolveModelInfo(body.provider as string, body.model as string, signal); } catch { fail(res, 422, "confirmation-invalid"); return; } }
+    try {
+      const result = await withExplainJobLocks(located.root, awaiting.map(job => job.jobId), async () => {
+        const validated: Array<{ before: ExplainJobRecord; prepare: any }> = [];
+        for (const job of awaiting) {
+          const current = await readJobRecord(located.root, job.jobId);
+          if (!current || current.workspaceId !== located.batch.workspaceId || current.status !== "awaiting-input" || current.revision !== job.revision) throw new Error("revision-conflict");
+          let prepare: Awaited<ReturnType<typeof loadPrepare>>; try { prepare = await loadPrepare(located.root, current.prepareArtifactPath); } catch { throw new Error("stale-snapshot"); } const manifest = await readManifest(graphBaseDir(located.root, current.workspaceId));
+          if (!manifest || current.engineVersion !== ICI_ENGINE_VERSION || manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || manifest.sourceFingerprint !== current.sourceFingerprint || manifest.graphDigest !== current.graphDigest || prepare.manifest.sourceFingerprint !== current.sourceFingerprint || prepare.manifest.graphDigest !== current.graphDigest || prepare.prepareId !== current.prepareId) throw new Error("stale-snapshot");
+          if (docs.some(doc => !prepare.references.some(ref => ref.readable && ref.path === doc!.path && ref.sha256 === doc!.sha256))) throw new Error("confirmation-invalid");
+          for (const doc of docs) { const file = (await readPreparedSources(located.root, current.workspaceId, current.prepareArtifactPath, [], [doc!.path as string], signal))[0]; if (!file || file.sha256 !== doc!.sha256) throw new Error("source-changed"); }
+          validated.push({ before: current, prepare });
+        }
+        const applied: Array<{ before: ExplainJobRecord; updated: ExplainJobRecord }> = [];
+        try {
+          for (const item of validated) {
+            const updated: ExplainJobRecord = { ...item.before, provider: body.provider as string, model: body.model as string, docs: docs.map(doc => ({ path: doc!.path as string, sha256: doc!.sha256 as string })), folderPath: target.path, referenceTarget: target, notBefore, status: "scheduled", revision: item.before.revision + 1, updatedAt: new Date().toISOString() };
+            await writeJobRecordUnderLock(located.root, updated); applied.push({ before: item.before, updated });
+          }
+        } catch (cause) {
+          for (const item of applied.reverse()) await writeJobRecordUnderLock(located.root, item.before, true).catch(() => undefined);
+          throw cause;
+        }
+        return applied.map(item => ({ jobId: item.updated.jobId, status: item.updated.status, revision: item.updated.revision }));
+      });
+      (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke(); ok(res, { batchId: located.batch.batchId, applied: result, jobs: result.length, status: "scheduled" });
+    } catch (cause) { const message = cause instanceof Error ? cause.message : "storage-error"; const code = ["revision-conflict", "stale-snapshot", "prepare-invalidated", "source-changed", "folder-changed", "confirmation-invalid", "source-forbidden", "folder-forbidden", "folder-oversize"].includes(message) ? message === "prepare-invalidated" ? "stale-snapshot" : message : signal.aborted ? "cancelled" : "storage-error"; fail(res, statusCode(code), code); }
+  }
+  private async batchCancel(located: BatchLocated, res: ServerResponse): Promise<void> {
+    const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined; const cancelled: string[] = [];
+    for (const job of located.jobs) {
+      if (!["awaiting-input", "scheduled", "confirmed", "running"].includes(job.status)) continue;
+      let done = scheduler ? await scheduler.cancelJob(job.jobId).catch(() => false) : false;
+      if (!done) { const current = await readJobRecord(located.root, job.jobId); if (current && ["awaiting-input", "scheduled", "confirmed", "running"].includes(current.status)) done = await updateJobRecord(located.root, current.jobId, current.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); }
+      if (done) cancelled.push(job.jobId);
+    }
+    ok(res, { batchId: located.batch.batchId, cancelled });
+  }
+  private async batchRetry(located: BatchLocated, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    const engine = this.ctx.get("iciEngine") as Engine | undefined; if (!engine) { fail(res, 500, "storage-error"); return; }
+    const jobIds = [...located.batch.jobIds]; const retried: Array<{ from: string; to: string; apiName: string }> = []; const created: string[] = [];
+    const cleanupCreated = async (): Promise<void> => { for (const jobId of created) { const current = await readJobRecord(located.root, jobId); if (current && ["awaiting-input", "scheduled", "confirmed", "running"].includes(current.status)) await updateJobRecord(located.root, jobId, current.revision, { status: "cancelled", error: "storage-error" }).catch(() => undefined); } };
+    for (const job of located.jobs) {
+      if (!["failed", "cancelled", "interrupted"].includes(job.status)) continue;
+      try {
+        const result = await engine.explainPrepare({ workspaceId: job.workspaceId, query: job.apiName }, signal);
+        if (!result.ok || typeof result.value?.jobId !== "string") { await cleanupCreated(); const code = result.error?.code ?? "storage-error"; fail(res, statusCode(code), code); return; }
+        const index = jobIds.indexOf(job.jobId); if (index < 0) continue; jobIds[index] = result.value.jobId; created.push(result.value.jobId); retried.push({ from: job.jobId, to: result.value.jobId, apiName: job.apiName });
+      } catch { await cleanupCreated(); fail(res, 500, "storage-error"); return; }
+    }
+    try { const updated = await updateBatchJobIds(located.root, located.batch.batchId, jobIds); ok(res, { batchId: updated.batchId, jobIds: updated.jobIds, retried }); }
+    catch { await cleanupCreated(); fail(res, 409, "revision-conflict"); }
   }
   private async folder(located: Located, url: URL, res: ServerResponse): Promise<void> { const selected = referenceTargetOf(located.job); const folderPath = url.searchParams.get("path") ?? (selected.kind === "directory" ? selected.path : selected.path.slice(0, selected.path.lastIndexOf("/"))); if (!validFolderPath(folderPath)) { fail(res, 422, "folder-forbidden"); return; } try { const entries = await listFolderEntries(located.root, folderPath); const slash = folderPath.lastIndexOf("/"); ok(res, { folderPath, parentPath: slash > 0 ? folderPath.slice(0, slash) : null, entries: entries.filter(entry => entry.kind === "directory" || entry.supported === true), unsupportedCount: entries.filter(entry => entry.kind === "file" && entry.supported === false).length }); } catch { fail(res, 422, "folder-forbidden"); } }
   private async confirm(located: Located, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
@@ -150,9 +261,21 @@ export class ExplainRoutesService extends Service {
     catch { fail(res, 500, "storage-error"); }
   }
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://localhost"); const suffix = url.pathname.slice(EXPLAIN_ROUTES_PREFIX.length).replace(/^\//, ""); const parts = suffix.split("/").filter(Boolean); const action = parts[0] === "jobs" ? parts[2] : parts[1]; const jobId = parts[0] === "jobs" ? parts[1] : parts[0];
-    if (!jobId || !action || !/^[a-f0-9]{16}$/.test(jobId)) { fail(res, 404, "job-missing"); return; }
-    const located = await this.locate(jobId); if (!located) { fail(res, 404, "job-missing"); return; }
+    const url = new URL(req.url ?? "/", "http://localhost"); const suffix = url.pathname.slice(EXPLAIN_ROUTES_PREFIX.length).replace(/^\//, ""); const parts = suffix.split("/").filter(Boolean);
+    const isBatch = parts[0] === "batches"; const isJobScope = parts[0] === "jobs"; const id = isBatch || isJobScope ? parts[1] : parts[0]; const action = isBatch || isJobScope ? parts[2] : parts[1];
+    if (!id || !action || !/^[a-f0-9]{16}$/.test(id)) { fail(res, 404, "job-missing"); return; }
+    if (isBatch) {
+      const located = await this.locateBatch(id); if (!located) { fail(res, 404, "job-missing"); return; }
+      if (req.method === "GET" && action === "status") { await this.batchStatus(located, res); return; }
+      if (req.method !== "POST" || !["confirm", "cancel", "retry", "native-pick"].includes(action) || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
+      if ((action === "confirm" || action === "native-pick") && typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "confirmation-invalid"); return; }
+      const controller = new AbortController(); req.on("aborted", () => controller.abort()); const body = await readBody(req); if (body === null) { fail(res, 413, "input-too-large"); return; }
+      if (action === "confirm") { await this.batchConfirm(located, body, res, controller.signal); return; }
+      if (action === "native-pick") { await this.batchNativePick(located, body, res, controller.signal); return; }
+      if (action === "cancel") { await this.batchCancel(located, res); return; }
+      await this.batchRetry(located, res, controller.signal); return;
+    }
+    const located = await this.locate(id); if (!located) { fail(res, 404, "job-missing"); return; }
     if (req.method === "GET" && action === "status") { await this.getJob(located, res); return; }
     if (req.method === "GET" && action === "folder") { await this.folder(located, url, res); return; }
     if (req.method !== "POST" || !["confirm", "cancel", "retry", "native-pick"].includes(action) || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
@@ -160,7 +283,7 @@ export class ExplainRoutesService extends Service {
     const controller = new AbortController(); req.on("aborted", () => controller.abort()); const body = await readBody(req); if (body === null) { fail(res, 413, "input-too-large"); return; }
     if (action === "confirm") { await this.confirm(located, body, res, controller.signal); return; }
     if (action === "native-pick") { await this.nativePick(located, body, res, controller.signal); return; }
-    if (action === "cancel") { const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined; const cancelled = scheduler ? await scheduler.cancelJob(jobId) : await updateJobRecord(located.root, jobId, located.job.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); if (!cancelled) fail(res, 409, "revision-conflict"); else ok(res, { jobId, status: "cancelled" }); return; }
+    if (action === "cancel") { const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined; const cancelled = scheduler ? await scheduler.cancelJob(id) : await updateJobRecord(located.root, id, located.job.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); if (!cancelled) fail(res, 409, "revision-conflict"); else ok(res, { jobId: id, status: "cancelled" }); return; }
     await this.retry(located, res, controller.signal);
   }
 }

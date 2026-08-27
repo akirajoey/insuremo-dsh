@@ -184,3 +184,23 @@ export async function readValidatedExplainFinal(root: string, expectedApiName?: 
 export async function readContainedExplainJson(root: string, path: string): Promise<unknown> { return readArtifact(root, path); }
 export async function isExplainArtifactPathContained(root: string, path: string): Promise<boolean> { try { await safeMetadataPath(root, path); return true; } catch { return false; } }
 export async function assertExplainWritePath(root: string, relativePath: string): Promise<void> { await ensureParent(root, relativePath); }
+
+export interface ExplainBatchRecord {
+  readonly schemaVersion: 1;
+  readonly kind: "explain-batch";
+  readonly batchId: string;
+  readonly workspaceId: string;
+  readonly jobIds: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+export type ExplainBatchJobStatus = "awaiting-input" | "scheduled" | "confirmed" | "running" | "final" | "failed" | "cancelled" | "interrupted";
+export interface ExplainBatchStatusJob { readonly jobId: string; readonly apiName: string; readonly status: ExplainBatchJobStatus; readonly artifactPath?: string; readonly error?: string; readonly promptBaseBytes: number; readonly sourceBytes: number; }
+export interface ExplainBatchStatus { readonly batch: ExplainBatchRecord; readonly jobs: readonly ExplainBatchStatusJob[]; readonly providers: readonly { id: string; models: readonly { id: string; name: string }[] }[]; readonly summary: { promptBaseBytes: number; sourceBytes: number; maxPromptBaseBytes?: number; jobCount?: number }; }
+export interface ExplainBatchConfirmInput { readonly provider: string; readonly model: string; readonly docs: readonly { path: string; sha256: string }[]; readonly referenceTarget: { path: string; kind: "file" | "directory" }; readonly notBefore: string; readonly consent: true; }
+export function validExplainBatchJobIds(value: unknown): value is readonly string[] { return Array.isArray(value) && value.length >= 1 && value.length <= 10 && value.every(id => typeof id === "string" && /^[a-f0-9]{16}$/.test(id)) && new Set(value).size === value.length; }
+export function validExplainBatchRecord(value: unknown): value is ExplainBatchRecord {
+  if (!exact(value, ["schemaVersion", "kind", "batchId", "workspaceId", "jobIds", "createdAt", "updatedAt"])) return false;
+  const row = value as ExplainBatchRecord;
+  return row.schemaVersion === 1 && row.kind === "explain-batch" && /^[a-f0-9]{16}$/.test(row.batchId) && text(row.workspaceId, 256) && validExplainBatchJobIds(row.jobIds) && text(row.createdAt, 128) && text(row.updatedAt, 128);
+}

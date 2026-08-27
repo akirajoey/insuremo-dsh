@@ -1,5 +1,5 @@
 {
-  "auditedAt": "2026-08-26T15:09:46.123Z",
+  "auditedAt": "2026-08-27T07:55:50.300Z",
   "harnessCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
   "pinnedCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
   "harnessClean": true,
@@ -21,6 +21,10 @@
     {
       "ok": true,
       "check": "@deepseek-ai/dsh-workspace resolved via harness-shims.d.ts in 6 referring package(s)"
+    },
+    {
+      "ok": true,
+      "check": "@deepseek-ai/dsh-native-command -> ../deepseek-harness/packages/util/native-command/src/index.ts (2 referrers)"
     },
     {
       "ok": true,
@@ -92,7 +96,7 @@
     },
     {
       "ok": true,
-      "check": "pnpm-lock.yaml present (sha256:036e5bf2dad63126)"
+      "check": "pnpm-lock.yaml present (sha256:9fc888b7d9c676b8)"
     }
   ]
 }

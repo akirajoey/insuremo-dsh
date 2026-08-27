@@ -4,7 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { auditGraph, buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { runExplainContext, runExplainDeterministic } from "./explain-runtime.ts";
-import { runFinalize, runPrepare, runSource, type NativeExplainDeps } from "./explain-native.ts";
+import { runFinalize, runPrepare, runPrepareBatch, runSource, type NativeExplainDeps } from "./explain-native.ts";
 import { computeGraphDigest } from "./explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
@@ -32,6 +32,7 @@ import type {
   EmbeddingMode,
   ExplainContextBundle,
   ExplainDeterministicResult,
+  ExplainPrepareBatchResult,
   IciBuildResult,
   IciEdge,
   IciErrorCode,
@@ -117,6 +118,7 @@ export class IciEngineService extends Service {
       cleanupApply: (input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }) => self.cleanupApply(input),
       explainContext: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainContext(input, options),
       explainPrepare: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainPrepare(input, options),
+      explainPrepareBatch: (input: { readonly workspaceId: string; readonly queries: readonly string[] }, options?: BuildOptions | AbortSignal) => self.explainPrepareBatch(input, options),
       explainSource: (input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal) => self.explainSource(input, options),
       explainFinalize: (input: Parameters<IciEngineService["explainFinalize"]>[0], options?: BuildOptions | AbortSignal) => self.explainFinalize(input, options),
       explainDeterministic: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainDeterministic(input, options),
@@ -439,6 +441,7 @@ export class IciEngineService extends Service {
     };
   }
   async explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainPrepareResult>> { return runPrepare(this.nativeExplainDeps(), input, options); }
+  async explainPrepareBatch(input: { readonly workspaceId: string; readonly queries: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareBatchResult>> { return runPrepareBatch(this.nativeExplainDeps(), input, options); }
   async explainSource(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainSourceResult>> { return runSource(this.nativeExplainDeps(), input, options); }
   async explainFinalize(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly analysis: { readonly api: { technical: string; business: string; flow: readonly string[]; evidence: readonly string[] } } }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainFinalizeResult>> { return runFinalize(this.nativeExplainDeps(), input, options); }
 

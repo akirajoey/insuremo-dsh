@@ -61,6 +61,15 @@ export const zh = {
   "explain.waitingIdle": "等待 Agent idle",
   "explain.usage": "预计输入",
   "explain.inputTooLarge": "超出输入预算",
+  "explain.batchTitle": "批量业务解释",
+  "explain.batchApis": "个 API",
+  "explain.batchList": "任务列表",
+  "explain.batchUsage": "批内预计输入",
+  "explain.batchPerJobLimit": "每个任务不超过 256 KiB",
+  "explain.batchTooLarge": "批内有任务超出输入预算",
+  "explain.batchCancelAll": "取消整批",
+  "explain.batchRetryFailed": "重试失败任务",
+  "explain.batchFailed": "批内部分任务失败",
 } as const satisfies Record<string, string>;
 
 export type WorkbenchJobLocaleKey = keyof typeof zh;
@@ -127,4 +136,13 @@ export const en = {
   "explain.waitingIdle": "Waiting for Agent idle",
   "explain.usage": "Estimated input",
   "explain.inputTooLarge": "Input budget exceeded",
+  "explain.batchTitle": "Batch explanation",
+  "explain.batchApis": "APIs",
+  "explain.batchList": "Jobs",
+  "explain.batchUsage": "Estimated batch input",
+  "explain.batchPerJobLimit": "each job must stay within 256 KiB",
+  "explain.batchTooLarge": "One or more batch jobs exceed the input budget",
+  "explain.batchCancelAll": "Cancel batch",
+  "explain.batchRetryFailed": "Retry failed jobs",
+  "explain.batchFailed": "Some batch jobs failed",
 } as const satisfies Record<WorkbenchJobLocaleKey, string>;

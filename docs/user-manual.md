@@ -292,7 +292,7 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 | API 调用链 | `queryApi({query, depth?, focus?, maxNodes?})`：下游树、多起点、focus 子树过滤、cycle/seen 标记、截断边界列表 |
 | 影响分析 | `queryImpact({query})`：function/method 反向到 API 层的路径（每条含 hop 链）+ 置信度计数；冗余 method 跳压缩 |
 | 语义检索 | `index`（经 auth lease + curl embedding；增量：源未变复用旧向量）+ `search`（cosine top-N）；JSONL 为唯一向量存储 |
-| 业务解释 | `ici_explain` 只准备 schema-3 调用链/源码范围并创建 awaiting-input Job；会话中的 keyed toolview 卡片通过 Host 原生选择器分别选择 workspace-relative supported text 文件或目录（默认 `ref_doc`），不再渲染卡片内 tree/modal；同时选择 provider/model 与 not-before。资料仅允许 `.md/.txt/.json/.yaml/.yml/.csv/.log`，不支持浏览器上传；空模型 catalog 仍可手输 opaque model ID。到所属 Agent 下一次 idle 后，Host 启动仅有 list/read/submit 三个工具的 fresh Explain Agent；目录目标可浏览后代，文件目标只能读取所选文件；submit 才发布 immutable `finals/<jobId>.json`，随后 `state.json` 最后指向它并点亮第三 Intelligence 图标。 |
+| 业务解释 | `ici_explain` 只准备 schema-3 调用链/源码范围并创建 awaiting-input Job；单 API 使用 `query`，group/多 API 必须一次使用 `queries`（2–10，自动去重）创建一个 batch card，一次确认 workspace-relative reference、provider/model 与 not-before，闲时逐个运行 batch jobs。会话中的 keyed toolview 卡片通过 Host 原生选择器分别选择 workspace-relative supported text 文件或目录（默认 `ref_doc`），不再渲染卡片内 tree/modal。资料仅允许 `.md/.txt/.json/.yaml/.yml/.csv/.log`，不支持浏览器上传；空模型 catalog 仍可手输 opaque model ID。到所属 Agent 下一次 idle 后，Host 启动仅有 list/read/submit 三个工具的 fresh Explain Agent；目录目标可浏览后代，文件目标只能读取所选文件；submit 才发布 immutable `finals/<jobId>.json`，随后 `state.json` 最后指向它并点亮第三 Intelligence 图标。 |
 | 后台 Job | `ici_build`/`ici_status` 工具：≤50 资产同步返回，>50 走 `ctx.jobs`（kind `ici-build`/`ici-index`）；kill → JobOutcome `killed` 且快照不变；readOutput 增量进度 |
 | 诊断 | 索引路径/schema/engine/节点边数/最后构建/stale 判定/必需文件（对照 Rust doctor 语义） |
 | 清理 | `cleanupPlan` 只列 `staging-*`/`stale-*` 残留；`cleanupApply` 逐路径复核（防 TOCTOU），仅删计划内生成物 |
@@ -352,10 +352,10 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 | `ici_search` | `{workspace_id, query, mode?, top?}` | 语义检索 top-N |
 | `ici_build` | `{workspace_id, mode?: graph\|search-index, rebuild?}` | 构建图/索引（≤50 资产同步；>50 后台 job 返回 jobId） |
 | `ici_status` | `{workspace_id}` | 图/索引诊断（版本/计数/stale/必需文件） |
-| `ici_explain` | `{workspace_id, query}` | 只准备 schema-3 完整调用链与源码范围并创建 awaiting-input Job；图谱 engineVersion 过期时返回 stale-snapshot 并提示 `ici_build`；不调用模型、不点亮状态 |
+| `ici_explain` | `{workspace_id, query 或 queries[2..10]}` | 只准备 schema-3 完整调用链与源码范围；单 API 创建 Job，`queries` 一次创建去重后的 batch Jobs 并返回 `batch=` 卡片；图谱 engineVersion 过期时返回 stale-snapshot 并提示 `ici_build`；不调用模型、不点亮状态 |
 | `ici_explain_list/read/submit` | 仅 fresh Explain Agent 内部可见 | 受限目录浏览、文本读取、严格 aggregate submit；不注册到主 Agent 工具面 |
 
-Host routes：`GET .../jobs/:jobId/status` / `GET .../jobs/:jobId/folder?path=...`（旧兼容）/ `POST .../jobs/:jobId/native-pick`；卡片通过 Host 原生选择器得到 `{path,kind:file|directory}`，再以 `POST .../confirm|cancel|retry` 完成确认、取消和重试。原生选择器只在 Host 内短暂处理 absolute path，成功响应和 confirm 仅含 workspace-relative target；取消/不可用/越界/符号链接/不支持类型均返回固定错误且不改变当前选择。旧 Job 的 `folderPath` 目录字段只作读取迁移兼容。
+Host routes：单 Job 的 `GET .../jobs/:jobId/status` / `GET .../jobs/:jobId/folder?path=...`（旧兼容）/ `POST .../jobs/:jobId/native-pick|confirm|cancel|retry`；Batch 增加 `GET .../batches/:batchId/status` 与 `POST .../batches/:batchId/native-pick|confirm|cancel|retry`，一次确认会排入多个 Job，闲时逐个运行。卡片通过 Host 原生选择器得到 `{path,kind:file|directory}`，原生选择器只在 Host 内短暂处理 absolute path，成功响应和 confirm 仅含 workspace-relative target；取消/不可用/越界/符号链接/不支持类型均返回固定错误且不改变当前选择。旧 Job 的 `folderPath` 目录字段只作读取迁移兼容。
 
 **不在工具面**（需审批流，走 Host face）：push/test/release/create/metadata/skill 写动作/升级。
 

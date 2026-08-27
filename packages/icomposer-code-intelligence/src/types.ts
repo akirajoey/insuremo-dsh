@@ -111,6 +111,11 @@ export interface ExplainPrepareResult {
   readonly manifest: { sourceFingerprint: string; graphDigest: string; promptVersion: "explain-mvp-v1"; engineVersion: string }; readonly contextHash: string;
   readonly jobId: string; readonly jobStatus: "awaiting-input";
 }
+export interface ExplainPrepareBatchJob {
+  readonly apiId: string; readonly apiName: string; readonly jobId: string; readonly artifactPath: string;
+  readonly jobStatus: "awaiting-input" | "scheduled" | "confirmed" | "running" | "final" | "failed" | "cancelled" | "interrupted"; readonly chainNodes: number; readonly chainEdges: number; readonly truncated: boolean; readonly reused: boolean;
+}
+export interface ExplainPrepareBatchResult { readonly batchId: string; readonly workspaceId: string; readonly jobs: readonly ExplainPrepareBatchJob[]; }
 export interface ExplainSourceResult { readonly files: readonly { nodeId?: string; path: string; startLine?: number; endLine?: number; content: string; sha256: string }[]; }
 export interface ExplainFinalizeResult { readonly artifactPath: string; readonly schemaVersion: 3; readonly kind: "final"; readonly generatedBy: "current-agent"; readonly verified: false; readonly needsBusinessReview: true; readonly sourceFingerprint: string; readonly graphDigest: string; readonly contextHash: string; readonly flow: readonly string[]; readonly evidence: readonly string[]; }
 
@@ -136,6 +141,7 @@ export interface IciEngineFace {
   cleanupApply(input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }): Promise<Result<CleanupApplyResult>>;
   explainContext(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainContextBundle>>;
   explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareResult>>;
+  explainPrepareBatch(input: { readonly workspaceId: string; readonly queries: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareBatchResult>>;
   explainSource(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainSourceResult>>;
   explainFinalize(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly analysis: { readonly api: { technical: string; business: string; flow: readonly string[]; evidence: readonly string[] } } }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainFinalizeResult>>;
   explainDeterministic(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainDeterministicResult>>;

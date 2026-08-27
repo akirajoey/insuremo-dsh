@@ -49,7 +49,7 @@ Registered under `ctx.tools` (all `isConcurrencySafe`, effect-free, structured
 - `ici_search` — semantic API search via `ctx.iciEngine.search`
 - `ici_build` — graph/index build (inline or background job)
 - `ici_status` — read-only Code Intelligence diagnostics
-- `ici_explain` — explain-context bundle for Agent-written explanations
+- `ici_explain` — prepare one API with `query`, or one 2–10 API batch with `queries`, for a single Workbench confirmation card
 
 ## Errors
 
