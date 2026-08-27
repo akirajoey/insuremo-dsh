@@ -31,3 +31,12 @@ test("TASK-051 MVP routes expose bounded status/folder and CAS confirmation", as
     await updateJobRecord(fx.root, fx.job.jobId, (await readJobRecord(fx.root, fx.job.jobId))!.revision, { status: "cancelled", error: "cancelled" });
   } finally { await fiber.dispose(); await fx.cleanup(); }
 });
+
+test("TASK-052 accepts routable custom models when the advisory catalog is empty", async () => {
+  const fx = await fixture(); const routes: any[] = []; let rejectModel = false; const ctx: any = new Context(); ctx.provide("webServer", { register(route: any) { routes.push(route); return () => undefined; } }); ctx.provide("workspaceBinding", { list: async () => ({ ok: true, value: [{ workspaceId: "route", canonicalPath: fx.root }] }) }); ctx.provide("llm", { listProviders: () => [{ id: "custom" }], listModels: async () => [], resolveModelInfo: async (_provider: string, _model: string) => { if (rejectModel) throw new Error("model unavailable"); } }); ctx.provide("iciEngine", {}); ctx.provide("iciExplainScheduler", { poke: () => undefined, cancelJob: async () => false }); const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await(); const handler = routes[0].handler;
+  try {
+    const statusRes = response(); await handler(req("GET", `/api/icomposer-workbench/ici/explain/jobs/${fx.job.jobId}/status`), statusRes); const status = decode(statusRes); assert.equal(status.ok, true); assert.deepEqual(status.result.providers, [{ id: "custom", models: [] }]);
+    const confirmRes = response(); await handler(req("POST", `/api/icomposer-workbench/ici/explain/jobs/${fx.job.jobId}/confirm`, { provider: "custom", model: "custom-model", folderPath: "ref_doc", docs: [], consent: true }), confirmRes); assert.equal(decode(confirmRes).ok, true); assert.equal((await readJobRecord(fx.root, fx.job.jobId))?.model, "custom-model");
+    rejectModel = true; const rejected = response(); await handler(req("POST", `/api/icomposer-workbench/ici/explain/jobs/${fx.job.jobId}/confirm`, { provider: "custom", model: "unroutable-model", folderPath: "ref_doc", docs: [], consent: true }), rejected); assert.equal(decode(rejected).error.code, "confirmation-invalid"); assert.equal((await readJobRecord(fx.root, fx.job.jobId))?.model, "custom-model");
+  } finally { await fiber.dispose(); await fx.cleanup(); }
+});
