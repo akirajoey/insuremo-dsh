@@ -40,3 +40,10 @@ test("TASK-052 accepts routable custom models when the advisory catalog is empty
     rejectModel = true; const rejected = response(); await handler(req("POST", `/api/icomposer-workbench/ici/explain/jobs/${fx.job.jobId}/confirm`, { provider: "custom", model: "unroutable-model", folderPath: "ref_doc", docs: [], consent: true }), rejected); assert.equal(decode(rejected).error.code, "confirmation-invalid"); assert.equal((await readJobRecord(fx.root, fx.job.jobId))?.model, "custom-model");
   } finally { await fiber.dispose(); await fx.cleanup(); }
 });
+
+test("TASK-053 provider catalog keeps slash-qualified model ids and rejects unsafe names", async () => {
+  const fx = await fixture(); const routes: any[] = []; const ctx: any = new Context(); ctx.provide("webServer", { register(route: any) { routes.push(route); return () => undefined; } }); ctx.provide("workspaceBinding", { list: async () => ({ ok: true, value: [{ workspaceId: "route", canonicalPath: fx.root }] }) }); ctx.provide("llm", { listProviders: () => [{ id: "custom" }], listModels: async () => [{ id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash" }, { id: "z-ai/glm-5.3-flash" }, { id: "bad\\path", name: "Bad" }, { id: "client-secret-model" }] }); ctx.provide("iciEngine", {}); ctx.provide("iciExplainScheduler", { poke: () => undefined, cancelJob: async () => false }); const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await(); const handler = routes[0].handler;
+  try {
+    const statusRes = response(); await handler(req("GET", `/api/icomposer-workbench/ici/explain/jobs/${fx.job.jobId}/status`), statusRes); const status = decode(statusRes); assert.equal(status.ok, true); assert.deepEqual(status.result.providers, [{ id: "custom", models: [{ id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash" }, { id: "z-ai/glm-5.3-flash", name: "z-ai/glm-5.3-flash" }] }]);
+  } finally { await fiber.dispose(); await fx.cleanup(); }
+});

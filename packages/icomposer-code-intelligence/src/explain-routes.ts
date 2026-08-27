@@ -58,7 +58,7 @@ export class ExplainRoutesService extends Service {
     for (const item of listed) {
       if (!safeProvider(item.id)) continue;
       let models: { id: string; name: string }[] = [];
-      try { models = (await llm.listModels?.(item.id) ?? []).filter(model => safeString(model.id)).map(model => ({ id: model.id, name: safeString(model.name, 256) ? model.name : model.id })); } catch { /* unavailable catalog */ }
+      try { models = (await llm.listModels?.(item.id) ?? []).filter(model => safeModel(model.id)).map(model => ({ id: model.id, name: typeof model.name === "string" && model.name.length > 0 && model.name.length <= 256 && !/[\u0000-\u001f\u007f]/.test(model.name) ? model.name : model.id })); } catch { /* unavailable catalog */ }
       output.push({ id: item.id, models });
     }
     return output;
