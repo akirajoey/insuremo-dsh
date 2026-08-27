@@ -28,6 +28,8 @@ import { IcomposerVerifyService } from "../../icomposer-verify/src/service.ts";
 import { IcomposerVerifyToolService } from "../../icomposer-verify/src/tool-service.ts";
 import { IciContextService } from "../../icomposer-verify/src/ici-context-service.ts";
 import { IciEngineService } from "../../icomposer-code-intelligence/src/service.ts";
+import { ExplainScheduler } from "../../icomposer-code-intelligence/src/explain-scheduler.ts";
+import { ExplainRoutesService } from "../../icomposer-code-intelligence/src/explain-routes.ts";
 import * as write from "../../icomposer-write/src/index.ts";
 import * as insuremoService from "../../insuremo-service/src/index.ts";
 
@@ -43,6 +45,7 @@ export const inject = [
   "webServer",
   "tools",
   "jobs",
+  "llm",
   "agents",
   "systemPrompt",
 ] as const;
@@ -78,6 +81,8 @@ export class WorkbenchDistService extends Service {
     await ctx.plugin(IcomposerVerifyService as never, this.#config.verify);
     await ctx.plugin(IciContextService as never);
     await ctx.plugin(IciEngineService as never);
+    await ctx.plugin(ExplainScheduler as never);
+    await ctx.plugin(ExplainRoutesService as never);
     await ctx.plugin(IcomposerVerifyToolService as never);
     await ctx.plugin(write as never, this.#config.write);
   }

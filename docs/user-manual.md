@@ -292,7 +292,7 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 | API 调用链 | `queryApi({query, depth?, focus?, maxNodes?})`：下游树、多起点、focus 子树过滤、cycle/seen 标记、截断边界列表 |
 | 影响分析 | `queryImpact({query})`：function/method 反向到 API 层的路径（每条含 hop 链）+ 置信度计数；冗余 method 跳压缩 |
 | 语义检索 | `index`（经 auth lease + curl embedding；增量：源未变复用旧向量）+ `search`（cosine top-N）；JSONL 为唯一向量存储 |
-| 业务解释 | `explainContext` 返回并持久化真实上下文 bundle（API + 下游树 + 影响路径 + ref_doc 索引）到 `explain/<safe-api>/context.json`，供当前 Agent 撰写解释；`explainDeterministic` 另存 `deterministic.json`。`explain/state.json` 只在 artifact 完整有效时点亮第三 Intelligence 图标。 |
+| 业务解释 | `ici_explain` 只准备 schema-3 调用链/源码范围并创建 awaiting-input Job；会话中的 keyed toolview 卡片选择 workspace-relative 资料目录（默认 `ref_doc`）、provider/model 与 not-before。资料仅允许 `.md/.txt/.json/.yaml/.yml/.csv/.log`，不支持浏览器上传。到所属 Agent 下一次 idle 后，Host 启动仅有 list/read/submit 三个工具的 fresh Explain Agent；submit 才发布 immutable `finals/<jobId>.json`，随后 `state.json` 最后指向它并点亮第三 Intelligence 图标。 |
 | 后台 Job | `ici_build`/`ici_status` 工具：≤50 资产同步返回，>50 走 `ctx.jobs`（kind `ici-build`/`ici-index`）；kill → JobOutcome `killed` 且快照不变；readOutput 增量进度 |
 | 诊断 | 索引路径/schema/engine/节点边数/最后构建/stale 判定/必需文件（对照 Rust doctor 语义） |
 | 清理 | `cleanupPlan` 只列 `staging-*`/`stale-*` 残留；`cleanupApply` 逐路径复核（防 TOCTOU），仅删计划内生成物 |
@@ -341,7 +341,7 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 
 ## 6. Agent 工具参考
 
-以下 8 个工具全部注册进 Harness `ctx.tools`，**不写源文件/凭据、并发安全、canonical JSON 输出**（Agent 可直接调用）；`ici_build`/索引和 `ici_explain` 会写 workspace-local ICI artifacts。
+以下 10 个工具全部注册进 Harness `ctx.tools`，**不写源文件/凭据、并发安全、canonical JSON 输出**（Agent 可直接调用）；`ici_build`/索引和 `ici_explain` 会写 workspace-local ICI artifacts。
 
 | 工具 | 参数 | 功能 |
 |---|---|---|
@@ -352,7 +352,10 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 | `ici_search` | `{workspace_id, query, mode?, top?}` | 语义检索 top-N |
 | `ici_build` | `{workspace_id, mode?: graph\|search-index, rebuild?}` | 构建图/索引（≤50 资产同步；>50 后台 job 返回 jobId） |
 | `ici_status` | `{workspace_id}` | 图/索引诊断（版本/计数/stale/必需文件） |
-| `ici_explain` | `{workspace_id, query}` | 业务解释上下文 bundle（供 Agent 撰写三段解释）；写入 `explain/<safe-api>/context.json` 与 `explain/state.json` |
+| `ici_explain` | `{workspace_id, query}` | 只准备 schema-3 完整调用链与源码范围并创建 awaiting-input Job；不调用模型、不点亮状态 |
+| `ici_explain_list/read/submit` | 仅 fresh Explain Agent 内部可见 | 受限目录浏览、文本读取、严格 aggregate submit；不注册到主 Agent 工具面 |
+
+Host routes：`GET .../jobs/:jobId/status` / `GET .../jobs/:jobId/folder?path=...`；卡片通过 `POST .../confirm|cancel|retry` 完成确认、取消和重试。
 
 **不在工具面**（需审批流，走 Host face）：push/test/release/create/metadata/skill 写动作/升级。
 
@@ -446,6 +449,7 @@ node scripts/audit-secrets.mjs   # 全仓脱敏扫描（token 形状/canary/路�
 5. 真实 Harness 升级演练——以只读审计 + 回滚预案替代（checkout 99f6f02 即恢复）；
 6. 浏览器写 transport——CSRF/Origin 设计 deferred，Web 侧仅只读 GET 桥；
 7. `verify utils` CLI 会在 workspace `.metadata/icomposer/` 写缓存（CLI 正常行为，已按用户裁定接受）；
+8. ICI Explain 在单进程内串行 prepare/final/cancel 并在 submit 前重哈希资料；同一 OS 用户的其他进程仍可并发修改 workspace（TOCTOU 不在 MVP 的 `openat` 威胁模型内）；
 
 **P2 残余**：README 含开发者机器绝对路径（待通用化）；`ici/service.ts` 恰 500 行贴限；并行真实 smoke 偶发超时（隔离重跑即过）；进程内 journal 重启后 conflict resolution 返回安全侧错误（需人工 reconcile）。
 

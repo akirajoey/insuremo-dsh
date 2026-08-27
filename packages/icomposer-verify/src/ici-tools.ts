@@ -1,5 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
-import type { DefineToolFn } from "./tool-defs.ts";
+import type { DefineToolFn } from "./tool-types.ts";
 import { catalogListOutputSchema, sdkQueryOutputSchema, verifyUtilsOutputSchema } from "./ici-tool-schemas.ts";
 
 interface ToolExecContext {

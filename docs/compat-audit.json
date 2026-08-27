@@ -1,5 +1,5 @@
 {
-  "auditedAt": "2026-08-24T11:01:51.269Z",
+  "auditedAt": "2026-08-26T15:09:46.123Z",
   "harnessCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
   "pinnedCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
   "harnessClean": true,
@@ -92,7 +92,7 @@
     },
     {
       "ok": true,
-      "check": "pnpm-lock.yaml present (sha256:6f881ad9dfcfd602)"
+      "check": "pnpm-lock.yaml present (sha256:036e5bf2dad63126)"
     }
   ]
 }

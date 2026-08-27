@@ -1,6 +1,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { OVERVIEW_PATH } from "./paths.ts";
+import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 
 const JSON_TYPE = "application/json; charset=utf-8";
 
@@ -37,48 +38,13 @@ interface IciDiagnosticsFace {
 }
 
 /**
- * Bounded local read of the workspace-owned explain artifact state, with a
- * legacy DSH_HOME marker fallback. Kept local because this package's tsconfig
+ * Bounded local read of the workspace-owned schema-3 final explain state.
+ * Legacy/context/prepare markers are intentionally never readiness signals. Kept local because this package's tsconfig
  * rootDir cannot include sibling sources.
  */
 async function localReadExplainState(canonicalPath: string, workspaceId: string): Promise<boolean> {
-  const { readFile } = await import("node:fs/promises");
-  const { createHash } = await import("node:crypto");
-  const { homedir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { realpathSync } = await import("node:fs");
-  const statePath = join(canonicalPath, ".metadata", "icomposer", "ici", "explain", "state.json");
-  let stateText: string;
-  try { stateText = await readFile(statePath, "utf8"); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
-    stateText = "";
-  }
-  if (stateText.length > 0) {
-    try {
-      const state = JSON.parse(stateText) as { schemaVersion?: unknown; artifactPath?: unknown; kind?: unknown; generatedAt?: unknown; apiName?: unknown };
-      if (state.schemaVersion !== 2 || (state.kind !== "context" && state.kind !== "deterministic") || typeof state.generatedAt !== "string" || state.generatedAt.length === 0 || typeof state.apiName !== "string" || state.apiName.length === 0 || typeof state.artifactPath !== "string" || !state.artifactPath.startsWith(".metadata/icomposer/ici/explain/") || state.artifactPath.includes("..")) return false;
-      const base = state.apiName.normalize("NFKC").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 72) || "api";
-      const suffix = createHash("sha256").update(state.apiName).digest("hex").slice(0, 12);
-      const expected = `.metadata/icomposer/ici/explain/${base}-${suffix}/${state.kind === "context" ? "context" : "deterministic"}.json`;
-      if (state.artifactPath !== expected) return false;
-      const artifact = JSON.parse(await readFile(join(canonicalPath, state.artifactPath), "utf8")) as { schemaVersion?: unknown; kind?: unknown; bundle?: Record<string, unknown>; result?: Record<string, unknown> };
-      if (artifact.schemaVersion !== 2 || artifact.kind !== state.kind) return false;
-      if (state.kind === "context") {
-        const bundle = artifact.bundle;
-        return bundle !== undefined && typeof bundle.api === "object" && typeof bundle.manifest === "object" && typeof bundle.technicalText === "string" && Array.isArray(bundle.downstream) && Array.isArray(bundle.impact);
-      }
-      const result = artifact.result;
-      return result !== undefined && typeof result.technical === "string" && typeof result.business === "string" && Array.isArray(result.method);
-    } catch { return false; }
-  }
-  try {
-    let real = canonicalPath;
-    try { real = realpathSync(canonicalPath); } catch { /* keep */ }
-    const hash = createHash("sha256").update(`${real}:${workspaceId}`).digest("hex").slice(0, 16);
-    const dshHome = process.env.DSH_HOME || join(homedir(), ".dsh");
-    const parsed = JSON.parse(await readFile(join(dshHome, "ici", hash, "explain-state.json"), "utf8")) as { schemaVersion?: unknown };
-    return parsed.schemaVersion === 1;
-  } catch { return false; }
+  void workspaceId;
+  return (await readValidatedExplainFinal(canonicalPath, undefined, workspaceId)) !== null;
 }
 
 /**

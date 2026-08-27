@@ -1,7 +1,9 @@
 import type { Context } from "@deepseek-ai/cordis";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { apiEmbeddingText, searchEvidence } from "./search-core.ts";
 import { fingerprintSources } from "./graph.ts";
+import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import type { IciErrorCode, Result } from "./types.ts";
 
 function err2(code: IciErrorCode, message: string = code): Result<never> {
@@ -69,30 +71,35 @@ export interface SearchDocLike {
 
 /** Build per-api embedding docs from the snapshot graph (name+downstream template). */
 export async function loadSearchDocs(canonicalPath: string, graph: { nodes: Map<string, { id: string; kind: string; name: string; sourceFile?: string }>; edges: ReadonlyArray<{ from: string; to: string }> }): Promise<SearchDocLike[]> {
-  const { readFile: rf } = await import("node:fs/promises");
   const apiNodes = [...graph.nodes.values()].filter(n => n.kind === "api").sort((a, b) => a.id.localeCompare(b.id));
   const docs: SearchDocLike[] = [];
   for (const node of apiNodes) {
     const downstream = downstreamNodeNamesShim(graph, node.id);
-    const technicalText = apiEmbeddingText(node.name, "technical", "", downstream);
-    const businessText = apiEmbeddingText(node.name, "business", "", downstream);
-    const evidence = searchEvidence("", downstream);
+    let technicalText = apiEmbeddingText(node.name, "technical", "", downstream);
+    let businessText = apiEmbeddingText(node.name, "business", "", downstream);
+    let evidence = searchEvidence("", downstream);
+    let finalDigest = "";
+    try {
+      const validated = await readValidatedExplainFinal(canonicalPath, node.name, (graph as any).manifest?.workspaceId);
+      const final = validated?.final;
+      if (final?.api?.id === node.id) { technicalText = final.apiAnalysis.technical; businessText = final.apiAnalysis.business; evidence = final.apiAnalysis.evidence.filter((x: unknown): x is string => typeof x === "string").join(" | "); finalDigest = fingerprintSources([{ source: JSON.stringify({ api: final.api, apiAnalysis: final.apiAnalysis, contextHash: final.contextHash, prepareId: final.prepareId }) }]); }
+    } catch { /* no valid final: deterministic seed remains */ }
     let sourceHash = "";
     if (node.sourceFile) {
       try {
-        const content = await rf(join(canonicalPath, node.sourceFile), "utf8");
+        const content = await readFile(join(canonicalPath, node.sourceFile), "utf8");
         sourceHash = fingerprintSources([{ source: content }]);
       } catch { /* unreadable */ }
     }
     docs.push({
       apiId: node.id,
       apiName: node.name,
-      sourceHash,
+      sourceHash: fingerprintSources([{ source: sourceHash }, { source: finalDigest }]),
       technicalText,
       businessText,
       technicalEvidence: evidence,
       businessEvidence: evidence,
-      textHash: fingerprintSources([{ source: technicalText }, { source: businessText }]),
+      textHash: fingerprintSources([{ source: technicalText }, { source: businessText }, { source: finalDigest }]),
     });
   }
   return docs;

@@ -24,6 +24,7 @@
   },
   "peerDependencies": {
     "@icomposer/workbench-operation-log": "*",
+    "@icomposer/workbench-contracts": "*",
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-skill": "*",
     "@deepseek-ai/dsh-storage-domain": "*",
@@ -31,6 +32,7 @@
     "@deepseek-ai/schemastery": "*"
   },
   "devDependencies": {
+    "@icomposer/workbench-contracts": "file:../workbench-contracts",
     "@types/node": "^22.20.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"

@@ -1,0 +1,36 @@
+.card {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-3);
+  font-size: 13px;
+}
+.header { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.status { margin-left: auto; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.summary, .hint, .consent, .progress, .done, .error { margin: 8px 0; }
+.hint { color: var(--dsw-alias-label-tertiary); }
+.consent { color: var(--dsw-alias-label-secondary); }
+.fieldset { display: grid; gap: 6px; margin: 8px 0; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; }
+.fieldset legend { color: var(--dsw-alias-label-secondary); }
+.breadcrumb { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.breadcrumb button, .linkButton { border: 0; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.fileList { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.fileList li { display: flex; align-items: center; gap: 8px; }
+.fileList li .check { min-width: 0; flex: 1; }
+.fileList li .check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remove { flex: none; border: 0; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.check { display: flex; align-items: center; gap: 6px; }
+.field { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.field span { min-width: 76px; color: var(--dsw-alias-label-secondary); }
+.field select { min-width: 150px; max-width: 100%; }
+.selectAll { margin: 4px 0; padding: 3px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); }
+.actions { display: flex; gap: 8px; margin-top: 10px; }
+.actions button, .card > button { min-height: 28px; padding: 4px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); cursor: pointer; }
+.actions button:first-child { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-active); }
+button:disabled, select:disabled { cursor: not-allowed; opacity: .55; }
+.error { color: var(--dsw-alias-state-error-primary); }
+.done { color: var(--dsw-alias-state-success-primary); overflow-wrap: anywhere; }
+.workspace { display: none; }

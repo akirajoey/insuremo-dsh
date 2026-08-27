@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { graphBaseDir, currentDir } from "../src/storage.ts";
+
+const REAL_SSAPOCPA = "/Users/junjie.zhang/skills/ssapocpa";
+const HAS_REAL_SSAPOCPA_SOURCE = existsSync(join(REAL_SSAPOCPA, "src", "dev"));
 import { harness, writeGroovy, writeMeta } from "./support/helpers.ts";
 
 test("queryApi roundtrip: multi-start, tree structure, depth truncation, focus filter", async () => {
@@ -215,8 +219,8 @@ test("stale detection: content change after build marks queries stale", async ()
   }
 });
 
-test("real ssapocpa query smoke: known API downstream tree, function impact to api, stale via manifest injection", async () => {
-  const projectRoot = "/Users/junjie.zhang/skills/ssapocpa";
+test("real ssapocpa query smoke: known API downstream tree, function impact to api, stale via manifest injection", { skip: !HAS_REAL_SSAPOCPA_SOURCE }, async () => {
+  const projectRoot = REAL_SSAPOCPA;
   const dshHome = await mkdtemp(join(tmpdir(), "ici-qsmoke-dsh-"));
   const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
   const { scanWorkspace } = await import("../../icomposer-catalog/src/scan.ts");
@@ -395,8 +399,8 @@ test("explain gates: no-match and no-snapshot", async () => {
   }
 });
 
-test("real ssapocpa explain smoke: bundle non-empty sections, deterministic three parts, zero write", async () => {
-  const projectRoot = "/Users/junjie.zhang/skills/ssapocpa";
+test("real ssapocpa explain smoke: bundle non-empty sections, deterministic three parts, zero write", { skip: !HAS_REAL_SSAPOCPA_SOURCE }, async () => {
+  const projectRoot = REAL_SSAPOCPA;
   const dshHome = await mkdtemp(join(tmpdir(), "ici-exsmoke-dsh-"));
   const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
   const { scanWorkspace } = await import("../../icomposer-catalog/src/scan.ts");

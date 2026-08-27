@@ -1,5 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
-import type { DefineToolFn } from "./tool-defs.ts";
+import type { DefineToolFn } from "./tool-types.ts";
 
 interface ToolExecContext {
   readonly signal: AbortSignal;

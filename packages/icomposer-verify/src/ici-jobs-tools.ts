@@ -1,5 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
-import type { DefineToolFn } from "./tool-defs.ts";
+import type { DefineToolFn } from "./tool-types.ts";
 
 interface ToolExecContext {
   readonly signal: AbortSignal;
@@ -97,11 +97,6 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
     name: "tool:ici_build",
     order: 150,
     text: "ici_build builds the local iComposer Code Intelligence graph from a registered workspace canonical path; search-index mode uses the Workbench Active Profile for authentication and fails closed when it is unavailable. Small workspaces complete inline; larger ones run as cancellable background jobs.",
-  }));
-  disposers.push(ctx.systemPrompt.section({
-    name: "tool:ici_explain",
-    order: 150,
-    text: "ici_explain assembles and persists a bounded context bundle (technical text, downstream tree, upstream impact, reference hints) for one API so the current Agent can write its business explanation. This operation writes workspace-local explain/context.json and explain/state.json artifacts; it never writes source files, profiles, tokens, or remote data.",
   }));
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_status",
@@ -244,77 +239,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
     },
   })));
 
-  disposers.push(ctx.tools.register(defineTool({
-    name: "ici_explain",
-    description: "Build a bounded local context bundle for one API of a registered workspace: technical text, downstream tree, upstream impact, and reference-doc hints. No InsureMO binding is required.",
-    parameters: {
-      workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
-      query: { type: "string", required: true, description: "Api name or id substring." },
-    },
-    output: {
-      schema: objectSchema2(
-        {
-          workspace_id: { type: "string", required: true },
-          artifact_path: { type: "string" },
-          api: objectSchema2(
-            {
-              id: { type: "string", required: true },
-              name: { type: "string", required: true },
-              path: { type: "string" },
-            },
-            ["id", "name"],
-          ),
-          technicalText: { type: "string" },
-          downstreamCount: { type: "integer" },
-          impactCount: { type: "integer" },
-          businessReference: { type: "array", items: { type: "string" } },
-          stale: { type: "boolean" },
-          error: objectSchema2({ code: { type: "string", required: true } }, ["code"]),
-        },
-        ["workspace_id", "api"],
-      ),
-      render: (_args: unknown, value: unknown) => {
-        const v = value as {
-          workspace_id: string;
-          artifact_path?: string;
-          api: { name: string };
-          technicalText?: string;
-          downstreamCount?: number;
-          impactCount?: number;
-          businessReference?: readonly string[];
-          error?: { code: string };
-        };
-        if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
-        return [{
-          type: "text",
-          text: [
-            `workspace ${v.workspace_id}: api=${v.api.name} downstream=${v.downstreamCount ?? 0} impact=${v.impactCount ?? 0}`,
-            `reference=${v.businessReference?.join(", ") || "none"}`,
-            `artifact=${v.artifact_path ?? "unknown"}`,
-          ].join("\n"),
-        }];
-      },
-    },
-    isConcurrencySafe: () => true,
-    async execute(rawArgs: Record<string, unknown>, exec: ToolExecContext) {
-      const args = rawArgs as { workspace_id: string; query: string };
-      const ici = ctx.get("iciEngine") as unknown as IciEngineExplainFace | undefined;
-      if (!ici) return { workspace_id: args.workspace_id, error: { code: "cli-error" } };
-      const res = await ici.explainContext({ workspaceId: args.workspace_id, query: args.query }, exec.signal);
-      if (!res.ok) return { workspace_id: args.workspace_id, error: { code: res.error.code } };
-      return {
-        workspace_id: args.workspace_id,
-        ...(res.value.artifactPath === undefined ? {} : { artifact_path: res.value.artifactPath }),
-        api: { ...res.value.api },
-        technicalText: res.value.technicalText,
-        downstreamCount: res.value.downstream.length,
-        impactCount: res.value.impact.length,
-        businessReference: [...res.value.businessReference],
-        ...(res.value.manifest.stale === true ? { stale: true } : {}),
-      };
-    },
-  })));
-
+  /* ici_explain is registered by ici-explain-tools.ts as the two-phase Harness-native flow. */
   // Shared execute body for the two job-backed modes.
   async function runBuild(args: {
     workspace_id: string;

@@ -88,28 +88,17 @@ test("statuses: four-quadrant aggregation (bound×graph×explain joins)", async 
   try {
     const statuses = await buildWorkspaceStatuses(h.ctx as never);
     const by = new Map(statuses.map(entry => [entry.workspaceId, entry]));
-    assert.deepEqual(by.get("ws-a"), { workspaceId: "ws-a", displayName: "ws-a-title", detected: true, autoBindState: "bound", graphReady: true, explainReady: true });
+    assert.deepEqual(by.get("ws-a"), { workspaceId: "ws-a", displayName: "ws-a-title", detected: true, autoBindState: "bound", graphReady: true, explainReady: false });
     assert.deepEqual(by.get("ws-b"), { workspaceId: "ws-b", displayName: "ws-b", detected: true, autoBindState: "pending", graphReady: false, explainReady: false });
     assert.deepEqual(by.get("ws-c"), { workspaceId: "ws-c", displayName: "ws-c", detected: false, autoBindState: "none", graphReady: false, explainReady: false });
   } finally { await h.dispose(); await rm(dsh, { recursive: true, force: true }); }
 });
 
-test("new explain state requires a matching valid artifact", async () => {
-  const root = await mkdtemp(join(tmpdir(), "w038-artifact-"));
-  const stateDir = join(root, ".metadata", "icomposer", "ici", "explain");
-  await mkdir(stateDir, { recursive: true });
-  const artifactPath = ".metadata/icomposer/ici/explain/Api-ce111709f54c/context.json";
-  await mkdir(join(root, ".metadata", "icomposer", "ici", "explain", "Api-ce111709f54c"), { recursive: true });
-  await writeFile(join(root, artifactPath), JSON.stringify({ schemaVersion: 2, kind: "context", bundle: { api: {}, manifest: {}, technicalText: "x", downstream: [], impact: [] } }), "utf8");
-  await writeFile(join(stateDir, "state.json"), JSON.stringify({ schemaVersion: 2, kind: "context", generatedAt: "now", apiName: "Api", artifactPath }), "utf8");
-  const h = await fixture({ rows: [{ workspaceId: "ws-artifact", canonicalPath: root, detectedIcomposer: true, autoBindState: "pending" }] });
-  try {
-    let statuses = await buildWorkspaceStatuses(h.ctx as never);
-    assert.equal(statuses[0]?.explainReady, true);
-    await writeFile(join(root, artifactPath), JSON.stringify({ schemaVersion: 2, kind: "deterministic", result: {} }), "utf8");
-    statuses = await buildWorkspaceStatuses(h.ctx as never);
-    assert.equal(statuses[0]?.explainReady, false);
-  } finally { await h.dispose(); await rm(root, { recursive: true, force: true }); }
+test("final explain state requires a matching valid artifact and graph fingerprint", async () => {
+  const { createHash } = await import("node:crypto"); const root = await mkdtemp(join(tmpdir(), "w038-artifact-")); const stateDir = join(root, ".metadata", "icomposer", "ici", "explain"); const graphDir = join(root, ".metadata", "icomposer", "ici", "graph", "current"); await mkdir(stateDir, { recursive: true }); await mkdir(graphDir, { recursive: true });
+  const fp = "f".repeat(64); const gd = "d".repeat(64); const ch = "c".repeat(64); const artifactPath = ".metadata/icomposer/ici/explain/Api-b8fb321a557f/finals/aaaaaaaaaaaaaaaa.json"; await mkdir(join(root, ".metadata", "icomposer", "ici", "explain", "Api-b8fb321a557f", "finals"), { recursive: true }); await writeFile(join(graphDir, "manifest.json"), JSON.stringify({ sourceFingerprint: fp, graphDigest: gd }), "utf8");
+  const artifact: any = { schemaVersion: 3, kind: "final", workspaceId: "ws-artifact", generatedBy: "current-agent", verified: false, needsBusinessReview: true, generatedAt: "now", sourceFingerprint: fp, graphDigest: gd, prepareId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contextHash: ch, api: { id: "api:Api", name: "Api" }, manifest: { sourceFingerprint: fp, graphDigest: gd, promptVersion: "explain-mvp-v1" }, callChain: { nodes: [{ nodeId: "api:Api", kind: "api", name: "Api", sourceFile: "src/x.groovy", directCalls: [], pathFromApi: ["api:Api"], cycle: false, repeated: false }], edges: [], paths: [["api:Api"]], repeatedVisits: [], truncated: false }, apiAnalysis: { technical: "technical", business: "business", flow: ["flow"], evidence: ["src/x.groovy#1"] } }; const finalDigest = createHash("sha256").update(JSON.stringify({ ...artifact, generatedAt: undefined })).digest("hex"); await writeFile(join(root, artifactPath), JSON.stringify(artifact), "utf8"); await writeFile(join(stateDir, "state.json"), JSON.stringify({ schemaVersion: 3, kind: "final", generatedAt: "now", apiName: "Api", sourceFingerprint: fp, graphDigest: gd, contextHash: ch, finalDigest, artifactPath }), "utf8");
+  const h = await fixture({ rows: [{ workspaceId: "ws-artifact", canonicalPath: root, detectedIcomposer: true, autoBindState: "pending" }] }); try { let statuses = await buildWorkspaceStatuses(h.ctx as never); assert.equal(statuses[0]?.explainReady, true); artifact.apiAnalysis.technical = "tampered"; await writeFile(join(root, artifactPath), JSON.stringify(artifact), "utf8"); statuses = await buildWorkspaceStatuses(h.ctx as never); assert.equal(statuses[0]?.explainReady, false); } finally { await h.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("route: GET serves the projection with no-store/nosniff; non-GET → 405; dispose unmounts", async () => {

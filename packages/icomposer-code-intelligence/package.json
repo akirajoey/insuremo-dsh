@@ -25,9 +25,11 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@icomposer/workspace-binding": "*",
+    "@icomposer/workbench-contracts": "*",
     "@icomposer/icomposer-catalog": "*"
   },
   "devDependencies": {
+    "@icomposer/workbench-contracts": "file:../workbench-contracts",
     "@types/node": "^22.20.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"

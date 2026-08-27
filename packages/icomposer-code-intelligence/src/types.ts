@@ -10,6 +10,10 @@ export interface IciNode {
   readonly path: string;
   readonly evidence: string;
   readonly sourceFile?: string;
+  readonly startLine?: number;
+  readonly endLine?: number;
+  readonly signature?: string;
+  readonly sourceHash?: string;
   readonly owner?: string;
 }
 
@@ -32,6 +36,8 @@ export interface IciManifest {
   readonly nodeCount: number;
   readonly edgeCount: number;
   readonly workspaceId: string;
+  readonly audit?: { readonly duplicateNodeIds: number; readonly duplicateEdgeTuples: number; readonly invalidRanges: number };
+  readonly graphDigest?: string;
   readonly canonicalPath?: string;
 }
 
@@ -56,7 +62,22 @@ export type IciErrorCode =
   | "invalid-auth"
   | "forbidden"
   | "prepare-invalidated"
-  | "lease-revoked";
+  | "lease-revoked"
+  | "source-forbidden"
+  | "source-changed"
+  | "folder-changed"
+  | "source-range"
+  | "source-oversize"
+  | "source-symlink"
+  | "stale-snapshot"
+  | "coverage-invalid"
+  | "analysis-invalid"
+  | "confirmation-invalid"
+  | "immutable-conflict"
+  | "schema-invalid"
+  | "job-active"
+  | "input-too-large"
+  | "interrupted";
 
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
@@ -84,6 +105,15 @@ export interface ExplainContextBundle {
   };
 }
 
+export interface ExplainPrepareResult {
+  readonly artifactPath: string; readonly schemaVersion: 3; readonly kind: "prepare"; readonly workspaceId: string; readonly api: { id: string; name: string };
+  readonly callChain: unknown; readonly sources: readonly unknown[]; readonly references: readonly unknown[];
+  readonly manifest: { sourceFingerprint: string; graphDigest: string; promptVersion: "explain-mvp-v1" }; readonly contextHash: string;
+  readonly jobId: string; readonly jobStatus: "awaiting-input";
+}
+export interface ExplainSourceResult { readonly files: readonly { nodeId?: string; path: string; startLine?: number; endLine?: number; content: string; sha256: string }[]; }
+export interface ExplainFinalizeResult { readonly artifactPath: string; readonly schemaVersion: 3; readonly kind: "final"; readonly generatedBy: "current-agent"; readonly verified: false; readonly needsBusinessReview: true; readonly sourceFingerprint: string; readonly graphDigest: string; readonly contextHash: string; readonly flow: readonly string[]; readonly evidence: readonly string[]; }
+
 export interface ExplainDeterministicResult {
   readonly artifactPath: string;
   readonly generatedBy: "deterministic-v1";
@@ -105,6 +135,9 @@ export interface IciEngineFace {
   cleanupPlan(input: { readonly workspaceId: string }): Promise<Result<CleanupPlan>>;
   cleanupApply(input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }): Promise<Result<CleanupApplyResult>>;
   explainContext(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainContextBundle>>;
+  explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareResult>>;
+  explainSource(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainSourceResult>>;
+  explainFinalize(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly analysis: { readonly api: { technical: string; business: string; flow: readonly string[]; evidence: readonly string[] } } }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainFinalizeResult>>;
   explainDeterministic(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainDeterministicResult>>;
 }
 

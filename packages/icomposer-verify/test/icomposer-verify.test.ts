@@ -458,7 +458,7 @@ test("real project smoke (read-only + transient-cache restore): list/search agai
   for (const [k, v] of before) assert.equal(after.get(k), v);
 });
 
-test("tools: 3 read-only tools registered at mount, unregistered on dispose, execute smoke via fake faces", async () => {
+test("tools: ICI build/query/explain two-phase tools registered at mount, unregistered on dispose, execute smoke via fake faces", async () => {
   const ctx = new Context();
   const registered = new Map<string, { name: string; output: { render: (args: unknown, value: unknown) => unknown }; execute: (args: Record<string, unknown>, exec: { signal: AbortSignal }) => Promise<unknown> }>();
   const removed: string[] = [];
@@ -478,6 +478,7 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
       options?.onProgress?.(1, 1, "embedding batch");
       return { ok: true, value: { artifactPath: ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl", total: 5, embedded: input.rebuild === true ? 5 : 1, reused: input.rebuild === true ? 0 : 4 } };
     },
+    explainPrepare: async () => ({ ok: true, value: { artifactPath: ".metadata/icomposer/ici/explain/TestAPI-abc/prepare.json", jobId: "job123", jobStatus: "awaiting-input", api: { id: "api:TestAPI", name: "TestAPI" }, callChain: { nodes: [{ id: "api:TestAPI" }], edges: [], truncated: false }, sources: [], references: [], nodesToUpdate: [], cache: { hit: 0, miss: 0 }, manifest: { sourceFingerprint: "x".repeat(64), graphDigest: "g", promptVersion: "explain-v4" }, contextHash: "c" } }),
     explainContext: async () => ({
       ok: true,
       value: {
@@ -574,7 +575,8 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
   try {
     assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
     assert.equal([...registered.values()].every(tool => typeof tool.output.render === "function"), true);
-    assert.deepEqual(sections.map(x => x.order), [150, 150, 150, 150, 150, 150, 150, 150]);
+    assert.equal(sections.length, 8);
+    assert.equal(sections.every(x => x.order === 150), true);
     assert.equal(sections.every(x => x.name.startsWith("tool:")), true);
     const exec = { signal: new AbortController().signal };
 
@@ -630,15 +632,11 @@ test("tools: 3 read-only tools registered at mount, unregistered on dispose, exe
     assert.equal(status.workspace_id, "ws1");
     assert.ok(status.requiredFiles.manifest === false || status.requiredFiles.manifest === true);
     assert.doesNotThrow(() => registered.get("ici_status")!.output.render({}, status));
-    // ici_explain context bundle
+    // ici_explain prepare artifact
     const explainOut: any = await registered.get("ici_explain")!.execute({ workspace_id: "ws1", query: "TestAPI" }, exec);
-    assert.equal(explainOut.api.id, "api:TestAPI");
-    assert.equal(explainOut.downstreamCount, 1);
-    assert.equal(explainOut.impactCount, 1);
-    assert.deepEqual(explainOut.businessReference, ["IComposerPaymentUtils"]);
     assert.equal(explainOut.error, undefined);
-    assert.equal(explainOut.artifact_path, ".metadata/icomposer/ici/explain/TestAPI-abc/context.json");
-    assert.match((registered.get("ici_explain")!.output.render({}, explainOut) as any)[0].text, /artifact=\.metadata/);
+    assert.equal(explainOut.artifact_path, ".metadata/icomposer/ici/explain/TestAPI-abc/prepare.json");
+    assert.match((registered.get("ici_explain")!.output.render({}, explainOut) as any)[0].text, /prepare=\.metadata/);
   } finally {
     for (const dispose of disposers) dispose();
   }
@@ -727,7 +725,7 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
   const { registerIciJobTools } = await import("../src/ici-jobs-tools.ts");
   registerIciJobTools(ctx, (o: unknown) => o as never);
   try {
-    assert.deepEqual(reg.map(d => d.name).sort(), ["ici_build", "ici_explain", "ici_status"]);
+    assert.deepEqual(reg.map(d => d.name).sort(), ["ici_build", "ici_status"]);
     const exec = { signal: new AbortController().signal };
     const startRes: any = await reg.find(d => d.name === "ici_build")!.execute({ workspace_id: "ws1" }, exec);
     assert.equal(startRes.kind, "background");

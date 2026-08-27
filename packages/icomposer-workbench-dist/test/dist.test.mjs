@@ -14,7 +14,7 @@ test("dist package metadata declares the full dsh contract", async () => {
   assert.equal(manifest.dsh.bundle.patch, "./cordis.patch.yml");
   assert.equal(manifest.dsh.client.platform, "web");
   const clientInject = manifest.dsh.client.inject;
-  for (const service of ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-primitives"]) {
+  for (const service of ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-tool", "@deepseek-ai/dsh-client-ui-primitives"]) {
     assert.ok(clientInject.includes(service), `client inject missing ${service}`);
   }
   // exports cover the loader contract
@@ -38,7 +38,7 @@ test("cordis.patch.yml is a single insert with the inject union", async () => {
   const injectMatch = text.match(/inject: \[([^\]]+)\]/);
   assert.ok(injectMatch !== undefined);
   const inject = injectMatch[1].split(",").map(s => s.trim());
-  assert.deepEqual([...inject].sort(), ["agents", "jobs", "skills", "storageDomain", "subprocess", "tools", "webServer", "workspaceRegistry"]);
+  assert.deepEqual([...inject].sort(), ["agents", "jobs", "llm", "skills", "storageDomain", "subprocess", "tools", "webServer", "workspaceRegistry"]);
   assert.equal(text.includes("config:"), false, "patch must not carry config");
 });
 

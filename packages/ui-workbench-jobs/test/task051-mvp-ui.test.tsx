@@ -1,0 +1,21 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LocaleRuntime } from "@deepseek-ai/dsh-client-locale/client";
+import { SlotTestRuntime, usePinnedBrowserLanguages } from "@deepseek-ai/dsh-client-test-runtime";
+import { apply, inject } from "../src/client/index.ts";
+import { zh } from "../src/client/locales.ts";
+
+usePinnedBrowserLanguages("zh-CN");
+const jobId = "0123456789abcdef";
+function resultBlock() { return { kind: "tool-result" as const, call: { argsRaw: JSON.stringify({ workspace_id: "mvp", query: "MvpAPI" }) }, content: [{ type: "text", text: `prepare=.metadata/icomposer/ici/explain/MvpAPI/prepare.json job=${jobId} status=awaiting-input` }] }; }
+const status = (state: string) => ({ ok: true, result: { job: { jobId, workspaceId: "mvp", apiName: "MvpAPI", provider: "mvp", model: "mvp-model", folderPath: "ref_doc", status: state, revision: 1 }, summary: { nodes: 3, edges: 2, sourceFiles: 2, readableSources: 2, sourceBytes: 1024, promptBaseBytes: 2048, truncated: false }, providers: [{ id: "mvp", models: [{ id: "mvp-model", name: "MVP model" }] }] } });
+
+describe("TASK-051 MVP ICI toolview", () => {
+  let runtime: SlotTestRuntime; let locale: LocaleRuntime; let feature: Awaited<ReturnType<SlotTestRuntime["mount"]>>;
+  beforeEach(async () => { vi.stubGlobal("localStorage", { clear: () => undefined, getItem: () => null, setItem: () => undefined, removeItem: () => undefined, key: () => null, length: 0 }); runtime = await SlotTestRuntime.create(); locale = new LocaleRuntime(runtime.ctx); runtime.ctx.provide("locale", locale); runtime.slots.installLocale(locale); const owner: any = { callId: "call-1", toolName: "ici_explain", block: resultBlock() }; const Frame = ({ renderSlot }: any) => renderSlot("tool.call.toolview", owner, { entryKey: "ici_explain" }); await runtime.root.declare({ "tool.call.toolview": { kind: "keyed", scope: "root" } } as never, Frame as never); feature = await runtime.mount({ inject, apply }); });
+  afterEach(async () => { await feature.dispose(); await runtime.dispose(); vi.unstubAllGlobals(); });
+  it("browses nested workspace folder, sends consent/model/notBefore, and renders scheduled", async () => {
+    let started = false; const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => { const url = String(input); if (url.endsWith(`/jobs/${jobId}/status`)) return new Response(JSON.stringify(status(started ? "scheduled" : "awaiting-input")), { status: 200 }); if (url.includes(`/jobs/${jobId}/folder`)) { const path = new URL(url, "http://localhost").searchParams.get("path"); return new Response(JSON.stringify({ ok: true, result: { folderPath: path, parentPath: path === "ref_doc/nested" ? "ref_doc" : null, entries: path === "ref_doc" ? [{ path: "ref_doc/nested", kind: "directory" }, { path: "ref_doc/readme.md", kind: "file", supported: true }] : [{ path: "ref_doc/nested/guide.md", kind: "file", supported: true }] } })); } if (url.includes(`/jobs/${jobId}/confirm`)) { started = true; const body = JSON.parse(String(init?.body)); expect(body).toMatchObject({ provider: "mvp", model: "mvp-model", folderPath: "ref_doc/nested", consent: true }); expect(typeof body.notBefore).toBe("string"); return new Response(JSON.stringify({ ok: true, result: { jobId, status: "scheduled", notBefore: body.notBefore, folderPath: body.folderPath } })); } return new Response(JSON.stringify({ ok: false, error: { code: "not-found", message: "not-found" } }), { status: 404 }); }); vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderRoot(); expect(await view.findByText("MvpAPI")).toBeTruthy(); expect(await view.findByText(zh["explain.folder"])).toBeTruthy();
+    (await view.findByRole("button", { name: /nested/ })).click(); expect(await view.findByText("guide.md")).toBeTruthy(); (await view.findByRole("button", { name: zh["explain.useFolder"] })).click(); const start = await view.findByRole("button", { name: zh["explain.start"] }); start.click(); await vi.waitFor(() => expect(started).toBe(true)); expect(await view.findByText(zh["status.scheduled"])).toBeTruthy(); const confirm = fetchMock.mock.calls.find(call => String(call[0]).includes("/confirm")); expect(confirm).toBeTruthy();
+  });
+});

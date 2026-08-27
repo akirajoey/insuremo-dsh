@@ -6,7 +6,7 @@ import { createUserMessage } from "./msg-shim.ts";
 export const ICI_CONTEXT_PLUGIN = "icomposer-code-intelligence-context" as const;
 export const ICI_CONTEXT_SECTION = "icomposer-code-intelligence" as const;
 export const ICI_CONTEXT_DIGEST_SECTION = "icomposer-code-intelligence-digest" as const;
-export const ICI_CONTEXT_POLICY_VERSION = "3" as const;
+export const ICI_CONTEXT_POLICY_VERSION = "4" as const;
 const COMPACT_PLUGIN = "compact";
 
 interface BindingEntry {
@@ -54,12 +54,10 @@ export class IciContextService extends Service {
   async decide(payload: unknown, next: () => Promise<Decision>): Promise<Decision> {
     const decision = await (next as unknown as () => Promise<Decision>)();
     const input = payload as PreStepPayload;
-    console.error("ICI_DEBUG_STEP", input.step, input.agent?.session?.header?.cwd);
     if (decision.kind === "reject" || this.#disposed || input.signal?.aborted === true || input.step !== 1) return decision;
     const cwd = input.agent?.session?.header?.cwd;
     if (typeof cwd !== "string" || cwd.length === 0) return decision;
-    const workspace = await this.matchWorkspace(cwd, input.signal).catch(error => { console.error("ICI_DEBUG_MATCH", error); return undefined; });
-    console.error("ICI_DEBUG_WS", workspace);
+    const workspace = await this.matchWorkspace(cwd, input.signal).catch(() => undefined);
     if (this.#disposed || input.signal?.aborted || workspace === undefined || !isSafeWorkspaceId(workspace.workspaceId)) return decision;
     const state: ContextState = workspace.binding !== null && workspace.binding !== undefined ? "bound" : "detected-pending";
     const digest = contextDigest(workspace.workspaceId, state, workspace.detectedIcomposer === true, ICI_CONTEXT_POLICY_VERSION);
@@ -125,5 +123,5 @@ function shouldInject(events: readonly unknown[], digest: string, policyVersion 
 }
 
 function renderContext(workspaceId: string, _state: ContextState): string {
-  return `This is iComposer workspace ${workspaceId}. It is detected and registered; local graph/catalog/reference operations use its canonical path without requiring an InsureMO binding. Workspace-owned ICI artifacts live under .metadata/icomposer/ici/: graph/current, graph/search/api_embeddings.jsonl, explain/<safe-api>/context.json or deterministic.json, and explain/state.json. Local tools ici_build (graph mode), ici_status, ici_query, ici_explain, icomposer_catalog_list, and icomposer_sdk_query do not require a binding. Embedding index/search and icomposer_verify_utils resolve the Workbench Active Profile explicitly for authentication and fail closed when it is missing or unavailable. Read the returned artifact_path before referring to a persisted artifact; never invent paths. Real tools are: ici_build, ici_status, ici_query, ici_search, ici_explain; supporting read-only tools are icomposer_catalog_list, icomposer_sdk_query, and icomposer_verify_utils. Use the injected workspace_id; never guess one. Read each registered tool schema and description for exact parameters, enums, and output before calling it; those schemas are the source of truth. Do not invent CLI commands. Graph build/index may schedule jobs and write workspace graph/search artifacts; ici_explain also writes workspace-local explain context/state artifacts. ici_status, ici_query, ici_search, catalog, and reference reads do not write. Authentication uses only the Workbench Active Profile and never the CLI default pointer.`;
+  return `This is iComposer workspace ${workspaceId}. It is detected and registered; local graph/catalog/reference operations use its canonical path without requiring an InsureMO binding. Workspace-owned ICI artifacts live under .metadata/icomposer/ici/: graph/current, graph/search/api_embeddings.jsonl, explain/<safe-api>/prepare.json, immutable finals/<jobId>.json, and final-only explain/state.json. Local tools ici_build (graph mode), ici_status, ici_query, ici_explain, icomposer_catalog_list, and icomposer_sdk_query do not require a binding. Embedding index/search and icomposer_verify_utils resolve the Workbench Active Profile explicitly for authentication and fail closed when it is missing or unavailable. Read the returned artifact_path before referring to a persisted artifact; never invent paths. Real tools are: ici_build, ici_status, ici_query, ici_search, ici_explain; ici_explain is prepare-only. The Workbench card validates selected references/model and starts one idle host job; model output is never written to conversation history. Supporting read-only tools are icomposer_catalog_list, icomposer_sdk_query, and icomposer_verify_utils. Use the injected workspace_id; never guess one. Read each registered tool schema and description for exact parameters, enums, and output before calling it; those schemas are the source of truth. Do not invent CLI commands. Graph build/index may schedule jobs and write workspace graph/search artifacts; ici_explain writes only schema-3 prepare metadata. Host maintenance starts one fresh restricted background Explain Agent at idle; the child reads only the selected workspace-relative text directory and prepared source ranges, then publishes immutable final/state metadata through its submit tool. Deterministic, legacy, corrupt, orphan, prepare, and incomplete artifacts never mark explain ready; a failed/cancelled/interrupted job preserves the previous valid final/state. ici_status, ici_query, ici_search, catalog, and reference reads do not write. Authentication uses only the Workbench Active Profile and never the CLI default pointer.`;
 }

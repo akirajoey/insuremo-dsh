@@ -60,6 +60,32 @@ await assertNoRetiredText(join(distDir, "lib"), "dist/lib");
 for (const entry of ["lib", "cordis.patch.yml", "package.json", "README.md"]) {
   await cp(join(distDir, entry), join(staged, entry), { recursive: true });
 }
+// Source maps are useful during local development but are not part of the
+// release payload: they expose source layout and make the artifact needlessly
+// large. Keep only executable JS in the shipped lib/.
+async function removeSourceMaps(dir) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) await removeSourceMaps(full);
+    else if (entry.name.endsWith(".map")) await rm(full, { force: true });
+  }
+}
+await removeSourceMaps(join(staged, "lib"));
+// Rollup/tsdown region comments can retain the local checkout prefix. Never
+// ship machine-specific host paths even in comments; the executable payload
+// does not depend on them.
+async function sanitizeStagedJs(dir) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) await sanitizeStagedJs(full);
+    else if (entry.name.endsWith(".js")) {
+      const text = await readFile(full, "utf8");
+      const sanitized = text.replaceAll(`${repoRoot}/`, "<repo>/").replaceAll("/private/var", "private-var").replaceAll("/var/folders", "var-folders").replaceAll("/tmp/", "tmp/");
+      if (sanitized !== text) await writeFile(full, sanitized, "utf8");
+    }
+  }
+}
+await sanitizeStagedJs(join(staged, "lib"));
 
 await assertNoRetiredText(staged, "staged");
 

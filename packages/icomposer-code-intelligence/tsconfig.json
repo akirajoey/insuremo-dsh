@@ -1,12 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": "../..",
     "outDir": "dist",
     "types": ["node"],
     "paths": {
       "@deepseek-ai/cordis": ["src/harness-shims.d.ts"],
-      "@deepseek-ai/dsh-workspace": ["src/harness-shims.d.ts"]
+      "@deepseek-ai/dsh-workspace": ["src/harness-shims.d.ts"],
+      "@icomposer/workbench-contracts": ["packages/workbench-contracts/src/index.ts"],
+      "@icomposer/workbench-contracts/ici-explain": ["packages/workbench-contracts/src/ici-explain.ts"],
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"],

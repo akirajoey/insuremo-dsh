@@ -12,25 +12,25 @@ importers:
     dependencies:
       '@icomposer/icomposer-catalog':
         specifier: file:../icomposer-catalog
-        version: file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-code-intelligence':
         specifier: file:../icomposer-code-intelligence
-        version: file:packages/icomposer-code-intelligence(@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding))(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-code-intelligence(@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)))(@icomposer/workbench-contracts@file:packages/workbench-contracts)(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-lifecycle':
         specifier: file:../icomposer-lifecycle
-        version: file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-reference':
         specifier: file:../icomposer-reference
-        version: file:packages/icomposer-reference(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-reference(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-verify':
         specifier: file:../icomposer-verify
-        version: file:packages/icomposer-verify(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-verify(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-write':
         specifier: file:../icomposer-write
-        version: file:packages/icomposer-write(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-write(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/insuremo-service':
         specifier: file:../insuremo-service
-        version: file:packages/insuremo-service(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)
+        version: file:packages/insuremo-service(@icomposer/workbench-contracts@file:packages/workbench-contracts)(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)
       '@icomposer/plugin-workbench-test':
         specifier: file:../plugin-workbench-test
         version: link:../plugin-workbench-test
@@ -43,12 +43,15 @@ importers:
       '@icomposer/ui-workbench-jobs':
         specifier: file:../ui-workbench-jobs
         version: file:packages/ui-workbench-jobs(@deepseek-ai/dsh-client-ui-conversation@0.1.0-rc.7(@deepseek-ai/dsh-client-ui-primitives@0.1.0-rc.7)(react@18.2.0))(@deepseek-ai/dsh-client-ui-primitives@0.1.0-rc.7)(react@18.2.0)
+      '@icomposer/workbench-contracts':
+        specifier: file:../workbench-contracts
+        version: link:../workbench-contracts
       '@icomposer/workbench-operation-log':
         specifier: file:../workbench-operation-log
         version: link:../workbench-operation-log
       '@icomposer/workspace-binding':
         specifier: file:../workspace-binding
-        version: link:../workspace-binding
+        version: file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
 
   packages/icomposer-catalog:
     dependencies:
@@ -72,6 +75,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@icomposer/workbench-contracts':
+        specifier: file:../workbench-contracts
+        version: link:../workbench-contracts
       '@types/node':
         specifier: ^22.20.0
         version: 22.20.1
@@ -134,25 +140,25 @@ importers:
     devDependencies:
       '@icomposer/icomposer-catalog':
         specifier: file:../icomposer-catalog
-        version: file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-code-intelligence':
         specifier: file:../icomposer-code-intelligence
-        version: file:packages/icomposer-code-intelligence(@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding))(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-code-intelligence(@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)))(@icomposer/workbench-contracts@file:packages/workbench-contracts)(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-lifecycle':
         specifier: file:../icomposer-lifecycle
-        version: file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-reference':
         specifier: file:../icomposer-reference
-        version: file:packages/icomposer-reference(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-reference(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-verify':
         specifier: file:../icomposer-verify
-        version: file:packages/icomposer-verify(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-verify(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/icomposer-write':
         specifier: file:../icomposer-write
-        version: file:packages/icomposer-write(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)(@icomposer/workspace-binding@file:packages/workspace-binding)
+        version: file:packages/icomposer-write(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
       '@icomposer/insuremo-service':
         specifier: file:../insuremo-service
-        version: file:packages/insuremo-service(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)
+        version: file:packages/insuremo-service(@icomposer/workbench-contracts@file:packages/workbench-contracts)(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)
       '@icomposer/ui-insuremo-settings':
         specifier: file:../ui-insuremo-settings
         version: link:../ui-insuremo-settings
@@ -162,12 +168,15 @@ importers:
       '@icomposer/ui-workbench-jobs':
         specifier: file:../ui-workbench-jobs
         version: file:packages/ui-workbench-jobs(@deepseek-ai/dsh-client-ui-conversation@0.1.0-rc.7(@deepseek-ai/dsh-client-ui-primitives@0.1.0-rc.7)(react@18.2.0))(@deepseek-ai/dsh-client-ui-primitives@0.1.0-rc.7)(react@18.2.0)
+      '@icomposer/workbench-contracts':
+        specifier: file:../workbench-contracts
+        version: link:../workbench-contracts
       '@icomposer/workbench-operation-log':
         specifier: file:../workbench-operation-log
         version: link:../workbench-operation-log
       '@icomposer/workspace-binding':
         specifier: file:../workspace-binding
-        version: link:../workspace-binding
+        version: file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
       '@types/node':
         specifier: ^22.20.0
         version: 22.20.1
@@ -221,6 +230,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@icomposer/workbench-contracts':
+        specifier: file:../workbench-contracts
+        version: link:../workbench-contracts
       '@types/node':
         specifier: ^22.20.0
         version: 22.20.1
@@ -732,6 +744,7 @@ packages:
     peerDependencies:
       '@deepseek-ai/cordis': '*'
       '@icomposer/icomposer-catalog': '*'
+      '@icomposer/workbench-contracts': '*'
       '@icomposer/workspace-binding': '*'
 
   '@icomposer/icomposer-lifecycle@file:packages/icomposer-lifecycle':
@@ -770,6 +783,7 @@ packages:
       '@deepseek-ai/dsh-storage-domain': '*'
       '@deepseek-ai/dsh-subprocess': '*'
       '@deepseek-ai/schemastery': '*'
+      '@icomposer/workbench-contracts': '*'
       '@icomposer/workbench-operation-log': '*'
 
   '@icomposer/ui-insuremo-status@file:packages/ui-insuremo-status':
@@ -794,6 +808,9 @@ packages:
       '@deepseek-ai/dsh-client-ui-slots': '*'
       '@deepseek-ai/dsh-invariants': '*'
       react: ^18.2.0
+
+  '@icomposer/workbench-contracts@file:packages/workbench-contracts':
+    resolution: {directory: packages/workbench-contracts, type: directory}
 
   '@icomposer/workbench-operation-log@file:packages/workbench-operation-log':
     resolution: {directory: packages/workbench-operation-log, type: directory}
@@ -2351,40 +2368,42 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
-  '@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)':
+  '@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))':
     dependencies:
-      '@icomposer/workspace-binding': file:packages/workspace-binding
+      '@icomposer/workspace-binding': file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
       zod: 4.4.3
 
-  '@icomposer/icomposer-code-intelligence@file:packages/icomposer-code-intelligence(@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding))(@icomposer/workspace-binding@file:packages/workspace-binding)':
+  '@icomposer/icomposer-code-intelligence@file:packages/icomposer-code-intelligence(@icomposer/icomposer-catalog@file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)))(@icomposer/workbench-contracts@file:packages/workbench-contracts)(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))':
     dependencies:
-      '@icomposer/icomposer-catalog': file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding)
-      '@icomposer/workspace-binding': file:packages/workspace-binding
+      '@icomposer/icomposer-catalog': file:packages/icomposer-catalog(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))
+      '@icomposer/workbench-contracts': file:packages/workbench-contracts
+      '@icomposer/workspace-binding': file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
       zod: 4.4.3
 
-  '@icomposer/icomposer-lifecycle@file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding)':
+  '@icomposer/icomposer-lifecycle@file:packages/icomposer-lifecycle(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))':
     dependencies:
-      '@icomposer/workspace-binding': file:packages/workspace-binding
+      '@icomposer/workspace-binding': file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
       zod: 4.4.3
 
-  '@icomposer/icomposer-reference@file:packages/icomposer-reference(@icomposer/workspace-binding@file:packages/workspace-binding)':
+  '@icomposer/icomposer-reference@file:packages/icomposer-reference(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))':
     dependencies:
-      '@icomposer/workspace-binding': file:packages/workspace-binding
+      '@icomposer/workspace-binding': file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
       zod: 4.4.3
 
-  '@icomposer/icomposer-verify@file:packages/icomposer-verify(@icomposer/workspace-binding@file:packages/workspace-binding)':
+  '@icomposer/icomposer-verify@file:packages/icomposer-verify(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))':
     dependencies:
-      '@icomposer/workspace-binding': file:packages/workspace-binding
+      '@icomposer/workspace-binding': file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
       zod: 4.4.3
 
-  '@icomposer/icomposer-write@file:packages/icomposer-write(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)(@icomposer/workspace-binding@file:packages/workspace-binding)':
+  '@icomposer/icomposer-write@file:packages/icomposer-write(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)(@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts))':
     dependencies:
       '@icomposer/workbench-operation-log': file:packages/workbench-operation-log
-      '@icomposer/workspace-binding': file:packages/workspace-binding
+      '@icomposer/workspace-binding': file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)
       zod: 4.4.3
 
-  '@icomposer/insuremo-service@file:packages/insuremo-service(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)':
+  '@icomposer/insuremo-service@file:packages/insuremo-service(@icomposer/workbench-contracts@file:packages/workbench-contracts)(@icomposer/workbench-operation-log@file:packages/workbench-operation-log)':
     dependencies:
+      '@icomposer/workbench-contracts': file:packages/workbench-contracts
       '@icomposer/workbench-operation-log': file:packages/workbench-operation-log
       yaml: 2.9.0
       zod: 4.4.3
@@ -2400,12 +2419,17 @@ snapshots:
       '@deepseek-ai/dsh-client-ui-primitives': 0.1.0-rc.7
       react: 18.2.0
 
+  '@icomposer/workbench-contracts@file:packages/workbench-contracts':
+    dependencies:
+      zod: 3.25.76
+
   '@icomposer/workbench-operation-log@file:packages/workbench-operation-log':
     dependencies:
       zod: 4.4.3
 
-  '@icomposer/workspace-binding@file:packages/workspace-binding':
+  '@icomposer/workspace-binding@file:packages/workspace-binding(@icomposer/workbench-contracts@file:packages/workbench-contracts)':
     dependencies:
+      '@icomposer/workbench-contracts': file:packages/workbench-contracts
       zod: 4.4.3
 
   '@jridgewell/gen-mapping@0.3.12':

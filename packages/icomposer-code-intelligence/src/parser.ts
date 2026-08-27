@@ -80,34 +80,67 @@ export function containsLocalMethodCall(code: string, method: string): boolean {
   return new RegExp(`\\b${method}\\s*\\(`).test(code);
 }
 
+function lexicalBraceDelta(line: string): number {
+  let delta = 0;
+  let quote: string | undefined;
+  let escaped = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (quote !== undefined) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === quote) quote = undefined;
+      continue;
+    }
+    if (ch === "\"" || ch === "'") { quote = ch; continue; }
+    if (ch === "/" && next === "/") break;
+    if (ch === "{") delta++;
+    if (ch === "}") delta--;
+  }
+  return delta;
+}
+
+function isDeclarationPrefix(prefix: string, methodName: string): boolean {
+  if (["if", "for", "while", "switch", "catch", "return", "new"].includes(methodName)) return false;
+  if (/\b(?:new|return)\b/.test(prefix) || prefix.includes("=") || prefix.trim().endsWith(".")) return false;
+  const words = prefix.trim().split(/\s+/).filter(Boolean);
+  return words.includes("def") || words.some(word => ["private", "protected", "public", "static", "final", "abstract"].includes(word)) || words.length >= 1;
+}
+
+/** Extract only class-body method declarations, not calls/constructors/closures. */
 export function extractMethods(source: string): MethodInfo[] {
   const lines = source.split("\n");
   const methods: MethodInfo[] = [];
+  let depth = 0;
+  let classBodyDepth: number | undefined;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    if (trimmed.startsWith("class ") || !trimmed.includes("{") || !trimmed.includes("(")) continue;
+    const beforeDepth = depth;
+    const classMatch = /^(?:(?:public|private|protected|final|abstract|static)\s+)*class\s+[A-Za-z_][A-Za-z0-9_]*/.test(trimmed);
+    if (classMatch && classBodyDepth === undefined && lexicalBraceDelta(line) > 0) classBodyDepth = beforeDepth + 1;
     const paren = trimmed.indexOf("(");
-    const beforeParen = trimmed.slice(0, paren).trim();
-    const methodName = beforeParen.split(/\s+/).pop();
-    if (!methodName || !isIdentifier(methodName)) continue;
-    if (["if", "for", "while", "switch", "catch", "return", "new"].includes(methodName)) continue;
-    const params = trimmed.slice(paren + 1, trimmed.indexOf(")", paren)).trim();
-    let brace = (line.match(/{/g) || []).length - (line.match(/}/g) || []).length;
-    let end = i;
-    for (let j = i + 1; j < lines.length; j++) {
-      brace += (lines[j].match(/{/g) || []).length - (lines[j].match(/}/g) || []).length;
-      end = j;
-      if (brace <= 0) break;
+    if (paren >= 0 && trimmed.includes("{") && (classBodyDepth === undefined ? beforeDepth === 0 : beforeDepth === classBodyDepth)) {
+      const beforeParen = trimmed.slice(0, paren).trim();
+      const methodName = beforeParen.split(/\s+/).pop();
+      const closeParen = trimmed.indexOf(")", paren);
+      if (methodName && isIdentifier(methodName) && closeParen >= 0 && isDeclarationPrefix(beforeParen.slice(0, beforeParen.length - methodName.length), methodName)) {
+        const params = trimmed.slice(paren + 1, closeParen).trim();
+        let brace = lexicalBraceDelta(line);
+        let end = i;
+        for (let j = i + 1; j < lines.length && brace > 0; j++) {
+          brace += lexicalBraceDelta(lines[j]);
+          end = j;
+        }
+        if (brace <= 0) {
+          const body = lines.slice(i, end + 1).join("\n");
+          methods.push({ name: methodName, signature: `${methodName}(${params})`, body, startLine: i + 1, endLine: end + 1 });
+        }
+      }
     }
-    const body = lines.slice(i, end + 1).join("\n");
-    methods.push({
-      name: methodName,
-      signature: `${methodName}(${params})`,
-      body,
-      startLine: i + 1,
-      endLine: end + 1,
-    });
+    depth += lexicalBraceDelta(line);
+    if (depth < 0) depth = 0;
   }
   return methods;
 }

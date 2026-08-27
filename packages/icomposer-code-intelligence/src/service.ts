@@ -2,7 +2,10 @@ import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { buildGraph, collectSources, fingerprintSources } from "./graph.ts";
+import { auditGraph, buildGraph, collectSources, fingerprintSources } from "./graph.ts";
+import { runExplainContext, runExplainDeterministic } from "./explain-runtime.ts";
+import { runFinalize, runPrepare, runSource, type NativeExplainDeps } from "./explain-native.ts";
+import { computeGraphDigest } from "./explain-artifacts.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
 import { embeddingLease, loadSearchDocs } from "./search-runtime.ts";
 import { resolveActiveProfileAuth } from "./active-profile-auth.ts";
@@ -110,6 +113,9 @@ export class IciEngineService extends Service {
       cleanupPlan: (input: { readonly workspaceId: string }) => self.cleanupPlan(input),
       cleanupApply: (input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }) => self.cleanupApply(input),
       explainContext: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainContext(input, options),
+      explainPrepare: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainPrepare(input, options),
+      explainSource: (input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal) => self.explainSource(input, options),
+      explainFinalize: (input: Parameters<IciEngineService["explainFinalize"]>[0], options?: BuildOptions | AbortSignal) => self.explainFinalize(input, options),
       explainDeterministic: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainDeterministic(input, options),
     });
     ctx.set("iciEngine", face);
@@ -147,6 +153,8 @@ export class IciEngineService extends Service {
         const base = graphBaseDir(canonicalPath, input.workspaceId);
         const manifest: IciManifest = {
           schemaVersion: 1,
+          audit: auditGraph(nodes, edges),
+          graphDigest: computeGraphDigest({ nodes: new Map(nodes.map(n => [n.id, n])), edges, manifest: {} as IciManifest }),
           engineVersion: this.#engineVersion,
           sourceFingerprint,
           builtAt: new Date().toISOString(),
@@ -416,61 +424,22 @@ export class IciEngineService extends Service {
     }
   }
   async explainContext(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainContextBundle>> {
-    const opts: BuildOptions = options instanceof AbortSignal ? { signal: options } : (options ?? {});
-    if (this.#disposed) return err("service-disposed");
-    if (opts.signal?.aborted) return err("cancelled");
-    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
-    if (typeof input.query !== "string" || !input.query.trim()) return err("invalid-workspace-id", "query is required");
-    const base = await this.loadExplainBase(input.workspaceId, input.query);
-    if (!base.ok) return base.result;
-    const { graph, canonicalPath, start, stale } = base;
-    const { roots } = buildDownstreamTrees(graph, [start.id], DEFAULT_DEPTH, DEFAULT_MAX_NODES);
-    const impactStarts = [...graph.nodes.values()].filter(n => n.kind === "function" || n.kind === "method");
-    const impactAll = buildImpactPaths(graph, impactStarts.map(s2 => s2.id));
-    const refDocNames = await this.listRefDocNames(canonicalPath);
-    const bundle = buildExplainBundle({
-      graph, canonicalPath, start,
-      downstreamRoot: roots[0],
-      // strip edge metadata at the transport boundary: hops carry only nodeId
-      impactPaths: impactAll.paths.filter(p => p.hops.some(h => h.nodeId === start.id)).slice(0, 50)
-        .map(p => ({ apiId: p.apiId, hops: p.hops.map(h => ({ nodeId: h.nodeId })) })),
-      refDocNames,
-      ...(stale ? { stale: true as const } : {}),
-    });
-    let artifactPath: string;
-    try { artifactPath = await writeExplainContext(canonicalPath, start.name, bundle, opts.signal); } catch { return opts.signal?.aborted ? err("cancelled") : err("storage-error"); }
-    return { ok: true, value: { ...bundle, artifactPath } };
+    return runExplainContext({ disposed: () => this.#disposed, loadBase: async (workspaceId, query) => { const result = await this.loadExplainBase(workspaceId, query); return result.ok ? { ok: true as const, value: result } : result.result; }, listRefDocNames: path => this.listRefDocNames(path) }, input, options);
   }
-  async explainDeterministic(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainDeterministicResult>> {
-    const opts: BuildOptions = options instanceof AbortSignal ? { signal: options } : (options ?? {});
-    if (this.#disposed) return err("service-disposed");
-    if (opts.signal?.aborted) return err("cancelled");
-    if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id");
-    if (typeof input.query !== "string" || !input.query.trim()) return err("invalid-workspace-id", "query is required");
-    const base = await this.loadExplainBase(input.workspaceId, input.query);
-    if (!base.ok) return base.result;
-    const { graph, canonicalPath, start, stale } = base;
-    const { roots } = buildDownstreamTrees(graph, [start.id], DEFAULT_DEPTH, DEFAULT_MAX_NODES);
-    const refDocNames = await this.listRefDocNames(canonicalPath);
-    const parts = buildDeterministicExplain({
-      graph, canonicalPath, start,
-      downstreamRoot: roots[0],
-      refDocNames,
-      sourceFingerprint: graph.manifest.sourceFingerprint,
-      ...(stale ? { stale: true as const } : {}),
-    });
-    const result = {
-      generatedBy: "deterministic-v1" as const,
-      promptVersion: "none" as const,
-      sourceFingerprint: graph.manifest.sourceFingerprint,
-      generatedAt: new Date().toISOString(),
-      technical: parts.technical,
-      business: parts.business,
-      method: parts.method,
+  private nativeExplainDeps(): NativeExplainDeps {
+    return {
+      disposed: () => this.#disposed,
+      loadBase: async (workspaceId, query) => { const result = await this.loadExplainBase(workspaceId, query); return result.ok ? { ok: true as const, value: result } : result.result; },
+      refs: path => this.listRefDocNames(path),
+      current: async id => { const result = await this.loadQueryContext(id); if (!result.ok) return result.result; return { ok: true as const, value: { canonicalPath: result.canonicalPath, sourceFingerprint: result.graph.manifest.sourceFingerprint, graphDigest: computeGraphDigest(result.graph) } }; },
     };
-    let artifactPath: string;
-    try { artifactPath = await writeExplainDeterministic(canonicalPath, start.name, result, opts.signal); } catch { return opts.signal?.aborted ? err("cancelled") : err("storage-error"); }
-    return { ok: true, value: { ...result, artifactPath } };
+  }
+  async explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainPrepareResult>> { return runPrepare(this.nativeExplainDeps(), input, options); }
+  async explainSource(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainSourceResult>> { return runSource(this.nativeExplainDeps(), input, options); }
+  async explainFinalize(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly analysis: { readonly api: { technical: string; business: string; flow: readonly string[]; evidence: readonly string[] } } }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainFinalizeResult>> { return runFinalize(this.nativeExplainDeps(), input, options); }
+
+  async explainDeterministic(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainDeterministicResult>> {
+    return runExplainDeterministic({ disposed: () => this.#disposed, loadBase: async (workspaceId, query) => { const result = await this.loadExplainBase(workspaceId, query); return result.ok ? { ok: true as const, value: result } : result.result; }, listRefDocNames: path => this.listRefDocNames(path) }, input, options);
   }
 
   private async workspaceEntry(

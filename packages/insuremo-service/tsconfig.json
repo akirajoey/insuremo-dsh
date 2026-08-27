@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": "../..",
     "outDir": "lib/types",
     "noEmit": true,
     "types": ["node"],
@@ -10,7 +10,9 @@
       "@deepseek-ai/schemastery": ["src/harness-shims.d.ts"],
       "@deepseek-ai/dsh-subprocess": ["src/harness-shims.d.ts"],
       "@deepseek-ai/dsh-skill": ["src/harness-shims.d.ts"],
-      "@deepseek-ai/dsh-storage-domain": ["src/harness-shims.d.ts"]
+      "@deepseek-ai/dsh-storage-domain": ["src/harness-shims.d.ts"],
+      "@icomposer/workbench-contracts": ["packages/workbench-contracts/src/index.ts"],
+      "@icomposer/workbench-contracts/ici-explain": ["packages/workbench-contracts/src/ici-explain.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"],

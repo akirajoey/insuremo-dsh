@@ -12,6 +12,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./ici-explain": {
+      "types": "./src/ici-explain.ts",
+      "import": "./src/ici-explain.ts"
     }
   },
   "scripts": {

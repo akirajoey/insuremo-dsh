@@ -38,9 +38,8 @@ test("TASK-050 fresh build/explain artifacts stay in workspace metadata, not DSH
     assert.equal(artifact.schemaVersion, 2);
     assert.equal(artifact.kind, "context");
     assert.equal(artifact.bundle.manifest.sourceFingerprint, build.value.manifest.sourceFingerprint);
-    const state = JSON.parse(await readFile(explainStatePath(root, "ws1"), "utf8"));
-    assert.equal(state.artifactPath, context.value.artifactPath);
-    assert.equal((await readExplainState(root, "ws1"))?.kind, "context");
+    await assert.rejects(() => readFile(explainStatePath(root, "ws1"), "utf8"));
+    assert.equal(await readExplainState(root, "ws1"), null);
     assert.equal(JSON.stringify(artifact).includes(root), false);
     assert.equal(JSON.stringify(artifact).includes("access_token"), false);
     const deterministic: any = await h.engine.explainDeterministic({ workspaceId: "ws1", query: "ArtifactApi" });
@@ -48,7 +47,7 @@ test("TASK-050 fresh build/explain artifacts stay in workspace metadata, not DSH
     assert.match(deterministic.value.artifactPath, /deterministic\.json$/);
     const longApi = `Long${"x".repeat(220)}`;
     await writeExplainContext(root, longApi, { api: {}, manifest: {}, technicalText: "x", downstream: [], impact: [] });
-    assert.equal((await readExplainState(root, "ws1"))?.apiName, longApi);
+    assert.equal(await readExplainState(root, "ws1"), null);
     const controller = new AbortController();
     controller.abort();
     const cancelled: any = await h.engine.explainDeterministic({ workspaceId: "ws1", query: "ArtifactApi" }, controller.signal);

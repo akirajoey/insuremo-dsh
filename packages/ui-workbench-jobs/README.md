@@ -1,17 +1,16 @@
 # `@icomposer/ui-workbench-jobs`
 
-Client-side renderer for a Workbench background job as a keyed
-`conversation.chat.node` entry (`workbench-job`). It shows an icon, the
-producer kind/label, a localized queued/running/done/failed badge, and an
-optional digest-only progress string. There are no action buttons or local
-job state in this phase.
+Client-side Workbench conversation contributions. The package keeps the
+existing keyed `conversation.chat.node` projection for generic Harness jobs
+and also owns the `tool.call.toolview` key `ici_explain`.
 
-The Harness `jobsBySession` mirror remains the source of truth. This package
-exports `projectJobView()` for the small `JobView` → Chat-node projection, but
-the durable event-to-node producer is intentionally deferred to a later Host
-card; current tests therefore exercise the renderer with explicit node props.
-
-The browser bundle uses the Harness Strategy A `clientBundle` preset.
+The ICI card is an interactive, localized Prepare → confirmation surface. It
+browses only workspace-relative directories through same-origin Host routes,
+defaults to `ref_doc`, lets the user select an explicit provider/model and
+not-before time, and renders scheduled/running/final/failed/interrupted
+states. Start sends only the safe relative directory, consent, and model
+selection; source contents are read by the restricted Host-created Explain
+Agent, never by the browser or the main session.
 
 ```sh
 pnpm run typecheck

@@ -4,6 +4,7 @@ import { mkdir, rename, rm, writeFile, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { IciManifest } from "./types.ts";
+import { readContainedExplainJson, writeExplainAbsolute } from "@icomposer/workbench-contracts/ici-explain";
 
 export function getDshHome(): string {
   return process.env.DSH_HOME || join(homedir(), ".dsh");
@@ -84,7 +85,7 @@ export interface ExplainStateFile {
 export async function readExplainState(canonicalPath: string, workspaceId: string): Promise<ExplainStateFile | null> {
   const newPath = explainStatePath(canonicalPath, workspaceId);
   let raw: string;
-  try { raw = await readFile(newPath, "utf8"); } catch (error) {
+  try { raw = JSON.stringify(await readContainedExplainJson(canonicalPath, ".metadata/icomposer/ici/explain/state.json")); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
     try { raw = await readFile(legacyExplainStatePath(canonicalPath, workspaceId), "utf8"); } catch { return null; }
     try {
@@ -98,13 +99,13 @@ export async function readExplainState(canonicalPath: string, workspaceId: strin
     const kind = parsed.kind === "context" || parsed.kind === "deterministic" ? parsed.kind : null;
     const expected = kind === "context" ? explainContextArtifactRelativePath(parsed.apiName ?? "") : kind === "deterministic" ? explainDeterministicArtifactRelativePath(parsed.apiName ?? "") : "";
     if (parsed.schemaVersion !== 2 || kind === null || typeof parsed.generatedAt !== "string" || parsed.generatedAt.length === 0 || typeof parsed.apiName !== "string" || parsed.apiName.length === 0 || parsed.artifactPath !== expected) return null;
-    const artifact = JSON.parse(await readFile(join(canonicalPath, parsed.artifactPath), "utf8")) as { schemaVersion?: unknown; kind?: unknown };
+    const artifact = await readContainedExplainJson(canonicalPath, parsed.artifactPath) as { schemaVersion?: unknown; kind?: unknown };
     return artifact.schemaVersion === 2 && artifact.kind === kind ? parsed as ExplainStateFile : null;
   } catch { return null; }
 }
 
 async function writeJsonAtomic(final: string, value: unknown, signal?: AbortSignal): Promise<void> {
-  await writeFileAtomic(final, `${JSON.stringify(value, null, 2)}\n`, { signal });
+  await writeExplainAbsolute(final, `${JSON.stringify(value, null, 2)}\n`, signal === undefined ? {} : { signal });
 }
 
 export async function writeExplainContext(canonicalPath: string, apiName: string, bundle: unknown, signal?: AbortSignal): Promise<string> {
@@ -112,7 +113,6 @@ export async function writeExplainContext(canonicalPath: string, apiName: string
   const generatedAt = new Date().toISOString();
   const artifactPath = explainContextArtifactRelativePath(apiName);
   await writeJsonAtomic(explainContextPath(canonicalPath, apiName), { schemaVersion: 2, kind: "context", generatedAt, bundle }, signal);
-  await writeJsonAtomic(explainStatePath(canonicalPath, ""), { schemaVersion: 2, kind: "context", generatedAt, apiName, artifactPath }, signal);
   return artifactPath;
 }
 
@@ -121,7 +121,6 @@ export async function writeExplainDeterministic(canonicalPath: string, apiName: 
   const generatedAt = new Date().toISOString();
   const artifactPath = explainDeterministicArtifactRelativePath(apiName);
   await writeJsonAtomic(explainDeterministicPath(canonicalPath, apiName), { schemaVersion: 2, kind: "deterministic", generatedAt, result }, signal);
-  await writeJsonAtomic(explainStatePath(canonicalPath, ""), { schemaVersion: 2, kind: "deterministic", generatedAt, apiName, artifactPath }, signal);
   return artifactPath;
 }
 
