@@ -24,7 +24,8 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-sidebar"
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ]
     }
   },
@@ -40,6 +41,7 @@
     "@deepseek-ai/dsh-client-locale": "*",
     "@deepseek-ai/dsh-client-runtime": "*",
     "@deepseek-ai/dsh-client-ui-sidebar": "*",
+    "@deepseek-ai/dsh-client-ui-primitives": "*",
     "@deepseek-ai/dsh-client-ui-slots": "*",
     "@deepseek-ai/dsh-invariants": "*",
     "react": "^18.2.0"
@@ -47,6 +49,8 @@
   "devDependencies": {
     "@deepseek-ai/dsh-client-test-runtime": "link:../../../deepseek-harness/packages/test-support/client-runtime",
     "@deepseek-ai/dsh-client-ui-sidebar": "link:../../../deepseek-harness/packages/client/ui-sidebar",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:../../../deepseek-harness/packages/client/ui-primitives",
+    "@testing-library/dom": "^10.0.0",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
@@ -64,6 +68,8 @@
     "lib/index.js",
     "lib/client.js",
     "lib/types/**/*.d.ts",
-    "assets/*.svg"
+    "lib/assets/insuremo-wordmark-light.png",
+    "lib/assets/insuremo-wordmark-dark.png",
+    "lib/assets/insuremo-globe.png"
   ]
 }

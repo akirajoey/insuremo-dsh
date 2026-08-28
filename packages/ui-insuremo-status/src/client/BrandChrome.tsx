@@ -1,12 +1,15 @@
 import { Component, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { INSUREMO_GLOBE_SVG, INSUREMO_WORDMARK_SVG } from "./brand-assets.ts";
+import wordmarkDarkUrl from "../../assets/insuremo-wordmark-dark.png";
+import wordmarkLightUrl from "../../assets/insuremo-wordmark-light.png";
+import globeUrl from "../../assets/insuremo-globe.png";
 import css from "./BrandChrome.module.css";
 
 /** Stable DOM signatures owned by the Harness sidebar shell. */
 const WORDMARK_VIEWBOX = "0 0 182 24";
 const FISH_VIEWBOX = "0 0 23.16 17.04";
 const PANEL_VIEWBOX = "0 0 16 16";
+const BRAND_ASSET_URL = "/api/icomposer-workbench/ui/assets";
 export const BRAND_HOST_ATTRIBUTE = "data-icomposer-brand-host";
 type HostKind = "wordmark" | "rail";
 
@@ -37,8 +40,23 @@ function svgButton(svg: SVGElement, kind: HostKind): HTMLButtonElement | null {
 }
 
 function Asset({ kind }: { kind: HostKind }): ReactNode {
-  const svg = kind === "wordmark" ? INSUREMO_WORDMARK_SVG : INSUREMO_GLOBE_SVG;
-  return <span className={kind === "wordmark" ? css.wordmark : css.railMark} data-icomposer-brand-asset={kind} dangerouslySetInnerHTML={{ __html: svg }} />;
+  if (kind === "wordmark") {
+    return (
+      <span
+        className={css.wordmark}
+        data-icomposer-brand-asset={kind}
+        data-emitted-brand-assets={`${wordmarkLightUrl}|${wordmarkDarkUrl}`}
+      >
+        <img className={css.wordmarkLight} src={`${BRAND_ASSET_URL}/insuremo-wordmark-light.png`} alt="" width={312} height={76} decoding="async" />
+        <img className={css.wordmarkDark} src={`${BRAND_ASSET_URL}/insuremo-wordmark-dark.png`} alt="" width={312} height={76} decoding="async" />
+      </span>
+    );
+  }
+  return (
+    <span className={css.railMark} data-icomposer-brand-asset={kind} data-emitted-brand-asset={globeUrl}>
+      <img src={`${BRAND_ASSET_URL}/insuremo-globe.png`} alt="" width={65} height={62} decoding="async" />
+    </span>
+  );
 }
 
 function OwnedWordmark(): ReactNode {

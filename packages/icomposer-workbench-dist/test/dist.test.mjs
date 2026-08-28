@@ -88,6 +88,24 @@ test("client entry aggregates the three UI applies with union inject", async () 
   assert.deepEqual(["slots", "locale", "sessions"], ["slots", "locale", "sessions"]);
 });
 
+test("aggregate emits and serves the owned raster brand assets", async () => {
+  const names = ["insuremo-wordmark-light.png", "insuremo-wordmark-dark.png", "insuremo-globe.png"];
+  const libDir = join(distDir, "lib");
+  const sourceDir = join(distDir, "..", "ui-insuremo-status", "assets");
+  for (const name of names) {
+    const emitted = await readFile(join(libDir, "assets", name));
+    const source = await readFile(join(sourceDir, name));
+    assert.deepEqual(emitted, source, `${name} differs from the owned source crop`);
+  }
+  const client = await readFile(join(libDir, "client.js"), "utf8");
+  assert.ok(client.includes("/api/icomposer-workbench/ui/assets"));
+  assert.ok(client.includes("insuremo-wordmark-light.png"));
+  assert.doesNotMatch(client, /data:image|base64,/i);
+  assert.equal(client.includes("/Users/junjie.zhang/dsh/"), false);
+  const host = await readFile(join(libDir, "index.js"), "utf8");
+  assert.ok(host.includes("/api/icomposer-workbench/ui/assets"));
+});
+
 test("clean build removes stale retired chunks and emits only fresh artifacts", async () => {
   const libDir = join(distDir, "lib");
   await mkdir(libDir, { recursive: true });

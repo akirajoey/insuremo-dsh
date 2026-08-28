@@ -32,6 +32,7 @@ import { ExplainScheduler } from "../../icomposer-code-intelligence/src/explain-
 import { ExplainRoutesService } from "../../icomposer-code-intelligence/src/explain-routes.ts";
 import * as write from "../../icomposer-write/src/index.ts";
 import * as insuremoService from "../../insuremo-service/src/index.ts";
+import { BRAND_ASSET_ROUTE, serveBrandAsset } from "../../ui-insuremo-status/src/brand-assets-server.ts";
 
 /** Loader-facing plugin name (the distributable package identity). */
 export const name = "@icomposer/workbench";
@@ -73,6 +74,15 @@ export class WorkbenchDistService extends Service {
 
   protected async [Service.init](): Promise<void> {
     const ctx = this.ctx;
+    const assetRoot = new URL("./assets/", import.meta.url);
+    ctx.effect(
+      () => ctx.webServer.register({
+        kind: "prefix",
+        path: BRAND_ASSET_ROUTE,
+        handler: (req, res) => serveBrandAsset(req, res, assetRoot),
+      }),
+      "@icomposer/workbench: emitted brand assets",
+    );
     await ctx.plugin(insuremoService as never, this.#config.insuremoService);
     await ctx.plugin(operationLog as never);
     await ctx.plugin(workspaceBinding as never);

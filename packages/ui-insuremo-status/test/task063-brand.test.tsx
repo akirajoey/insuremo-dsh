@@ -77,7 +77,8 @@ describe("TASK-063 owned brand chrome", () => {
     const view = mount(<BrandChrome />);
     let host!: HTMLElement;
     await eventually(() => { host = document.querySelector<HTMLElement>(`[${BRAND_HOST_ATTRIBUTE}="wordmark"]`)!; expect(host).toBeTruthy(); });
-    expect(host.querySelector("svg[viewBox=\"0 0 312 76\"]")).toBeTruthy();
+    expect(host.querySelector('img[src*="insuremo-wordmark-light"]')).toBeTruthy();
+    expect(host.querySelector('img[src*="insuremo-wordmark-dark"]')).toBeTruthy();
     expect(host.textContent?.replace(/\s/g, "")).toContain("dsh");
     expect(shell.native.isConnected).toBe(true);
     expect(shell.native.style.visibility).toBe("hidden");
@@ -89,8 +90,10 @@ describe("TASK-063 owned brand chrome", () => {
     expect(document.activeElement).toBe(shell.brand);
 
     const originalHost = host;
-    const ink = host.querySelector<HTMLElement>("[data-icomposer-brand-asset=\"wordmark\"]")!;
-    expect(getComputedStyle(ink).color).toBe("rgb(0, 0, 0)");
+    const light = host.querySelector<HTMLImageElement>('img[src*="insuremo-wordmark-light"]')!;
+    const dark = host.querySelector<HTMLImageElement>('img[src*="insuremo-wordmark-dark"]')!;
+    expect(light.alt).toBe("");
+    expect(dark.alt).toBe("");
     document.body.setAttribute("data-ds-dark-theme", "true");
     expect(document.body.hasAttribute("data-ds-dark-theme")).toBe(true);
     expect(document.querySelector(`[${BRAND_HOST_ATTRIBUTE}=\"wordmark\"]`)).toBe(originalHost);
@@ -106,7 +109,7 @@ describe("TASK-063 owned brand chrome", () => {
     const view = mount(<BrandChrome />);
     let host!: HTMLElement;
     await eventually(() => { host = document.querySelector<HTMLElement>(`[${BRAND_HOST_ATTRIBUTE}="rail"]`)!; expect(host).toBeTruthy(); });
-    expect(host.querySelector("svg[viewBox=\"0 0 65 62\"]")).toBeTruthy();
+    expect(host.querySelector('img[src*="insuremo-globe"]')).toBeTruthy();
     expect(host.textContent?.replace(/\s/g, "")).toBe("");
     expect(shell.native.style.visibility).toBe("hidden");
     expect(shell.panel.isConnected).toBe(true);
@@ -135,14 +138,17 @@ describe("TASK-063 owned brand chrome", () => {
     const source = await import("node:fs/promises");
     const path = await import("node:path");
     const packageJson = JSON.parse(await source.readFile(path.resolve(process.cwd(), "package.json"), "utf8")) as { files?: string[] };
-    const wordmark = await source.readFile(path.resolve(process.cwd(), "assets/insuremo-wordmark.svg"), "utf8");
-    const globe = await source.readFile(path.resolve(process.cwd(), "assets/insuremo-globe.svg"), "utf8");
-    expect(packageJson.files).toContain("assets/*.svg");
-    expect(wordmark).toContain("currentColor");
-    expect(wordmark).toContain("#777af2");
-    expect(globe).toContain("#777af2");
-    expect(wordmark).not.toMatch(/base64/i);
-    expect(globe).not.toMatch(/base64/i);
+    expect(packageJson.files).toEqual(expect.arrayContaining([
+      "lib/assets/insuremo-wordmark-light.png",
+      "lib/assets/insuremo-wordmark-dark.png",
+      "lib/assets/insuremo-globe.png",
+    ]));
+    expect(packageJson.files).not.toContain("assets/*.svg");
+    for (const file of ["insuremo-wordmark-light.png", "insuremo-wordmark-dark.png", "insuremo-globe.png"]) {
+      const bytes = await source.readFile(path.resolve(process.cwd(), "assets", file));
+      expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      expect(bytes.toString("ascii")).not.toMatch(/data:|base64/i);
+    }
     const css = await source.readFile(path.resolve(process.cwd(), "src/client/BrandChrome.module.css"), "utf8");
     expect(css).toContain("body[data-ds-dark-theme]");
     expect(css).toContain("button:hover");
@@ -181,7 +187,8 @@ describe("TASK-063 workspace health detection gate", () => {
     await eventually(() => expect(item.querySelectorAll("[data-icomposer-workspace-health-icons] > *")).toHaveLength(3));
     const icons = [...item.querySelectorAll<HTMLElement>("[data-icomposer-workspace-health-icons] > *")];
     expect(icons.map(icon => icon.getAttribute("aria-label"))).toEqual([en["health.iComposerPending"], en["health.graphNotReady"], en["health.explainReady"]]);
-    expect(icons.map(icon => icon.getAttribute("title"))).toEqual([en["health.iComposerPending"], en["health.graphNotReady"], en["health.explainReady"]]);
+    expect(icons.map(icon => icon.getAttribute("title"))).toEqual([null, null, null]);
+    expect(icons.map(icon => icon.getAttribute("tabindex"))).toEqual(["0", "0", "0"]);
     expect(item.querySelectorAll("svg")).toHaveLength(3);
     poll();
     await eventually(() => expect(item.querySelector("[data-icomposer-workspace-health-icons]")).toBeNull());

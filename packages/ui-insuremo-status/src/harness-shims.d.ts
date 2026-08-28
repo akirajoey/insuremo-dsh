@@ -29,3 +29,18 @@ declare module "@deepseek-ai/dsh-client-runtime/client" {
 
 declare module "@deepseek-ai/dsh-client-locale/client" {}
 declare module "@deepseek-ai/dsh-client-ui-sidebar/client" {}
+declare module "@deepseek-ai/dsh-client-ui-primitives" {
+  import type { ReactElement } from "react";
+  export function Tooltip(props: {
+    label: string | (() => string);
+    side?: "right" | "bottom" | "top";
+    delayMs?: number;
+    disabled?: boolean;
+    maxWidth?: number;
+    children: ReactElement;
+  }): ReactElement;
+}
+declare module "*.png" {
+  const url: string;
+  export default url;
+}

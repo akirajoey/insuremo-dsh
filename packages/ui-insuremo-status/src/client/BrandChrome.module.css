@@ -34,13 +34,28 @@
   flex: 0 0 auto;
   width: 99px;
   height: 24px;
-  color: #000;
 }
 
-.wordmark svg {
+/* The owned PNGs retain the source's 312×76 pixels while rendering at 99×24,
+   so the wordmark is sampled above 3× and the O counter stays transparent. */
+.wordmark img {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 99px;
+  height: 24px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.wordmarkDark {
+  display: none !important;
+}
+
+:global(body[data-ds-dark-theme]) .wordmarkLight {
+  display: none !important;
+}
+
+:global(body[data-ds-dark-theme]) .wordmarkDark {
+  display: block !important;
 }
 
 .dsh {
@@ -67,10 +82,12 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.railMark svg {
+.railMark img {
   display: block;
   width: 24px;
   height: 24px;
+  object-fit: contain;
+  image-rendering: auto;
 }
 
 /* The shell's native panel icon appears on hover; hide only our resting mark. */
@@ -78,8 +95,6 @@
   visibility: hidden;
 }
 
-/* The derived asset keeps purple emphasis while black Insure ink follows the
-   live body theme attribute, not the OS prefers-color-scheme media query. */
-:global(body[data-ds-dark-theme]) .wordmark {
-  color: var(--dsw-alias-label-primary);
-}
+/* The light/dark raster swap follows the live body theme attribute, not the
+   OS prefers-color-scheme media query. Purple pixels are identical in both
+   files; only the black/gray Insure ink is lifted for dark surfaces. */

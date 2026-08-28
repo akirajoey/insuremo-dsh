@@ -5,11 +5,20 @@ import { defineConfig } from "vitest/config";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const harnessRoot = resolve(packageRoot, "../../../deepseek-harness");
+const harnessReact = resolve(harnessRoot, "packages/client/ui-primitives/node_modules/react");
+const harnessReactDom = resolve(harnessRoot, "packages/client/ui-primitives/node_modules/react-dom");
 
 export default defineConfig({
   plugins: [tsconfigPaths({ projects: [resolve(harnessRoot, "tsconfig.base.json")] })],
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: [
+      // Harness source packages are symlinked outside this workspace and carry
+      // React 18.3; pin the test graph to that same React/DOM pair so Tooltip
+      // hooks and the slot renderer do not load two React dispatchers.
+      { find: "react-dom/client", replacement: resolve(harnessReactDom, "client") },
+      { find: "react-dom", replacement: harnessReactDom },
+      { find: "react", replacement: harnessReact },
       {
         find: "@deepseek-ai/dsh-client-locale/client",
         replacement: resolve(harnessRoot, "packages/client/locale/src/client/index.ts"),
@@ -25,6 +34,10 @@ export default defineConfig({
       {
         find: "@deepseek-ai/dsh-client-ui-sidebar/client",
         replacement: resolve(harnessRoot, "packages/client/ui-sidebar/src/client/index.ts"),
+      },
+      {
+        find: "@deepseek-ai/dsh-client-ui-primitives",
+        replacement: resolve(harnessRoot, "packages/client/ui-primitives/src/index.ts"),
       },
       {
         find: "@deepseek-ai/dsh-client-ui-slots",

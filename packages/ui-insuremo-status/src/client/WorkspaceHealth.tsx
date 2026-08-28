@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { Tooltip } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type { InsuremoStatusLocaleKey } from "./locales.ts";
 import { IcomposerGlyph, GraphGlyph, IntelligenceGlyph } from "./HealthGlyphs.tsx";
@@ -58,26 +59,33 @@ function Glyphs(props: {
   const explainLabel = props.row.explainReady ? props.t("health.explainReady") : props.t("health.explainNotReady");
   return (
     <span className={css.rowIcons} data-icomposer-workspace-health-icons="" onClick={event => event.stopPropagation()}>
-      {props.row.detected ? (
+      <Tooltip label={iComposerLabel} side="top" delayMs={400}>
         <span
           className={`${css.icon} ${props.row.autoBindState === "pending" ? css.iconPending : ""}`}
           data-state={props.row.autoBindState}
-          title={iComposerLabel}
+          role="img"
+          tabIndex={0}
           aria-label={iComposerLabel}
         ><IcomposerGlyph /></span>
-      ) : null}
-      <span
-        className={css.icon}
-        data-state={props.row.graphReady ? "on" : "off"}
-        title={graphLabel}
-        aria-label={graphLabel}
-      ><GraphGlyph /></span>
-      <span
-        className={css.icon}
-        data-state={props.row.explainReady ? "on" : "off"}
-        title={explainLabel}
-        aria-label={explainLabel}
-      ><IntelligenceGlyph /></span>
+      </Tooltip>
+      <Tooltip label={graphLabel} side="top" delayMs={400}>
+        <span
+          className={css.icon}
+          data-state={props.row.graphReady ? "on" : "off"}
+          role="img"
+          tabIndex={0}
+          aria-label={graphLabel}
+        ><GraphGlyph /></span>
+      </Tooltip>
+      <Tooltip label={explainLabel} side="top" delayMs={400}>
+        <span
+          className={css.icon}
+          data-state={props.row.explainReady ? "on" : "off"}
+          role="img"
+          tabIndex={0}
+          aria-label={explainLabel}
+        ><IntelligenceGlyph /></span>
+      </Tooltip>
     </span>
   );
 }

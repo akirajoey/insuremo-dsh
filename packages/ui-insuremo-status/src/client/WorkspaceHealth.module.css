@@ -32,6 +32,11 @@
   display: block;
 }
 
+.rowIcons .icon:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 2px;
+}
+
 /* ON / bound: vivid vector with a soft badge background (only real tokens). */
 .rowIcons .icon[data-state="on"],
 .rowIcons .icon[data-state="bound"] {
