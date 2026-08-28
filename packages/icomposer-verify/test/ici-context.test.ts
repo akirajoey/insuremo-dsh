@@ -34,41 +34,47 @@ test("ICI context injects only for exact detected/bound workspace and deduplicat
     assert.equal(source?.workspaceId, "ws-a");
     const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
     assert.match(text, /\[iComposer workspace\]/);
-    assert.match(text, /workspace_id: ws-a/);
-    assert.match(text, /tools: \{.*inspect: \[ici_query\].*explain: \[ici_explain\]/);
+    assert.match(text, /workspace_id:ws-a/);
+    assert.match(text, /tools:\{.*inspect:\[ici_query\].*explain:\[ici_explain\]/);
     assert.doesNotMatch(text, /ici_search|embedding|semantic/i);
-    assert.match(text, /explain_results: \{files: \.metadata\/icomposer\/ici\/explain\/<api-name>-\*\/finals\/\*\.json, fields: \[apiAnalysis\.technical,apiAnalysis\.business,apiAnalysis\.flow,apiAnalysis\.evidence\]\}/);
-    assert.match(text, /workspace_id\/schema authority/);
-    assert.match(text, /named API business\/technical: locate\/read newest matching schemaVersion 3 kind final before answering/);
-    assert.match(text, /never use prepare\.json as an explanation result/);
-    assert.match(text, /no accessible matching Final: say so; do not invent one/);
-    assert.match(text, /stale graph: ici_build before ici_explain/);
-    assert.match(text, /ici_explain prepares only; card needs model; reference\/earliest optional/);
-    assert.match(text, /artifact paths from tools/);
-    assert.match(text, /Active Profile: Workbench Active Profile; never CLI defaults/);
+    assert.match(text, /explain_results:\{files:\.metadata\/icomposer\/ici\/explain\/\*\/finals\/\*\.json,fields:\[apiAnalysis\.technical,apiAnalysis\.business,apiAnalysis\.flow,apiAnalysis\.evidence\]\}/);
+    assert.doesNotMatch(text, /<api-name>-\*|named API business\/technical/);
+    assert.match(text, /schema authority/);
+    assert.match(text, /API discovery\/business\/technical: search\/read newest matching schemaVersion 3 kind final\(s\) before source; source only if no accessible matching Final or the user asks for source verification\./);
+    assert.match(text, /never use prepare\.json/);
+    assert.match(text, /no accessible Final:say so;do not invent one/);
+    assert.match(text, /Final verified=false\/needsBusinessReview=true: disclose status/);
+    assert.match(text, /evidence workspace-relative/);
+    assert.match(text, /stale: ici_build->ici_explain/);
+    assert.match(text, /ici_explain prepares;card needs model;reference\/earliest\?/);
+    assert.match(text, /artifact paths:tools/);
+    assert.match(text, /Active Profile: Workbench;no CLI defaults/);
     assert.doesNotMatch(text, /This is iComposer workspace/);
     assert.doesNotMatch(text, /canonical path|artifact layout|absolute|secret|digest/);
     assert.doesNotMatch(text, /imo auth|imo devops/);
-    assert.equal(Buffer.byteLength(text, "utf8") <= 1000, true);
+    assert.equal(Buffer.byteLength(text, "utf8") <= 1050, true);
     const firstPolicy = (first.messages?.[0] as { source?: { policyVersion?: string } }).source?.policyVersion;
     assert.equal(firstPolicy, ICI_CONTEXT_POLICY_VERSION);
-    assert.equal(ICI_CONTEXT_POLICY_VERSION, "6");
+    assert.equal(ICI_CONTEXT_POLICY_VERSION, "7");
     assert.equal((await step(fx.service, current)).messages?.length, 0);
     assert.equal((await step(fx.service, current, 2)).messages?.length, 0);
   } finally { await fx.fiber.dispose(); }
 });
 
-test("TASK-067 ICI context stays within the 1000-byte gate at the maximum workspace id", async () => {
+test("TASK-069 ICI context stays within the 1050-byte gate at the maximum workspace id", async () => {
   const longId = "a".repeat(128);
   const fx = await fixture([{ workspaceId: longId, canonicalPath: "/repo/long", detectedIcomposer: true, binding: null }]);
   try {
     const current = agent("/repo/long");
     const first = await step(fx.service, current);
     const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
-    assert.equal(Buffer.byteLength(text, "utf8") <= 1000, true);
-    assert.match(text, new RegExp(`workspace_id: ${longId}`));
+    assert.equal(Buffer.byteLength(text, "utf8") <= 1050, true);
+    assert.match(text, new RegExp(`workspace_id:${longId}`));
     assert.doesNotMatch(text, /ici_search|embedding|semantic/i);
-    assert.match(text, /schemaVersion 3 kind final/);
+    assert.doesNotMatch(text, /<api-name>-\*|named API business\/technical/);
+    assert.match(text, /\.metadata\/icomposer\/ici\/explain\/\*\/finals\/\*\.json/);
+    assert.match(text, /API discovery\/business\/technical: search\/read newest matching schemaVersion 3 kind final\(s\) before source/);
+    assert.match(text, /verified=false\/needsBusinessReview=true: disclose status/);
   } finally { await fx.fiber.dispose(); }
 });
 

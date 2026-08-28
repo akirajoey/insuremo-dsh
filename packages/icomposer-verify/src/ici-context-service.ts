@@ -6,7 +6,7 @@ import { createUserMessage } from "./msg-shim.ts";
 export const ICI_CONTEXT_PLUGIN = "icomposer-code-intelligence-context" as const;
 export const ICI_CONTEXT_SECTION = "icomposer-code-intelligence" as const;
 export const ICI_CONTEXT_DIGEST_SECTION = "icomposer-code-intelligence-digest" as const;
-export const ICI_CONTEXT_POLICY_VERSION = "6" as const;
+export const ICI_CONTEXT_POLICY_VERSION = "7" as const;
 const COMPACT_PLUGIN = "compact";
 
 interface BindingEntry {
@@ -124,9 +124,9 @@ function shouldInject(events: readonly unknown[], digest: string, policyVersion 
 
 function renderContext(workspaceId: string, _state: ContextState): string {
   return `[iComposer workspace]
-workspace_id: ${workspaceId}
-tools: {graph: [ici_build,ici_status],inspect: [ici_query],explain: [ici_explain],assets: [icomposer_catalog_list],sdk: [icomposer_sdk_query],verify: [icomposer_verify_utils]}
-auth: {active_profile: verify}
-explain_results: {files: .metadata/icomposer/ici/explain/<api-name>-*/finals/*.json, fields: [apiAnalysis.technical,apiAnalysis.business,apiAnalysis.flow,apiAnalysis.evidence]}
-rules: workspace_id/schema authority; named API business/technical: locate/read newest matching schemaVersion 3 kind final before answering; never use prepare.json as an explanation result; no accessible matching Final: say so; do not invent one; stale graph: ici_build before ici_explain; ici_explain prepares only; card needs model; reference/earliest optional; artifact paths from tools; Active Profile: Workbench Active Profile; never CLI defaults`;
+workspace_id:${workspaceId}
+tools:{graph:[ici_build,ici_status],inspect:[ici_query],explain:[ici_explain],assets:[icomposer_catalog_list],sdk:[icomposer_sdk_query],verify:[icomposer_verify_utils]}
+auth:{active_profile:verify}
+explain_results:{files:.metadata/icomposer/ici/explain/*/finals/*.json,fields:[apiAnalysis.technical,apiAnalysis.business,apiAnalysis.flow,apiAnalysis.evidence]}
+rules:schema authority;API discovery/business/technical: search/read newest matching schemaVersion 3 kind final(s) before source; source only if no accessible matching Final or the user asks for source verification.;never use prepare.json;no accessible Final:say so;do not invent one;Final verified=false/needsBusinessReview=true: disclose status;evidence workspace-relative;stale: ici_build->ici_explain;ici_explain prepares;card needs model;reference/earliest?;artifact paths:tools;Active Profile: Workbench;no CLI defaults`;
 }

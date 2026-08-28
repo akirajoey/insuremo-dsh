@@ -297,7 +297,7 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 | 诊断 | 索引路径/schema/engine/节点边数/最后构建/stale 判定/必需文件（对照 Rust doctor 语义） |
 | 清理 | `cleanupPlan` 只列 `staging-*`/`stale-*` 残留；`cleanupApply` 逐路径复核（防 TOCTOU），仅删计划内生成物 |
 
-**Explain Final 是 workspace source of truth**：回答命名 API 的业务/技术问题前，先读取 workspace 内最新匹配的 `schemaVersion: 3`、`kind: final`；`prepare.json` 不是解释结果。没有可访问的匹配 Final 时必须明确说明，不能编造。
+**Explain Final 是 workspace source of truth**：API discovery 或业务/技术问题必须先 search/read workspace 内最新匹配的 `schemaVersion: 3`、`kind: final`，再读 source；仅无可访问匹配 Final 或用户要求 source verification 时例外。`prepare.json` 不是解释结果；`verified:false` 或 `needsBusinessReview:true` 必须披露状态，证据保持 workspace-relative；无匹配 Final 时明确说明，不能编造。
 
 真实项目规模：**4502 节点 / 10308 边**；stress：5001 资产 → 10002 节点 2 秒内完成。
 

@@ -54,9 +54,9 @@ The engine's index/search faces remain available for internal backend use, but
 semantic search is temporarily unavailable as an Agent tool: no `ici_search`
 ToolSkill or system-prompt section is registered.
 
-## Injected context (TASK-067; policy 6)
+## Injected context (TASK-069; policy 7)
 
-`IciContextService` injects one compact structured block per session (step 1, dedup by digest, re-assert after compact/policy change): header `[iComposer workspace]`, `workspace_id`, grouped tools/auth, the workspace-relative `explain_results` contract, and short rules. It is a stable 1000-byte-bounded summary; tool schemas/system prompts remain authoritative, and the block carries no host paths, file contents, CLI examples, or secrets. For a named API business/technical question, the newest matching schemaVersion 3 `kind: final` under the workspace is the Explain Final source of truth; `prepare.json` is never an explanation result.
+`IciContextService` injects one compact structured block per session (step 1, dedup by digest, re-assert after compact/policy change): header `[iComposer workspace]`, `workspace_id`, full Agent tool discovery/auth, a generic workspace-relative `explain_results` glob, and short rules. It is a stable 1050-byte-bounded summary; tool schemas/system prompts remain authoritative, and the block carries no host paths, file contents, CLI examples, or secrets. For API discovery or business/technical questions, search/read the newest matching schemaVersion 3 `kind: final` before source; source is allowed only when no accessible matching Final exists or the user asks for source verification. `prepare.json` is never an explanation result; disclose `verified:false` or `needsBusinessReview:true` status and keep evidence workspace-relative.
 
 ## Errors
 
