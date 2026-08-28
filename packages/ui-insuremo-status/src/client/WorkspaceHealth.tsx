@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type { InsuremoStatusLocaleKey } from "./locales.ts";
 import { IcomposerGlyph, GraphGlyph, IntelligenceGlyph } from "./HealthGlyphs.tsx";
+import { BrandChrome } from "./BrandChrome.tsx";
 import css from "./WorkspaceHealth.module.css";
 
 /** Props supplied by the sidebar footer-action slot owner. */
@@ -51,27 +52,31 @@ function Glyphs(props: {
   t: (key: InsuremoStatusLocaleKey) => string;
   row: WorkspaceHealthRow;
 }): ReactNode {
+  if (!props.row.detected) return null;
+  const iComposerLabel = props.row.autoBindState === "bound" ? props.t("health.iComposerBound") : props.t("health.iComposerPending");
+  const graphLabel = props.row.graphReady ? props.t("health.graphReady") : props.t("health.graphNotReady");
+  const explainLabel = props.row.explainReady ? props.t("health.explainReady") : props.t("health.explainNotReady");
   return (
     <span className={css.rowIcons} data-icomposer-workspace-health-icons="" onClick={event => event.stopPropagation()}>
       {props.row.detected ? (
         <span
           className={`${css.icon} ${props.row.autoBindState === "pending" ? css.iconPending : ""}`}
           data-state={props.row.autoBindState}
-          title={props.row.autoBindState === "bound" ? props.t("health.iComposerBound") : props.t("health.iComposerPendingHint")}
-          aria-label={props.row.autoBindState === "bound" ? props.t("health.iComposerBound") : props.t("health.iComposerPending")}
+          title={iComposerLabel}
+          aria-label={iComposerLabel}
         ><IcomposerGlyph /></span>
       ) : null}
       <span
         className={css.icon}
         data-state={props.row.graphReady ? "on" : "off"}
-        title={props.row.graphReady ? props.t("health.graphReady") : props.t("health.graphNotReady")}
-        aria-label={props.t("health.graphReady")}
+        title={graphLabel}
+        aria-label={graphLabel}
       ><GraphGlyph /></span>
       <span
         className={css.icon}
         data-state={props.row.explainReady ? "on" : "off"}
-        title={props.row.explainReady ? props.t("health.explainReady") : props.t("health.explainNotReady")}
-        aria-label={props.t("health.explainReady")}
+        title={explainLabel}
+        aria-label={explainLabel}
       ><IntelligenceGlyph /></span>
     </span>
   );
@@ -92,9 +97,13 @@ export class WorkspaceHealth extends Component<WorkspaceHealthProps, { rows: rea
   /** workspaceId → portal root mounted into that row's host element. */
   #ports = new Map<string, { host: HTMLElement; root: Root }>();
   #occurrenceCounter = new Map<string, number>();
+  /** DOM row → workspace identity, retained across duplicate-title filters/reorders. */
+  #rowIds = new WeakMap<HTMLElement, string>();
   #driverRef: HTMLDivElement | null = null;
+  #mounted = false;
 
   override componentDidMount(): void {
+    this.#mounted = true;
     void this.load();
     this.#timer = setInterval(() => void this.load(), 60_000);
     this.#observer = new MutationObserver(() => this.syncRows());
@@ -105,14 +114,19 @@ export class WorkspaceHealth extends Component<WorkspaceHealthProps, { rows: rea
   }
 
   override componentWillUnmount(): void {
+    this.#mounted = false;
     this.#controller?.abort();
     if (this.#timer !== undefined) clearInterval(this.#timer);
     this.#observer?.disconnect();
-    for (const port of this.#ports.values()) {
-      port.root.unmount();
-      port.host.remove();
-    }
-    this.#ports.clear();
+    for (const id of [...this.#ports.keys()]) this.dropPort(id);
+  }
+
+  private dropPort(id: string): void {
+    const port = this.#ports.get(id);
+    if (port === undefined) return;
+    port.root.unmount();
+    port.host.remove();
+    this.#ports.delete(id);
   }
 
   private async load(): Promise<void> {
@@ -132,6 +146,7 @@ export class WorkspaceHealth extends Component<WorkspaceHealthProps, { rows: rea
   }
 
   private syncRows(): void {
+    if (!this.#mounted) return;
     const driver = this.#driverRef;
     if (driver === null) return;
     const doc = driver.ownerDocument;
@@ -149,23 +164,46 @@ export class WorkspaceHealth extends Component<WorkspaceHealthProps, { rows: rea
       const titleText = treeitem.querySelector('[class*="projectText"]');
       const label = (titleText?.textContent ?? "").trim();
       if (label.length === 0) continue;
-      // occurrence index among rows SHARING this title
+      // Pair by the existing row/host identity first. Only new rows use the
+      // occurrence fallback, so filtering or reordering duplicate titles does
+      // not make the remaining row lose its port or steal another id.
       const candidates = rowsInOrder.filter(candidate => candidate.displayName === label);
       if (candidates.length === 0) continue;
       const occurrence = this.#occurrenceCounter.get(label) ?? 0;
       this.#occurrenceCounter.set(label, occurrence + 1);
-      const row = candidates[occurrence % candidates.length];
+      const existingHost = treeitem.querySelector<HTMLElement>(`[${HOST_ATTR}]`);
+      const existingId = this.#rowIds.get(treeitem) ?? existingHost?.getAttribute("data-icomposer-workspace-id");
+      const preserved = existingId === undefined || existingId === null
+        ? undefined
+        : candidates.find(candidate => candidate.workspaceId === existingId);
+      const available = candidates.filter(candidate => !seenIds.has(candidate.workspaceId));
+      const row = preserved !== undefined && !seenIds.has(preserved.workspaceId)
+        ? preserved
+        : available[occurrence % Math.max(available.length, 1)];
+      if (row === undefined) continue;
       const id = row.workspaceId;
+      this.#rowIds.set(treeitem, id);
+      if (!row.detected) {
+        const staleId = existingHost?.getAttribute("data-icomposer-workspace-id");
+        const stalePort = staleId === undefined || staleId === null ? undefined : this.#ports.get(staleId);
+        if (staleId !== undefined && staleId !== null && stalePort?.host === existingHost) this.dropPort(staleId);
+        else existingHost?.remove();
+        continue;
+      }
       seenIds.add(id);
-      // locate any existing host bound to THIS id (freshly sits in this row)
+      // A stale host can remain for one mutation pass while React filters a
+      // row. Remove it before creating the desired identity in this row.
+      const hostId = existingHost?.getAttribute("data-icomposer-workspace-id");
+      if (hostId !== undefined && hostId !== null && hostId !== id) {
+        if (this.#ports.has(hostId)) this.dropPort(hostId);
+        else existingHost?.remove();
+      }
       let port = this.#ports.get(id);
       if (port !== undefined && !port.host.isConnected) {
-        port.root.unmount();
-        this.#ports.delete(id);
+        this.dropPort(id);
         port = undefined;
       }
-      // if this row already carries a host from a DIFFERENT id, leave it (the
-      // other sync pass will reconcile); only decorate when absent
+      if (port !== undefined && port.host.parentElement !== treeitem) treeitem.appendChild(port.host);
       if (port === undefined && treeitem.querySelector(`[${HOST_ATTR}]`) === null) {
         const host = doc.createElement("span");
         host.setAttribute(HOST_ATTR, "");
@@ -190,24 +228,23 @@ export class WorkspaceHealth extends Component<WorkspaceHealthProps, { rows: rea
     this.#occurrenceCounter.clear();
     // drop ports whose workspaceId is no longer visible (deleted/renamed/filtered)
     for (const [id, port] of this.#ports.entries()) {
-      if (!seenIds.has(id) || !port.host.isConnected) {
-        port.root.unmount();
-        port.host.remove();
-        this.#ports.delete(id);
-      }
+      if (!seenIds.has(id) || !port.host.isConnected) this.dropPort(id);
     }
   }
 
   override render(): ReactNode {
     const { t } = this.props;
     return (
-      <div
-        ref = {(element: HTMLDivElement | null): void => { this.#driverRef = element; }}
-        className={css.driver}
-        role="status"
-        aria-label={t("health.strip")}
-        data-icomposer-workspace-health-driver=""
-      />
+      <>
+        <BrandChrome />
+        <div
+          ref = {(element: HTMLDivElement | null): void => { this.#driverRef = element; }}
+          className={css.driver}
+          role="status"
+          aria-label={t("health.strip")}
+          data-icomposer-workspace-health-driver=""
+        />
+      </>
     );
   }
 }

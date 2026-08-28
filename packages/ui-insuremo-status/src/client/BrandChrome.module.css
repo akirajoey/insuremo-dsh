@@ -1,0 +1,85 @@
+/* The driver is mounted through the existing footer slot but never paints. */
+.driver {
+  display: none;
+}
+
+/* The native BrandWordmark/FishLogo keep their layout boxes; these hosts are
+   absolute overlays, so the source buttons retain their hit/focus semantics. */
+.wordmarkHost,
+.railHost {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.wordmarkHost {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.wordmarkInner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wordmark {
+  display: block;
+  flex: 0 0 auto;
+  width: 99px;
+  height: 24px;
+  color: #000;
+}
+
+.wordmark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dsh {
+  display: inline-block;
+  color: currentColor;
+  font-family: var(--ds-font-family, Inter, system-ui, sans-serif);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  line-height: 24px;
+}
+
+.railHost {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.railMark {
+  display: block;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.railMark svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+/* The shell's native panel icon appears on hover; hide only our resting mark. */
+:global(button:hover) .railHost {
+  visibility: hidden;
+}
+
+/* The derived asset keeps purple emphasis while black Insure ink follows the
+   live body theme attribute, not the OS prefers-color-scheme media query. */
+:global(body[data-ds-dark-theme]) .wordmark {
+  color: var(--dsw-alias-label-primary);
+}

@@ -1,16 +1,20 @@
 # `@icomposer/ui-insuremo-status`
 
-Host/client Workbench plugin for the static InsureMO status placeholder in the
-sidebar footer. Phase 1 renders a warning dot and the localized
-`InsureMO · 未配置` / `InsureMO · Not configured` label. It does not probe an
-environment or handle clicks; live status arrives in a later phase.
+Host/client Workbench plugin for the InsureMO sidebar status and owned brand
+chrome. It keeps the footer driver hidden, overlays the Harness brand buttons
+without changing their click/focus/tooltip owners, and ships source-derived
+InsureMO artwork plus the lowercase `dsh` wordmark. Black ink follows
+`body[data-ds-dark-theme]` immediately while the purple mark is retained.
 
-Phase 2 keeps this a static placeholder on purpose: turning the sidebar badge
-into a live overall-status dot would require the status bundle to repeat the
-overview fetch (duplicating cross-bundle network traffic and failure handling)
-or to receive a projected overview through the slot seams, which is not wired
-in this phase. The `@icomposer/ui-insuremo-settings` section owns the live
-read-only overview instead; this package stays presentational.
+The workspace health decorator is also fail-closed: undetected workspaces get
+no host or glyphs; detected workspaces get the 16px iComposer, ICI Graph, and
+ICI Explain state glyphs inline in the native workspace row. The read-only
+status route is polled with bounded cleanup when rows disappear, rename, or
+filter out.
+
+The package does not probe credentials or own sidebar button actions. Live
+status arrives from the Workbench overview endpoint; the native Harness
+buttons remain the behavior owners.
 
 The package uses the Harness Strategy A `clientBundle` preset, which keeps
 React in the browser module table rather than copying it into `lib/client.js`.
