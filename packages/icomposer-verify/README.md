@@ -51,9 +51,9 @@ Registered under `ctx.tools` (all `isConcurrencySafe`, effect-free, structured
 - `ici_status` — read-only Code Intelligence diagnostics
 - `ici_explain` — prepare one API with `query`, or one 2–10 API batch with `queries`, for a single Workbench confirmation card
 
-## Injected context (TASK-061)
+## Injected context (TASK-067; policy 6)
 
-`IciContextService` injects one compact structured block per session (step 1, dedup by digest, re-assert after compact/policy change): header `[iComposer workspace]`, `workspace_id`, grouped `tools:` (graph/inspect/explain/assets/sdk/verify), `auth:` (which tool groups need the Workbench Active Profile), and short `rules:`. It is a stable 850-byte-bounded summary only — tool schemas/system prompts remain the authoritative detail, and the block never carries canonical paths, artifact layouts, CLI examples, or secrets.
+`IciContextService` injects one compact structured block per session (step 1, dedup by digest, re-assert after compact/policy change): header `[iComposer workspace]`, `workspace_id`, grouped tools/auth, the workspace-relative `explain_results` contract, and short rules. It is a stable 1000-byte-bounded summary; tool schemas/system prompts remain authoritative, and the block carries no host paths, file contents, CLI examples, or secrets. For a named API business/technical question, the newest matching schemaVersion 3 `kind: final` under the workspace is the Explain Final source of truth; `prepare.json` is never an explanation result.
 
 ## Errors
 

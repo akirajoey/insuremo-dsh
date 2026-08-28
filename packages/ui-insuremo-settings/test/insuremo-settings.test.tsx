@@ -99,8 +99,12 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     expect(header.querySelector("svg")).toBeTruthy();
     // fast channel URL
     expect(fetchMock).toHaveBeenCalledWith(`${OVERVIEW_URL}?fast=1`, expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    // regions hidden while collapsed
+    // regions hidden while collapsed; the removed embedding endpoint/hint are
+    // absent in both collapsed and expanded states.
     expect(view.view.queryByText(zh.imoTitle)).toBeNull();
+    expect(view.container.textContent).not.toContain(fixtureView.ici.embeddingUrl);
+    expect(view.container.textContent).not.toContain(zh.iciEmbeddingEndpoint);
+    expect(view.container.textContent).not.toContain(zh.iciEmbeddingHint);
     // expanding flips aria and reveals regions
     header.click();
     await Promise.resolve();
@@ -110,6 +114,11 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     expect(await view.view.findByRole("switch", { name: `${zh.skillsToggle}: imo-audit-helper` })).toBeTruthy();
     expect(await view.view.findByText(zh.skillsUpdateAll)).toBeTruthy();
     expect(await view.view.findByText(zh.iciTitle)).toBeTruthy();
+    expect(view.container.textContent).toContain(`${zh.iciGraphWorkspaces}: 2`);
+    expect(view.container.textContent).toContain(`${zh.iciExplainWorkspaces}: 1`);
+    expect(view.container.textContent).not.toContain(fixtureView.ici.embeddingUrl);
+    expect(view.container.textContent).not.toContain(zh.iciEmbeddingEndpoint);
+    expect(view.container.textContent).not.toContain(zh.iciEmbeddingHint);
     // auth region removed (picker owns switching)
     expect(view.view.queryByRole("radio")).toBeNull();
   });
@@ -264,8 +273,19 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     vi.stubGlobal("fetch", fetchMock);
     locale.setLocale("en");
     const view = runtime.renderSlot("settings.plugin.item", {});
-    (await view.view.findByRole("button", { name: new RegExp(en.expand) })).click();
+    const header = await view.view.findByRole("button", { name: new RegExp(en.expand) });
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(view.container.textContent).not.toContain(fixtureView.ici.embeddingUrl);
+    expect(view.container.textContent).not.toContain(en.iciEmbeddingEndpoint);
+    expect(view.container.textContent).not.toContain(en.iciEmbeddingHint);
+    header.click();
     expect(await view.view.findByText(en.imoTitle)).toBeTruthy();
+    expect(await view.view.findByText(en.iciTitle)).toBeTruthy();
+    expect(view.container.textContent).toContain(`${en.iciGraphWorkspaces}: 2`);
+    expect(view.container.textContent).toContain(`${en.iciExplainWorkspaces}: 1`);
+    expect(view.container.textContent).not.toContain(fixtureView.ici.embeddingUrl);
+    expect(view.container.textContent).not.toContain(en.iciEmbeddingEndpoint);
+    expect(view.container.textContent).not.toContain(en.iciEmbeddingHint);
   });
 
   it("hostile payload fields never render", async () => {

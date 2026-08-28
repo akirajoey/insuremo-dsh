@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
-import { IciContextService, ICI_CONTEXT_PLUGIN } from "../src/ici-context-service.ts";
+import { IciContextService, ICI_CONTEXT_PLUGIN, ICI_CONTEXT_POLICY_VERSION } from "../src/ici-context-service.ts";
 
 function agent(cwd: string, events: unknown[] = []) {
   return { session: { header: { cwd }, events } };
@@ -35,36 +35,40 @@ test("ICI context injects only for exact detected/bound workspace and deduplicat
     const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
     assert.match(text, /\[iComposer workspace\]/);
     assert.match(text, /workspace_id: ws-a/);
-    assert.match(text, /  graph: \[ici_build, ici_status\]/);
-    assert.match(text, /  inspect: \[ici_query, ici_search\]/);
-    assert.match(text, /  explain: \[ici_explain\]/);
-    assert.match(text, /  assets: \[icomposer_catalog_list\]/);
-    assert.match(text, /  sdk: \[icomposer_sdk_query\]/);
-    assert.match(text, /  verify: \[icomposer_verify_utils\]/);
-    assert.match(text, /auth:\n  none: graph, query, explain, assets, sdk, non-semantic search\n  active_profile: semantic embedding\/search, verify/);
-    assert.match(text, /- Use workspace_id exactly; tool schemas are authoritative\./);
-    assert.match(text, /- If the graph is stale, run ici_build before ici_explain\./);
-    assert.match(text, /model is required; reference and earliest start are optional\./);
-    assert.match(text, /- Use only artifact paths returned by tools\./);
-    assert.match(text, /- active_profile ops: Workbench Active Profile; never CLI defaults\./);
+    assert.match(text, /tools: \{.*inspect: \[ici_query\].*explain: \[ici_explain\]/);
+    assert.doesNotMatch(text, /ici_search|embedding|semantic/i);
+    assert.match(text, /explain_results: \{files: \.metadata\/icomposer\/ici\/explain\/<api-name>-\*\/finals\/\*\.json, fields: \[apiAnalysis\.technical,apiAnalysis\.business,apiAnalysis\.flow,apiAnalysis\.evidence\]\}/);
+    assert.match(text, /workspace_id\/schema authority/);
+    assert.match(text, /named API business\/technical: locate\/read newest matching schemaVersion 3 kind final before answering/);
+    assert.match(text, /never use prepare\.json as an explanation result/);
+    assert.match(text, /no accessible matching Final: say so; do not invent one/);
+    assert.match(text, /stale graph: ici_build before ici_explain/);
+    assert.match(text, /ici_explain prepares only; card needs model; reference\/earliest optional/);
+    assert.match(text, /artifact paths from tools/);
+    assert.match(text, /Active Profile: Workbench Active Profile; never CLI defaults/);
     assert.doesNotMatch(text, /This is iComposer workspace/);
-    assert.doesNotMatch(text, /canonical path|artifact layout|finals\//);
+    assert.doesNotMatch(text, /canonical path|artifact layout|absolute|secret|digest/);
     assert.doesNotMatch(text, /imo auth|imo devops/);
-    assert.equal(Buffer.byteLength(text, "utf8") <= 850, true);
+    assert.equal(Buffer.byteLength(text, "utf8") <= 1000, true);
+    const firstPolicy = (first.messages?.[0] as { source?: { policyVersion?: string } }).source?.policyVersion;
+    assert.equal(firstPolicy, ICI_CONTEXT_POLICY_VERSION);
+    assert.equal(ICI_CONTEXT_POLICY_VERSION, "6");
     assert.equal((await step(fx.service, current)).messages?.length, 0);
     assert.equal((await step(fx.service, current, 2)).messages?.length, 0);
   } finally { await fx.fiber.dispose(); }
 });
 
-test("TASK-061 ICI context stays within the byte gate at the maximum workspace id", async () => {
+test("TASK-067 ICI context stays within the 1000-byte gate at the maximum workspace id", async () => {
   const longId = "a".repeat(128);
   const fx = await fixture([{ workspaceId: longId, canonicalPath: "/repo/long", detectedIcomposer: true, binding: null }]);
   try {
     const current = agent("/repo/long");
     const first = await step(fx.service, current);
     const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
-    assert.equal(Buffer.byteLength(text, "utf8") <= 850, true);
+    assert.equal(Buffer.byteLength(text, "utf8") <= 1000, true);
     assert.match(text, new RegExp(`workspace_id: ${longId}`));
+    assert.doesNotMatch(text, /ici_search|embedding|semantic/i);
+    assert.match(text, /schemaVersion 3 kind final/);
   } finally { await fx.fiber.dispose(); }
 });
 

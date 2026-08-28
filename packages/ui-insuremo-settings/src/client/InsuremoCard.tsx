@@ -282,10 +282,6 @@ function IciRegion(props: { t: Translate; ici: NonNullable<ImoOverviewView["ici"
     <div className={css.region}>
       <h4>{t("iciTitle")}</h4>
       <p>
-        {t("iciEmbeddingEndpoint")}: <code>{ici.embeddingUrl}</code>
-      </p>
-      <p className={css.hint}>{t("iciEmbeddingHint")}</p>
-      <p>
         {t("iciGraphWorkspaces")}: {ici.graphWorkspaces} · {t("iciExplainWorkspaces")}: {ici.explainWorkspaces}
       </p>
     </div>
