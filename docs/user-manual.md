@@ -22,7 +22,7 @@
    - 5.8 写闭环（icomposer-write）
    - 5.10 操作日志与审批（workbench-operation-log）
    - 5.11 界面插件（ui-*）
-6. [Agent 工具参考（8 个本地工具）](#6-agent-工具参考)
+6. [Agent 工具参考（7 个本地工具）](#6-agent-工具参考)
 7. [Workbench API 命令参考](#7-workbench-api-命令参考)
 8. [安全模型](#8-安全模型)
 9. [测试与验证](#9-测试与验证)
@@ -209,7 +209,7 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 3. 扫描资产目录                     → ctx.icomposerCatalog.listAssets({...})   # 459 资产
 4. 构建代码图                       → ici_build 工具（4502 节点 / 10308 边）
 5. 查 API 调用链 / 影响分析          → ici_query 工具
-6. 语义检索                         → ici_search 工具（先 ici_build 的 search-index 模式）
+6. 语义检索后端（当前 Agent 不可用） → 内部 `ctx.iciSearch` / `ctx.iciEngine`
 7. 业务解释上下文                    → ici_explain 工具
 8. 状态诊断 / 清理                   → ici_status 工具
 ```
@@ -275,7 +275,7 @@ DSH_HOME=../icomposer-workbench/.dsh-home pnpm dsh --profile icomposer-web --dum
 
 - 包装 `imo icomposer verify utils`（文件级校验 / `--list` / `--search`）；
 - argv 白名单（拒绝对路径/`..`/非 groovy）；digest-only；
-- 本包同时注册全部 **8 个 Agent 工具**（见第 6 节）。
+- 本包同时注册全部 **7 个 Agent 工具**（见第 6 节）；语义检索后端暂不在 Agent 工具面。
 
 ### 5.7 iComposer Code Intelligence（`@icomposer/icomposer-code-intelligence`）
 
@@ -343,7 +343,7 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 
 ## 6. Agent 工具参考
 
-以下 10 个工具全部注册进 Harness `ctx.tools`，**不写源文件/凭据、并发安全、canonical JSON 输出**（Agent 可直接调用）；`ici_build`/索引和 `ici_explain` 会写 workspace-local ICI artifacts。
+以下 7 个工具全部注册进 Harness `ctx.tools`，**不写源文件/凭据、并发安全、canonical JSON 输出**（Agent 可直接调用）；`ici_build` 与 `ici_explain` 会写 workspace-local ICI artifacts。语义检索的 index/search 后端保留，但当前 Agent 不可用。
 
 | 工具 | 参数 | 功能 |
 |---|---|---|
@@ -351,8 +351,7 @@ preview(dry-run) → request(pending + paramsDigest) → 人工 approve
 | `icomposer_sdk_query` | `{workspace_id, client?, keyword?, limit?}` | SDK operation 检索 |
 | `icomposer_verify_utils` | `{workspace_id, keyword?}` | 工具类检索（verify utils --search） |
 | `ici_query` | `{workspace_id, mode: api-chain\|impact, query, depth?, max_nodes?}` | 调用链树 / 影响路径 |
-| `ici_search` | `{workspace_id, query, mode?, top?}` | 语义检索 top-N |
-| `ici_build` | `{workspace_id, mode?: graph\|search-index, rebuild?}` | 构建图/索引（≤50 资产同步；>50 后台 job 返回 jobId） |
+| `ici_build` | `{workspace_id, mode?: graph}` | 构建图（≤50 资产同步；>50 后台 job 返回 jobId） |
 | `ici_status` | `{workspace_id}` | 图/索引诊断（版本/计数/stale/必需文件） |
 | `ici_explain` | `{workspace_id, query 或 queries[2..10]}` | 只准备 schema-3 完整调用链与源码范围；单 API 创建 Job，`queries` 一次创建去重后的 batch Jobs 并返回 `batch=` 卡片；图谱 engineVersion 过期时返回 stale-snapshot 并提示 `ici_build`；不调用模型、不点亮状态 |
 | `ici_explain_list/read/submit` | 仅 fresh Explain Agent 内部可见 | 受限目录浏览、文本读取、严格 aggregate submit；不注册到主 Agent 工具面 |

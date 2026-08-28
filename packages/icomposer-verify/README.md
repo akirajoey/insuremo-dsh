@@ -37,8 +37,8 @@ Host-only, injects `[subprocess, workspaceBinding, imoAuth, tools]`, frozen face
 ## Agent tools (read-only)
 
 Registered under `ctx.tools` (all `isConcurrencySafe`, effect-free, structured
-`{error:{code}}` outputs on gate failures). Eight tools in total — three
-`icomposer_*` plus five `ici_*`:
+`{error:{code}}` outputs on gate failures). Seven tools in total — three
+`icomposer_*` plus four `ici_*`:
 
 - `icomposer_catalog_list` — catalog counts + ≤50 entry summary via
   `ctx.icomposerCatalog.listAssets`
@@ -46,10 +46,13 @@ Registered under `ctx.tools` (all `isConcurrencySafe`, effect-free, structured
   `ctx.icomposerReference.querySdkOperations`
 - `icomposer_verify_utils` — utility listing/search via this package's faces
 - `ici_query` — api-chain/impact graph queries via `ctx.iciEngine`
-- `ici_search` — semantic API search via `ctx.iciEngine.search`
-- `ici_build` — graph/index build (inline or background job)
+- `ici_build` — graph build (inline or background job)
 - `ici_status` — read-only Code Intelligence diagnostics
 - `ici_explain` — prepare one API with `query`, or one 2–10 API batch with `queries`, for a single Workbench confirmation card
+
+The engine's index/search faces remain available for internal backend use, but
+semantic search is temporarily unavailable as an Agent tool: no `ici_search`
+ToolSkill or system-prompt section is registered.
 
 ## Injected context (TASK-067; policy 6)
 

@@ -1,6 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
 import { registerIciTools } from "./ici-tools.ts";
-import { registerIciSearchTool } from "./ici-search-tool.ts";
 import { registerIciJobTools } from "./ici-jobs-tools.ts";
 import { registerIciExplainTools } from "./ici-explain-tools.ts";
 import type { DefineToolFn } from "./tool-types.ts";
@@ -96,7 +95,6 @@ export function registerIcomposerToolsWith(ctx: Context, defineTool: DefineToolF
   }));
 
   disposers.push(...registerIciTools(ctx, defineTool as never));
-  disposers.push(...registerIciSearchTool(ctx, defineTool as never));
   disposers.push(...registerIciJobTools(ctx, defineTool as never));
   disposers.push(...registerIciExplainTools(ctx, defineTool as never));
   return disposers;

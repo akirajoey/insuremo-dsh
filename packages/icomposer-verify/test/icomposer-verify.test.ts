@@ -122,7 +122,7 @@ const fileKey = "icomposer verify utils --json --profile portal:demo src/dev/T/G
 const listKey = "icomposer verify utils --json --profile portal:demo --list";
 const searchKey = "icomposer verify utils --json --profile portal:demo --search json";
 
-test("apply mounts all eight tools persistently and disposes them with the plugin", async () => {
+test("apply mounts all seven Agent tools persistently and disposes them with the plugin", async () => {
   const ctx = new Context();
   ctx.provide("subprocess", fakeSubprocess() as never);
   ctx.provide("imoAuth" as never, stubAuth("ok") as never);
@@ -143,8 +143,8 @@ test("apply mounts all eight tools persistently and disposes them with the plugi
   } as never);
   const fiber = await ctx.plugin(verifyPlugin as never);
   await fiber.await();
-  assert.equal(names.size, 8);
-  assert.equal(sections.size, 8);
+  assert.equal(names.size, 7);
+  assert.equal(sections.size, 7);
   await fiber.dispose();
   assert.equal(names.size, 0);
   assert.equal(sections.size, 0);
@@ -545,9 +545,9 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
       return () => { registered.delete(definition.name); removed.push(definition.name); };
     },
   } as never);
-  const sections: Array<{ name: string; order: number }> = [];
+  const sections: Array<{ name: string; order: number; text?: string }> = [];
   ctx.provide("systemPrompt", {
-    section(section: { name: string; order: number }) {
+    section(section: { name: string; order: number; text?: string }) {
       sections.push(section);
       return () => {};
     },
@@ -573,9 +573,18 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
   const { registerIcomposerToolsWith } = await import("../src/tool-defs.ts");
   const disposers = registerIcomposerToolsWith(ctx, defineTool as never);
   try {
-    assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+    assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_explain", "ici_query", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
     assert.equal([...registered.values()].every(tool => typeof tool.output.render === "function"), true);
-    assert.equal(sections.length, 8);
+    assert.equal(sections.length, 7);
+    assert.equal(sections.some(section => section.name === "tool:ici_search"), false);
+    const buildSection = sections.find(section => section.name === "tool:ici_build");
+    assert.ok(buildSection);
+    assert.doesNotMatch(buildSection.text ?? "", /embedding|search-index|semantic/i);
+    const buildTool = registered.get("ici_build") as any;
+    const visibleBuild = JSON.stringify({ description: buildTool.description, parameters: buildTool.parameters, output: buildTool.output.schema });
+    assert.doesNotMatch(visibleBuild, /embedding|search-index|semantic/i);
+    assert.deepEqual(buildTool.parameters.properties.mode.enum, ["graph"]);
+    assert.equal(buildTool.parameters.properties.rebuild, undefined);
     assert.equal(sections.every(x => x.order === 150), true);
     assert.equal(sections.every(x => x.name.startsWith("tool:")), true);
     const exec = { signal: new AbortController().signal };
@@ -607,12 +616,13 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
     assert.equal(iciImpact.paths.length, 1);
     assert.equal(iciImpact.paths[0].apiId, "api:ApiA");
     assert.deepEqual(iciImpact.confidenceCounts, { static: 2, platform: 0, inferred: 0 });
-    const searchOut: any = await registered.get("ici_search")!.execute({ workspace_id: "ws1", query: "payment", top: 2 }, exec);
-    assert.equal(searchOut.rows.length, 2);
-    assert.equal(searchOut.rows[0].rank, 1);
-    assert.equal(searchOut.rows[0].apiName, "AlphaAPI");
-    assert.ok(Math.abs(searchOut.rows[0].score - 0.92) < 1e-9);
-    assert.equal(searchOut.error, undefined);
+    // Search remains an internal engine face, but is not an Agent tool.
+    const internalEngine: any = ctx.get("iciEngine" as never);
+    assert.equal(registered.has("ici_search"), false);
+    const searchOut: any = await internalEngine.search({ workspaceId: "ws1", query: "payment", top: 2 }, exec.signal);
+    assert.equal(searchOut.value.rows.length, 2);
+    assert.equal(searchOut.value.rows[0].apiName, "AlphaAPI");
+    assert.ok(Math.abs(searchOut.value.rows[0].score - 0.92) < 1e-9);
     // ici_build small workspace → inline with full detail
     const buildInline: any = await registered.get("ici_build")!.execute({ workspace_id: "ws1" }, exec);
     assert.equal(buildInline.kind, "inline");
@@ -622,11 +632,14 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
     assert.equal(buildInline.detail.artifact_path, undefined);
     assert.equal(buildInline.error, undefined);
     assert.match((registered.get("ici_build")!.output.render({}, buildInline) as any)[0].text, /artifact=\.metadata/);
-    // ici_build search-index mode
-    const indexInline: any = await registered.get("ici_build")!.execute({ workspace_id: "ws1", mode: "search-index", rebuild: true }, exec);
-    assert.equal(indexInline.kind, "inline");
-    assert.equal(indexInline.artifact_path, ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl");
-    assert.deepEqual(indexInline.detail, { total: 5, embedded: 5, reused: 0 });
+    // The Agent-facing build contract is graph-only; the backend index face remains callable internally.
+    const indexInternal: any = await internalEngine.index({ workspaceId: "ws1", rebuild: true }, { signal: exec.signal });
+    assert.equal(indexInternal.value.artifactPath, ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl");
+    assert.deepEqual(indexInternal.value, { artifactPath: ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl", total: 5, embedded: 5, reused: 0 });
+    await assert.rejects(
+      () => registered.get("ici_build")!.execute({ workspace_id: "ws1", mode: "search-index", rebuild: true }, exec),
+      (error: unknown) => (error as { code?: string }).code === "INVALID_ARGS",
+    );
     // ici_status diagnostics projection
     const status: any = await registered.get("ici_status")!.execute({ workspace_id: "ws1" }, exec);
     assert.equal(status.workspace_id, "ws1");
@@ -640,7 +653,7 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
   } finally {
     for (const dispose of disposers) dispose();
   }
-  assert.deepEqual(removed.sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+  assert.deepEqual(removed.sort(), ["ici_build", "ici_explain", "ici_query", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
   assert.equal(registered.size, 0);
 });
 

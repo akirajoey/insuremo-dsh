@@ -26,13 +26,6 @@ interface IciQueryImpactResult {
   stale?: true;
 }
 
-interface IciSearchRow {
-  readonly apiId: string;
-  readonly apiName: string;
-  readonly score: number;
-  readonly evidence: string;
-}
-
 interface ReferenceFace {
   querySdkOperations(input: { workspaceId: string; client?: string; keyword?: string; limit?: number }, signal?: AbortSignal): Promise<ResultLike<{
     counts: { clients: number; operations: number };
@@ -65,14 +58,6 @@ interface VerifyFace {
 interface IciEngineFace {
   queryApi(input: { workspaceId: string; query: string; depth?: number; focus?: string; maxNodes?: number }, signal?: AbortSignal): Promise<ResultLike<IciQueryApiResult>>;
   queryImpact(input: { workspaceId: string; query: string }, signal?: AbortSignal): Promise<ResultLike<IciQueryImpactResult>>;
-}
-
-interface IciSearchFace {
-  search(input: { workspaceId: string; query: string; mode?: "technical" | "business" | "all"; top?: number }, signal?: AbortSignal): Promise<ResultLike<{
-    rows: readonly { readonly apiId: string; readonly apiName: string; readonly score: number; readonly evidence: string }[];
-    truncated: boolean;
-    stale?: true;
-  }>>;
 }
 
 interface IciTreeLine {
@@ -145,26 +130,10 @@ interface IciEngineFace {
   queryImpact(input: { workspaceId: string; query: string }, signal?: AbortSignal): Promise<ResultLike<IciQueryImpactResult>>;
 }
 
-interface IciSearchRow {
-  readonly apiId: string;
-  readonly apiName: string;
-  readonly score: number;
-  readonly evidence: string;
-}
-
-interface IciSearchFace {
-  search(input: { workspaceId: string; query: string; mode?: "technical" | "business" | "all"; top?: number }, signal?: AbortSignal): Promise<ResultLike<{
-    rows: readonly IciSearchRow[];
-    truncated: boolean;
-    stale?: true;
-  }>>;
-}
-
-
 /**
- * Register the two read-only iComposer Code Intelligence Agent tools
- * (query tree/impact + semantic search) using the host defineTool factory.
- * @returns one disposer per registered tool.
+ * Register the read-only iComposer graph-query Agent tool using the host
+ * defineTool factory.
+ * @returns one disposer for the registered tool.
  */
 export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
   const disposers: Array<() => void> = [];
@@ -173,12 +142,6 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
     order: 150,
     text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. No InsureMO binding is required and the operation is read-only.",
   }));
-  disposers.push(ctx.systemPrompt.section({
-    name: "tool:ici_search",
-    order: 150,
-    text: "ici_search ranks registered workspace APIs by semantic similarity against iComposer Code Intelligence embeddings. It uses the Workbench Active Profile for authentication and fails closed when unavailable."
-  }));
-
   disposers.push(ctx.tools.register(defineTool({
     name: "icomposer_catalog_list",
     description: "List the read-only local iComposer asset catalog (api/function/batch/model) of a registered workspace with join status. No InsureMO binding is required.",

@@ -85,10 +85,9 @@ function objectSchema2(properties: Record<string, unknown>, required: string[]):
 }
 
 /**
- * Register the iComposer Code Intelligence background-build and status Agent
- * tools. `ici_build` starts a host job (`ici-build` / `ici-index` kind) for
- * large workspaces and awaits small ones synchronously; `ici_status` is a
- * read-only diagnostics projection.
+ * Register the iComposer Code Intelligence graph-build and status Agent
+ * tools. `ici_build` starts a host job for large workspaces and awaits small
+ * ones synchronously; `ici_status` is a read-only diagnostics projection.
  * @returns one disposer per registered tool.
  */
 export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
@@ -96,7 +95,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_build",
     order: 150,
-    text: "ici_build builds the local iComposer Code Intelligence graph from a registered workspace canonical path; search-index mode uses the Workbench Active Profile for authentication and fails closed when it is unavailable. Small workspaces complete inline; larger ones run as cancellable background jobs.",
+    text: "ici_build builds the local iComposer Code Intelligence graph from a registered workspace canonical path. Small workspaces complete inline; larger ones run as cancellable background jobs.",
   }));
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_status",
@@ -106,11 +105,10 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
 
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_build",
-    description: "Build the local iComposer Code Intelligence graph or authenticated embedding index for a registered workspace. Graph mode needs no binding; search-index mode uses the Workbench Active Profile and fails closed when unavailable.",
+    description: "Build the local iComposer Code Intelligence graph for a registered workspace. No InsureMO binding is required.",
     parameters: {
       workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
-      mode: { type: "string", enum: ["graph", "search-index"], description: "What to build; default graph." },
-      rebuild: { type: "boolean", description: "search-index only: force full re-embedding." },
+      mode: { type: "string", enum: ["graph"], description: "Graph mode; default graph." },
     },
     output: {
       schema: objectSchema2(
@@ -125,9 +123,6 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
               nodeCount: { type: "integer" },
               edgeCount: { type: "integer" },
               builtAt: { type: "string" },
-              total: { type: "integer" },
-              embedded: { type: "integer" },
-              reused: { type: "integer" },
             },
             [],
           ),
@@ -142,7 +137,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
           artifact_path?: string;
           jobId?: string;
           label?: string;
-          detail?: { nodeCount?: number; edgeCount?: number; builtAt?: string; total?: number; embedded?: number; reused?: number };
+          detail?: { nodeCount?: number; edgeCount?: number; builtAt?: string };
           error?: { code: string };
         };
         if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
@@ -152,18 +147,16 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
         const d = v.detail ?? {};
         const parts: string[] = [];
         if (d.nodeCount !== undefined) parts.push(`nodes=${d.nodeCount} edges=${d.edgeCount ?? 0}`);
-        if (d.total !== undefined) parts.push(`vectors total=${d.total} embedded=${d.embedded ?? 0} reused=${d.reused ?? 0}`);
         return [{ type: "text", text: `workspace ${v.workspace_id}: done — ${parts.join("; ")}; artifact=${v.artifact_path ?? "unknown"}` }];
       },
     },
     isConcurrencySafe: () => true,
     async execute(rawArgs: Record<string, unknown>, exec: ToolExecContext) {
-      const args = rawArgs as { workspace_id: string; mode?: "graph" | "search-index"; rebuild?: boolean };
-      return runBuild({
-        workspace_id: args.workspace_id,
-        mode: args.mode ?? "graph",
-        ...(args.rebuild === undefined ? {} : { rebuild: args.rebuild }),
-      }, exec);
+      const args = rawArgs as { workspace_id: string; mode?: string };
+      if (args.mode !== undefined && args.mode !== "graph") {
+        return { workspace_id: args.workspace_id, kind: "inline", error: { code: "unsupported-mode" } };
+      }
+      return runBuild({ workspace_id: args.workspace_id, mode: "graph" }, exec);
     },
   })));
 
