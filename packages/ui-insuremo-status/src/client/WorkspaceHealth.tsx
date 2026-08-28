@@ -54,15 +54,16 @@ function Glyphs(props: {
   row: WorkspaceHealthRow;
 }): ReactNode {
   if (!props.row.detected) return null;
-  const iComposerLabel = props.row.autoBindState === "bound" ? props.t("health.iComposerBound") : props.t("health.iComposerPending");
+  // iComposer is a detected/not-detected signal only.
+  const iComposerLabel = props.t("health.iComposer");
   const graphLabel = props.row.graphReady ? props.t("health.graphReady") : props.t("health.graphNotReady");
   const explainLabel = props.row.explainReady ? props.t("health.explainReady") : props.t("health.explainNotReady");
   return (
     <span className={css.rowIcons} data-icomposer-workspace-health-icons="" onClick={event => event.stopPropagation()}>
       <Tooltip label={iComposerLabel} side="top" delayMs={400}>
         <span
-          className={`${css.icon} ${props.row.autoBindState === "pending" ? css.iconPending : ""}`}
-          data-state={props.row.autoBindState}
+          className={css.icon}
+          data-state="detected"
           role="img"
           tabIndex={0}
           aria-label={iComposerLabel}

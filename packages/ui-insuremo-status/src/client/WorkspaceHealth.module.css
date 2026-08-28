@@ -14,8 +14,8 @@
   flex: none;
 }
 
-/* Health glyph shell: consistent 16px vector, positioned for the pending
-   corner dot; NO square/dot box, no dashed border anywhere. */
+/* Health glyph shell: consistent 16px vector; NO square/dot box and no
+   dashed border. */
 .rowIcons .icon {
   position: relative;
   width: 16px;
@@ -37,36 +37,20 @@
   outline-offset: 2px;
 }
 
-/* ON / bound: vivid vector with a soft badge background (only real tokens). */
-.rowIcons .icon[data-state="on"],
-.rowIcons .icon[data-state="bound"] {
+/* DETECTED: iComposer uses the brand accent, distinct from health success. */
+.rowIcons .icon[data-state="detected"] {
+  color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent);
+}
+
+/* ON: graph/explain health uses the success token. */
+.rowIcons .icon[data-state="on"] {
   color: var(--dsw-alias-state-success-primary);
   background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
 }
 
 /* OFF: the same outline vector, dimmed to label-tertiary at ~32% opacity. */
-.rowIcons .icon[data-state="off"],
-.rowIcons .icon[data-state="none"] {
+.rowIcons .icon[data-state="off"] {
   color: var(--dsw-alias-label-tertiary);
   opacity: 0.32;
-}
-
-/* Pending: warn color, no box/ring — a subtle corner dot reads "awaiting". */
-.rowIcons .icon.iconPending,
-.rowIcons .icon[data-state="pending"] {
-  color: var(--dsw-alias-state-warn-primary);
-  background: transparent;
-  opacity: 1;
-}
-
-/* pending corner dot: absolute, no layout shift, not wrapping the glyph. */
-.rowIcons .iconPending::after {
-  content: "";
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--dsw-alias-state-warn-primary);
 }

@@ -234,9 +234,10 @@ describe("theme variable regression (TASK-040)", () => {
     }
     const health = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.module.css"), "utf8");
     expect(health).toContain("var(--dsw-alias-state-success-primary)");
-    expect(health).toContain("var(--dsw-alias-state-warn-primary)");
+    expect(health).not.toContain("var(--dsw-alias-state-warn-primary)");
     expect(health).toContain("var(--dsw-alias-label-tertiary)");
-    expect(health).toContain("iconPending");
+    expect(health).not.toContain("iconPending");
+    expect(health).not.toContain('data-state="pending"');
     const picker = readFileSync(resolve(process.cwd(), "src/client/ProfilePicker.module.css"), "utf8");
     expect(picker).toContain("var(--dsw-alias-state-error-primary)");
   });
@@ -323,7 +324,9 @@ describe("TASK-044 A icon redesign", () => {
     const css = readFileSync(resolve(process.cwd(), "src/client/WorkspaceHealth.module.css"), "utf8");
     // ON uses only real state tokens
     expect(css).toContain("var(--dsw-alias-state-success-primary)");
-    expect(css).toContain("var(--dsw-alias-state-warn-primary)");
+    expect(css).not.toContain("var(--dsw-alias-state-warn-primary)");
+    expect(css).not.toContain("data-state=\"pending\"");
+    expect(css).not.toContain("iconPending");
     expect(css).toContain("opacity: 0.32");
   });
 });

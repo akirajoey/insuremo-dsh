@@ -2,6 +2,7 @@
 export const zh = {
   label: "InsureMO · 未配置",
   "health.strip": "工作区健康状态",
+  "health.iComposer": "iComposer",
   "health.iComposerBound": "iComposer · 已关联",
   "health.iComposerPending": "iComposer · 待关联",
   "health.iComposerPendingHint": "已检测 iComposer 项目；本地 ICI 已可用，binding 仅用于远程写操作",
@@ -21,6 +22,7 @@ export type InsuremoStatusLocaleKey = keyof typeof zh;
 export const en = {
   label: "InsureMO · Not configured",
   "health.strip": "Workspace health",
+  "health.iComposer": "iComposer",
   "health.iComposerBound": "iComposer · Bound",
   "health.iComposerPending": "iComposer · Pending",
   "health.iComposerPendingHint": "iComposer project detected; local ICI is ready. Binding is only required for remote write operations",

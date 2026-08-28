@@ -179,6 +179,10 @@ describe("TASK-064 raster brand assets", () => {
     const css = await (await import("node:fs/promises")).readFile(`${process.cwd()}/src/client/BrandChrome.module.css`, "utf8");
     expect(css).toContain("body[data-ds-dark-theme]");
     expect(light.className).not.toBe(dark.className);
+    const healthCss = await (await import("node:fs/promises")).readFile(`${process.cwd()}/src/client/WorkspaceHealth.module.css`, "utf8");
+    expect(healthCss).toContain('var(--dsw-alias-brand-primary)');
+    expect(healthCss).toMatch(/\.icon\[data-state="detected"\][\\s\\S]*?color: var\\(--dsw-alias-brand-primary\\)/);
+    expect(healthCss).not.toMatch(/\.icon\[data-state="detected"\][^}]*state-success-primary/);
   });
 });
 
@@ -239,6 +243,36 @@ describe("TASK-064 owned asset route", () => {
   });
 });
 
+describe("TASK-065 workspace glyph semantics", () => {
+  it("uses only detected state for iComposer across pending and bound payloads", async () => {
+    expect(en["health.iComposer"]).toBe("iComposer");
+    expect(zh["health.iComposer"]).toBe("iComposer");
+    const pending = treeitem("Pending");
+    const bound = treeitem("Bound");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ workspaces: [
+      { workspaceId: "w1", displayName: "Pending", detected: true, autoBindState: "pending", graphReady: true, explainReady: true },
+      { workspaceId: "w2", displayName: "Bound", detected: true, autoBindState: "bound", graphReady: false, explainReady: false },
+    ] }), { status: 200 })));
+    render(<WorkspaceHealth t={t} wide />);
+    const iconsFor = async (item: HTMLElement): Promise<HTMLElement[]> => vi.waitFor(() => {
+      const found = [...item.querySelectorAll<HTMLElement>('[data-icomposer-workspace-health-icons] [role="img"]')];
+      expect(found).toHaveLength(3);
+      return found;
+    });
+    const pendingIcons = await iconsFor(pending);
+    const boundIcons = await iconsFor(bound);
+    for (const first of [pendingIcons[0]!, boundIcons[0]!]) {
+      expect(first.getAttribute("aria-label")).toBe(en["health.iComposer"]);
+      expect(first.getAttribute("data-state")).toBe("detected");
+      expect(first.className).not.toContain("iconPending");
+    }
+    expect(document.querySelector('[data-state="pending"]')).toBeNull();
+    await act(async () => { fireEvent.focus(boundIcons[0]!); await Promise.resolve(); });
+    expect(screen.getByRole("tooltip").textContent).toBe(en["health.iComposer"]);
+    await act(async () => { fireEvent.blur(boundIcons[0]!); await Promise.resolve(); });
+  });
+});
+
 describe("TASK-064 workspace glyph tooltips", () => {
   it("shows each exact localized status on delayed hover and immediate keyboard focus", async () => {
     const item = treeitem("Detected");
@@ -253,15 +287,18 @@ describe("TASK-064 workspace glyph tooltips", () => {
       expect(found).toHaveLength(3);
       return found;
     });
-    expect(icons.map(icon => icon.getAttribute("aria-label"))).toEqual([en["health.iComposerPending"], en["health.graphNotReady"], en["health.explainReady"]]);
+    expect(icons.map(icon => icon.getAttribute("aria-label"))).toEqual([en["health.iComposer"], en["health.graphNotReady"], en["health.explainReady"]]);
     expect(icons.map(icon => icon.tabIndex)).toEqual([0, 0, 0]);
+    expect(icons[0]?.getAttribute("data-state")).toBe("detected");
+    expect(icons[0]?.className).not.toContain("iconPending");
+    expect(item.querySelector('[data-state="pending"]')).toBeNull();
     vi.useFakeTimers();
     fireEvent.mouseEnter(icons[0]!);
     expect(screen.queryByRole("tooltip")).toBeNull();
     await act(async () => { vi.advanceTimersByTime(399); await Promise.resolve(); });
     expect(screen.queryByRole("tooltip")).toBeNull();
     await act(async () => { vi.advanceTimersByTime(1); await Promise.resolve(); });
-    expect(screen.getByRole("tooltip").textContent).toBe(en["health.iComposerPending"]);
+    expect(screen.getByRole("tooltip").textContent).toBe(en["health.iComposer"]);
     await act(async () => { fireEvent.mouseLeave(icons[0]!); await Promise.resolve(); });
     expect(screen.queryByRole("tooltip")).toBeNull();
     await act(async () => { fireEvent.focus(icons[1]!); await Promise.resolve(); });
