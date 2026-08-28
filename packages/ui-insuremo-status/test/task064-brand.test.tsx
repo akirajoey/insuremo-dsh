@@ -180,9 +180,11 @@ describe("TASK-064 raster brand assets", () => {
     expect(css).toContain("body[data-ds-dark-theme]");
     expect(light.className).not.toBe(dark.className);
     const healthCss = await (await import("node:fs/promises")).readFile(`${process.cwd()}/src/client/WorkspaceHealth.module.css`, "utf8");
-    expect(healthCss).toContain('var(--dsw-alias-brand-primary)');
-    expect(healthCss).toMatch(/\.icon\[data-state="detected"\][\\s\\S]*?color: var\\(--dsw-alias-brand-primary\\)/);
-    expect(healthCss).not.toMatch(/\.icon\[data-state="detected"\][^}]*state-success-primary/);
+    const detectedRuleStart = healthCss.indexOf('.rowIcons .icon[data-state="detected"]');
+    const detectedRule = healthCss.slice(detectedRuleStart, healthCss.indexOf("}", detectedRuleStart));
+    expect(detectedRuleStart).toBeGreaterThanOrEqual(0);
+    expect(detectedRule).toContain("var(--dsw-alias-brand-primary)");
+    expect(detectedRule).not.toContain("var(--dsw-alias-state-success-primary)");
   });
 });
 
@@ -261,6 +263,8 @@ describe("TASK-065 workspace glyph semantics", () => {
     });
     const pendingIcons = await iconsFor(pending);
     const boundIcons = await iconsFor(bound);
+    expect(pendingIcons.map(icon => icon.getAttribute("data-state"))).toEqual(["detected", "on", "on"]);
+    expect(boundIcons.map(icon => icon.getAttribute("data-state"))).toEqual(["detected", "off", "off"]);
     for (const first of [pendingIcons[0]!, boundIcons[0]!]) {
       expect(first.getAttribute("aria-label")).toBe(en["health.iComposer"]);
       expect(first.getAttribute("data-state")).toBe("detected");
@@ -288,6 +292,7 @@ describe("TASK-064 workspace glyph tooltips", () => {
       return found;
     });
     expect(icons.map(icon => icon.getAttribute("aria-label"))).toEqual([en["health.iComposer"], en["health.graphNotReady"], en["health.explainReady"]]);
+    expect(icons.map(icon => icon.getAttribute("data-state"))).toEqual(["detected", "off", "on"]);
     expect(icons.map(icon => icon.tabIndex)).toEqual([0, 0, 0]);
     expect(icons[0]?.getAttribute("data-state")).toBe("detected");
     expect(icons[0]?.className).not.toContain("iconPending");

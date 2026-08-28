@@ -187,7 +187,7 @@ describe("TASK-063 workspace health detection gate", () => {
     await eventually(() => expect(item.querySelectorAll("[data-icomposer-workspace-health-icons] > *")).toHaveLength(3));
     const icons = [...item.querySelectorAll<HTMLElement>("[data-icomposer-workspace-health-icons] > *")];
     expect(icons.map(icon => icon.getAttribute("aria-label"))).toEqual([en["health.iComposer"], en["health.graphNotReady"], en["health.explainReady"]]);
-    expect(icons[0]?.getAttribute("data-state")).toBe("on");
+    expect(icons[0]?.getAttribute("data-state")).toBe("detected");
     expect(icons[0]?.className).not.toContain("iconPending");
     expect(icons.map(icon => icon.getAttribute("title"))).toEqual([null, null, null]);
     expect(icons.map(icon => icon.getAttribute("tabindex"))).toEqual(["0", "0", "0"]);
