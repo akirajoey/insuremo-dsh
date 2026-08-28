@@ -85,6 +85,8 @@ test("TASK-059 final plus failed retries to final plus awaiting, then confirms o
 });
 
 function toolCall(id: string, name: string, args: unknown): any[] { const text = JSON.stringify(args); return [{ type: "block-start", index: 0, blockType: "tool-call" }, { type: "tool-call-delta", index: 0, id, name, argumentsDelta: text }, { type: "block-end", index: 0, block: { type: "tool-call", id, name, arguments: text } }, { type: "finish", reason: { kind: "tool-calls" } }]; }
+function toolCalls(calls: readonly { name: string; args: unknown }[]): any[] { return [...calls.flatMap((call, index) => { const text = JSON.stringify(call.args); const id = `${call.name}-${index}`; return [{ type: "block-start", index, blockType: "tool-call" }, { type: "tool-call-delta", index, id, name: call.name, argumentsDelta: text }, { type: "block-end", index, block: { type: "tool-call", id, name: call.name, arguments: text } }]; }), { type: "finish", reason: { kind: "tool-calls" } }]; }
+async function scheduleNone(fx: Awaited<ReturnType<typeof fixture>>, jobId: string): Promise<any> { const current = await readJobRecord(fx.root, jobId); const none = await updateJobRecord(fx.root, jobId, current!.revision, { referenceTarget: { path: "", kind: "none" }, folderPath: "" }); return schedule(fx.root, jobId, none.revision); }
 async function realHarness(adapter: LlmAdapter): Promise<any> { const ctx: any = new Context(); await ctx.plugin(LlmRuntime); await ctx.plugin(SessionStore); await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime); await ctx.plugin(AgentRegistry); await ctx.plugin(AgentLoop, { agents: [] }); ctx.llm.registerAdapter(["mvp"], adapter); return ctx; }
 class AbsoluteReferenceAdapter extends LlmAdapter {
   calls = 0; readonly requests: any[] = [];
@@ -111,7 +113,7 @@ class ToolFailureAdapter extends LlmAdapter {
 async function schedule(root: string, jobId: string, revision: number): Promise<any> { return updateJobRecord(root, jobId, revision, { provider: "mvp", model: "mvp-model", status: "scheduled", notBefore: new Date(Date.now() - 1000).toISOString() }); }
 
 test("TASK-059 no-submit first idle gets one fixed corrective turn, then can submit", async () => {
-  const fx = await fixture(); const adapter = new FirstIdleThenSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task059-corrective-submit"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try { const scheduled = await schedule(fx.root, fx.jobs[0].job.jobId, fx.jobs[0].job.revision); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); assert.equal(adapter.calls, 2); assert.equal((await readJobRecord(fx.root, scheduled.jobId))?.status, "final"); assert.ok(await readValidatedExplainFinal(fx.root, "AlphaAPI", "recovery")); const correction = String(adapter.requests[1]?.messages?.at(-1)?.content?.[0]?.text ?? ""); assert.match(correction, /ici_explain_list.*ici_explain_read.*ici_explain_submit.*ici_explain_submit/); assert.doesNotMatch(correction, /source|paths?|secret/i); } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+  const fx = await fixture(); const adapter = new FirstIdleThenSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task059-corrective-submit"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try { const scheduled = await schedule(fx.root, fx.jobs[0].job.jobId, fx.jobs[0].job.revision); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); assert.equal(adapter.calls, 2); assert.equal((await readJobRecord(fx.root, scheduled.jobId))?.status, "final"); assert.ok(await readValidatedExplainFinal(fx.root, "AlphaAPI", "recovery")); const correction = String(adapter.requests[1]?.messages?.at(-1)?.content?.[0]?.text ?? ""); assert.match(correction, /ici_explain_list\/read only if needed/); assert.match(correction, /ici_explain_submit/); assert.doesNotMatch(correction, /must now use ici_explain_list.*ici_explain_read/); assert.doesNotMatch(correction, /absolute|secret|Bearer|\/Users\/|\/home\//i); } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
 });
 
 test("TASK-059 second idle without submit fails model-failed after exactly two turns", async () => {
@@ -140,6 +142,36 @@ class NoneSubmitAdapter extends LlmAdapter {
   calls = 0; readonly requests: any[] = [];
   override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
   async *stream(options: any): AsyncIterable<any> { this.requests.push(options); this.calls++; if (this.calls === 1) yield* toolCall("submit", "ici_explain_submit", { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/AlphaAPI.groovy#1"] }); else yield { type: "finish", reason: { kind: "stop" } }; }
+}
+class NoneReadsThenSubmitAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); this.calls++; yield* toolCalls([{ name: "ici_explain_list", args: { path: "../" } }, { name: "ici_explain_read", args: { path: "ref_doc/guide.md" } }, { name: "ici_explain_read", args: { path: "other.md" } }, { name: "ici_explain_read", args: { path: "../secret.md" } }, { name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/AlphaAPI.groovy#1"] } }]); }
+}
+class InvalidThenValidAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); this.calls++; yield* toolCalls([{ name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"] } }, { name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"], evidence: ["src/AlphaAPI.groovy:1"] } }, { name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"], evidence: ["src/AlphaAPI.groovy#1"] } }]); }
+}
+class MissingThenValidAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); this.calls++; yield* toolCalls([{ name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"] } }, { name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"], evidence: ["src/AlphaAPI.groovy#1"] } }]); }
+}
+class ThreeInvalidAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); this.calls++; yield* toolCalls([{ name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"] } }, { name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"], evidence: ["src/AlphaAPI.groovy:1"] } }, { name: "ici_explain_submit", args: { technical: "technical", business: "business", flow: ["step"], evidence: [{ path: "src/AlphaAPI.groovy", line: 1 }] } }]); }
+}
+class SensitiveSubmitAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); this.calls++; yield* toolCall("sensitive", "ici_explain_submit", { technical: "Authorization: Bearer hidden /Users/alice/file", business: "business", flow: ["step"], evidence: ["src/AlphaAPI.groovy#1"] }); }
+}
+class InvalidIdleThenValidAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); const call = this.calls++; if (call === 0) { const chunks = toolCall("invalid", "ici_explain_submit", { technical: "technical", business: "business", flow: ["step"] }); chunks[chunks.length - 1] = { type: "finish", reason: { kind: "stop" } }; yield* chunks; } else if (call === 1) { yield { type: "finish", reason: { kind: "stop" } }; } else { yield* toolCall("valid", "ici_explain_submit", { technical: "technical", business: "business", flow: ["step"], evidence: ["src/AlphaAPI.groovy#1"] }); } }
 }
 
 test("TASK-060 stream abort is attributed stream-aborted, gets one retry, then submits", async () => {
@@ -195,4 +227,55 @@ test("TASK-061 single none confirm schedules, restricted child submits without r
     const correction = JSON.stringify(adapter.requests[0]?.messages?.[0] ?? ""); assert.match(correction, /No optional reference selected/);
     assert.equal(adapter.calls, 1);
   } finally { parent.cancel("cancelled"); await parent.whenIdle(); await setup.fiber.dispose(); await fx.cleanup(); }
+});
+
+test("TASK-062 none read denials stay denied and allow valid submit with exact three tools", async () => {
+  const fx = await fixture(); const adapter = new NoneReadsThenSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task062-none-reads"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try {
+    const scheduled = await scheduleNone(fx, jobIds[0]); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent);
+    const after = await readJobRecord(fx.root, scheduled.jobId); assert.equal(after?.status, "final"); assert.equal(adapter.calls, 1);
+    assert.deepEqual(adapter.requests[0].tools.map((tool: any) => tool.name), ["ici_explain_list", "ici_explain_read", "ici_explain_submit"]);
+    const submit = adapter.requests[0].tools.find((tool: any) => tool.name === "ici_explain_submit"); assert.equal(submit.parameters.properties.flow.items.type, "string"); assert.equal(submit.parameters.properties.flow.minItems, 0); assert.equal(submit.parameters.properties.flow.maxItems, 64); assert.equal(submit.parameters.properties.evidence.items.type, "string"); assert.equal(submit.parameters.properties.evidence.minItems, 1); assert.equal(submit.parameters.properties.evidence.maxItems, 64); assert.equal(String(submit.parameters.properties.evidence.items.pattern).includes("#\\d"), true);
+    const request = JSON.stringify(adapter.requests[0]); assert.equal(request.includes("--- prepared source"), true); assert.equal(request.includes("src/AlphaAPI.groovy#"), true); assert.equal(request.includes("do not call ici_explain_list or ici_explain_read"), true); assert.equal(request.includes("retried up to three attempts"), true);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-062 invalid submit attempts one and two recover to valid output", async () => {
+  const fx = await fixture(); const adapter = new InvalidThenValidAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task062-invalid-valid"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try {
+    const scheduled = await scheduleNone(fx, jobIds[0]); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId);
+    assert.equal(after?.status, "final"); assert.equal(adapter.calls, 1); assert.equal(after?.error, undefined);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-062 missing evidence recovers on the second submit", async () => {
+  const fx = await fixture(); const adapter = new MissingThenValidAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task062-missing-valid"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try {
+    const scheduled = await scheduleNone(fx, jobIds[0]); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); assert.equal((await readJobRecord(fx.root, scheduled.jobId))?.status, "final"); assert.equal(adapter.calls, 1);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-062 third invalid submit is sticky and bounded", async () => {
+  const fx = await fixture(); const adapter = new ThreeInvalidAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task062-three-invalid"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try {
+    const scheduled = await scheduleNone(fx, jobIds[0]); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId);
+    assert.equal(after?.status, "failed"); assert.equal(after?.error, "schema-invalid"); assert.equal(adapter.calls, 1);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-062 sensitive submit output remains immediately fatal", async () => {
+  const fx = await fixture(); const adapter = new SensitiveSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task062-sensitive-submit"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try {
+    const scheduled = await schedule(fx.root, fx.jobs[0].job.jobId, fx.jobs[0].job.revision); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId);
+    assert.equal(after?.status, "failed"); assert.equal(after?.error, "schema-invalid"); assert.equal(adapter.calls, 1);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-062 none corrective prompts submit only and stream retry stays bounded", async () => {
+  const fx = await fixture(); const adapter = new InvalidIdleThenValidAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task062-none-corrective"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try {
+    const scheduled = await scheduleNone(fx, jobIds[0]); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); assert.equal((await readJobRecord(fx.root, scheduled.jobId))?.status, "final");
+    assert.match(JSON.stringify(adapter.requests[1]), /schema-invalid: submit exactly technical\/business strings/); const correction = String(adapter.requests[2]?.messages?.at(-1)?.content?.[0]?.text ?? ""); assert.match(correction, /No optional reference selected/); assert.match(correction, /do not call ici_explain_list or ici_explain_read/); assert.match(correction, /ici_explain_submit/); assert.equal(correction.includes("list/read only if needed"), false);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-062 none stream corrective does not request reference reads", async () => {
+  const fx = await fixture(); const adapter = new AbortedOnceThenSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task062-none-stream"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try {
+    const scheduled = await scheduleNone(fx, jobIds[0]); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); assert.equal((await readJobRecord(fx.root, scheduled.jobId))?.status, "final");
+    const correction = String(adapter.requests[1]?.messages?.at(-1)?.content?.[0]?.text ?? ""); assert.match(correction, /previous turn was aborted/); assert.match(correction, /No optional reference selected/); assert.match(correction, /do not call ici_explain_list or ici_explain_read/); assert.equal(correction.includes("list/read only if needed"), false);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
 });
