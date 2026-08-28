@@ -58,6 +58,32 @@ describe("TASK-056 batch ICI toolview", () => {
     const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull()); expect(view.getByText(zh["status.running"])).toBeTruthy(); expect(view.getByRole("button", { name: zh["explain.batchCancelAll"] })).toBeTruthy(); expect(view.queryByRole("button", { name: zh["explain.batchRetryFailed"] })).toBeNull(); expect(view.queryByRole("button", { name: zh["explain.start"] })).toBeNull();
   });
 
+  it("TASK-061 defaults to none reference, Start enabled with only provider/model, choose then clear", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(`/batches/${batchId}/status`)) return new Response(JSON.stringify(batchStatus("awaiting-input")), { status: 200 });
+      if (url.includes(`/batches/${batchId}/native-pick`)) return new Response(JSON.stringify({ ok: true, result: { path: "ref_doc/picked", kind: "directory" } }));
+      if (url.includes(`/batches/${batchId}/confirm`)) { expect(JSON.parse(String(init?.body)).referenceTarget).toEqual({ path: "", kind: "none" }); return new Response(JSON.stringify({ ok: true, result: { batchId, status: "scheduled" } })); }
+      return new Response(JSON.stringify({ ok: false }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderRoot();
+    await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull());
+    expect(view.getByText(zh["explain.noReference"])).toBeTruthy();
+    const start = view.getByRole("button", { name: zh["explain.start"] });
+    expect((start as HTMLButtonElement).disabled).toBe(false);
+    const chooseFolder = view.getByRole("button", { name: zh["explain.chooseDirectory"] });
+    chooseFolder.click();
+    await vi.waitFor(() => expect(view.queryByText("ref_doc/picked")).toBeTruthy());
+    const clear = view.getByRole("button", { name: zh["explain.noReference"] });
+    clear.click();
+    await vi.waitFor(() => expect(view.queryByText("ref_doc/picked")).toBeNull());
+    const confirmButton = view.getByRole("button", { name: zh["explain.start"] });
+    confirmButton.click();
+    await vi.waitFor(() => expect(JSON.stringify(fetchMock.mock.calls)).toContain("confirm"));
+    expect((view.container.textContent ?? "").includes("kind")).toBe(false);
+  });
+
   it("TASK-060 report rows show session, provider/model, times, and error without absolute paths", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus("failed")), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull());

@@ -73,6 +73,7 @@ export const zh = {
   "explain.session": "会话",
   "explain.startedAt": "开始",
   "explain.finishedAt": "结束",
+  "explain.noReference": "不使用参考资料",
 } as const satisfies Record<string, string>;
 
 export type WorkbenchJobLocaleKey = keyof typeof zh;
@@ -151,4 +152,5 @@ export const en = {
   "explain.session": "Session",
   "explain.startedAt": "started",
   "explain.finishedAt": "finished",
+  "explain.noReference": "No reference",
 } as const satisfies Record<WorkbenchJobLocaleKey, string>;

@@ -9,7 +9,7 @@ export const PROFILE_SECTION = "insuremo-active-profile";
 /** A NON-DISPLAY metadata section carrying only the profile digest token. */
 export const PROFILE_DIGEST_SECTION = "insuremo-profile-digest";
 /** Metadata version for the authoritative policy text (Task045 migration). */
-export const PROFILE_POLICY_VERSION = "2";
+export const PROFILE_POLICY_VERSION = "3";
 /** Compact checkpoint plugin marker (Harness compaction checkpoint source). */
 const COMPACT_PLUGIN = "compact";
 
@@ -19,11 +19,26 @@ export function shellQuote(value: string): string {
 
 function profilePolicyText(profile: InsuremoProfile, changed = false): string {
   if (profile.name === null) {
-    return `${changed ? "InsureMO authoritative profile changed: none. " : "InsureMO authoritative profile for this session: none. "}Select or log in to a profile first; do not execute remote/auth commands until one is selected.`;
+    return `[InsureMO profile]
+selection: none
+changed: ${changed ? "true" : "false"}
+authority: Workbench Active Profile
+rules:
+- Do not run remote/auth operations.
+- Ask the user to select or log in to a profile.`;
   }
-  const env = profile.env === undefined ? "" : ` (env ${profile.env})`;
+  const env = profile.env === undefined ? "" : `
+environment: ${JSON.stringify(profile.env)}`;
   const quoted = shellQuote(profile.name);
-  return `${changed ? "InsureMO authoritative profile changed: " : "InsureMO authoritative profile for this session: "}${profile.name}${env}. This value overrides cwd workspace/global default resolution. Every remote/auth imo command must pass --profile ${quoted}; never rely on an implicit default. Examples: imo auth prepare --profile ${quoted} --json; imo devops --profile ${quoted} cicd list. If a command or script does not support explicit --profile, stop and report; do not silently fall back to the cwd default.`;
+  return `[InsureMO profile]
+selection: selected
+changed: ${changed ? "true" : "false"}
+name: ${JSON.stringify(profile.name)}${env}
+authority: Workbench Active Profile
+rules:
+- Remote/auth \`imo\` commands: always pass \`--profile ${quoted}\`.
+- Never use cwd/global defaults.
+- If explicit \`--profile\` is unsupported, stop and report.`;
 }
 
 /** Per-session current profile fact. */

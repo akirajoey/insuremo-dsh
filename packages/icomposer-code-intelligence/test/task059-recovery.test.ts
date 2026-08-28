@@ -13,7 +13,7 @@ import AgentRegistry from "@deepseek-ai/dsh-agent";
 import AgentLoop from "@deepseek-ai/dsh-agent-loop";
 import { buildGraph } from "../src/graph.ts";
 import { ExplainRoutesService } from "../src/explain-routes.ts";
-import { computeGraphDigest, createJobRecord, prepareExplain, readBatchRecord, readJobRecord, readReferenceText, updateJobRecord, writeBatchRecord } from "../src/explain-artifacts.ts";
+import { computeGraphDigest, createJobRecord, finalizeExplain, listReferenceEntries, NONE_REFERENCE_TARGET, prepareExplain, readBatchRecord, readJobRecord, readReferenceText, updateJobRecord, writeBatchRecord } from "../src/explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "../src/engine-version.ts";
 import { processConfirmedJob } from "../src/explain-scheduler.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
@@ -136,6 +136,12 @@ class AlwaysAbortedAdapter2 extends LlmAdapter {
   async *stream(): AsyncIterable<any> { this.calls++; yield* abortedFinish(); }
 }
 
+class NoneSubmitAdapter extends LlmAdapter {
+  calls = 0; readonly requests: any[] = [];
+  override resolveModel(provider: string, model: string): Promise<any> { return Promise.resolve({ provider, id: model, name: model }); }
+  async *stream(options: any): AsyncIterable<any> { this.requests.push(options); this.calls++; if (this.calls === 1) yield* toolCall("submit", "ici_explain_submit", { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/AlphaAPI.groovy#1"] }); else yield { type: "finish", reason: { kind: "stop" } }; }
+}
+
 test("TASK-060 stream abort is attributed stream-aborted, gets one retry, then submits", async () => {
   const fx = await fixture(); const adapter = new AbortedOnceThenSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task060-abort-retry"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); try { const scheduled = await schedule(fx.root, fx.jobs[0].job.jobId, fx.jobs[0].job.revision); await processConfirmedJob(ctx.llm, fx.root, scheduled.jobId, new AbortController().signal, ctx, parent); const after = await readJobRecord(fx.root, scheduled.jobId); assert.equal(adapter.calls, 2); assert.equal(after?.status, "final"); assert.ok(after?.childSessionId && /^[0-9a-f-]{36}$/i.test(after.childSessionId)); assert.ok(after?.startedAt?.endsWith("Z")); assert.ok(after?.finishedAt?.endsWith("Z")); const correction = String(adapter.requests[1]?.messages?.at(-1)?.content?.[0]?.text ?? ""); assert.match(correction, /aborted/); assert.match(correction, /ici_explain_submit/); } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
 });
@@ -157,4 +163,36 @@ test("TASK-060 status routes expose run metadata without absolute paths", async 
     const single = response(); await setup.handler(req("GET", `/api/icomposer-workbench/ici/explain/jobs/${jobIds[0]}/status`), single); const singleView = decode(single);
     assert.equal(singleView.result.job.childSessionId, sessionId); assert.equal(singleView.result.job.startedAt, startedAt); assert.equal(singleView.result.job.finishedAt, finishedAt); assert.equal(single.body.includes(fx.root), false);
   } finally { await setup.fiber.dispose(); await fx.cleanup(); }
+});
+
+test("TASK-061 none target: list empty, read denied, no filesystem assertion", async () => {
+  const fx = await fixture(); try {
+    assert.deepEqual(await listReferenceEntries(fx.root, NONE_REFERENCE_TARGET), []);
+    assert.deepEqual(await listReferenceEntries(fx.root, NONE_REFERENCE_TARGET, "ref_doc"), []);
+    await assert.rejects(() => readReferenceText(fx.root, NONE_REFERENCE_TARGET, "ref_doc/guide.md"));
+    await assert.rejects(() => readReferenceText(fx.root, { path: "ref_doc", kind: "none" }, "ref_doc/guide.md"));
+    await assert.rejects(() => listReferenceEntries(fx.root, { path: "ref_doc", kind: "none" }));
+  } finally { await fx.cleanup(); }
+});
+
+test("TASK-061 finalize rejects nonempty folderReads for none target", async () => {
+  const fx = await fixture(); try {
+    const analysis = { api: { technical: "technical", business: "business", flow: ["API reads a request"], evidence: ["src/AlphaAPI.groovy#1"] } };
+    const current = { sourceFingerprint: fx.jobs[0].job.sourceFingerprint, graphDigest: fx.jobs[0].job.graphDigest, engineVersion: ICI_ENGINE_VERSION };
+    await assert.rejects(() => finalizeExplain(fx.root, "recovery", fx.jobs[0].prepared.artifactPath, analysis, current, undefined, "3333333333333333", [{ path: "ref_doc/guide.md", sha256: "a".repeat(64) }], "", NONE_REFERENCE_TARGET), /folder-changed/);
+    const ok = await finalizeExplain(fx.root, "recovery", fx.jobs[0].prepared.artifactPath, analysis, current, undefined, "4444444444444444", [], "", NONE_REFERENCE_TARGET);
+    assert.ok(ok.artifactPath.includes("4444444444444444"));
+  } finally { await fx.cleanup(); }
+});
+
+test("TASK-061 single none confirm schedules, restricted child submits without reference, final records none", async () => {
+  const fx = await fixture(); const adapter = new NoneSubmitAdapter(); const ctx = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task061-none-child"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); const setup = await routeFixture(fx); try {
+    const confirmBodyNone = { ...confirmBody, referenceTarget: { path: "", kind: "none" }, notBefore: new Date(Date.now() - 1000).toISOString() };
+    const confirmed = response(); await setup.handler(req("POST", `/api/icomposer-workbench/ici/explain/batches/${batchId}/confirm`, confirmBodyNone), confirmed); assert.equal(decode(confirmed).ok, true); assert.equal(decode(confirmed).result.jobs, 4);
+    const job = await readJobRecord(fx.root, jobIds[0]); assert.equal(job?.status, "scheduled"); assert.equal(job?.referenceTarget?.kind, "none"); assert.equal(job?.folderPath, "");
+    await processConfirmedJob(ctx.llm, fx.root, jobIds[0], new AbortController().signal, ctx, parent);
+    const after = await readJobRecord(fx.root, jobIds[0]); assert.equal(after?.status, "final"); assert.equal(after?.referenceTarget?.kind, "none");
+    const correction = JSON.stringify(adapter.requests[0]?.messages?.[0] ?? ""); assert.match(correction, /No optional reference selected/);
+    assert.equal(adapter.calls, 1);
+  } finally { parent.cancel("cancelled"); await parent.whenIdle(); await setup.fiber.dispose(); await fx.cleanup(); }
 });

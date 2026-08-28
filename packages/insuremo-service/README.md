@@ -200,6 +200,15 @@ sanitized descriptor, never the raw URL) and non-install receipts carry an
 
 ## Auth profile and prepare lease
 
+`ImoProfileContextService` injects one compact structured block per session
+(step 1, digest dedup, compact re-assert): header `[InsureMO profile]`,
+`selection: selected|none`, independent `changed:` flag, JSON-string-quoted
+`name:`/`environment:` (when present), `authority: Workbench Active Profile`,
+and three short rules including the shell-quoted `--profile` requirement. The
+none variant fail-closes remote/auth work and is bounded to 260 bytes;
+selected is bounded to 560 bytes even at the 128-character profile-name and
+32-character environment maximum.
+
 `ImoAuthService` provides `ctx.imoAuth` as the only authentication seam for
 future remote tools:
 

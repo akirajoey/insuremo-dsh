@@ -33,11 +33,38 @@ test("ICI context injects only for exact detected/bound workspace and deduplicat
     assert.equal(source?.plugin, ICI_CONTEXT_PLUGIN);
     assert.equal(source?.workspaceId, "ws-a");
     const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
-    assert.match(text, /ici_build/);
-    assert.match(text, /ici_explain writes only schema-3 prepare metadata/);
-    assert.doesNotMatch(text, /query\/search\/explain.*read-only/);
+    assert.match(text, /\[iComposer workspace\]/);
+    assert.match(text, /workspace_id: ws-a/);
+    assert.match(text, /  graph: \[ici_build, ici_status\]/);
+    assert.match(text, /  inspect: \[ici_query, ici_search\]/);
+    assert.match(text, /  explain: \[ici_explain\]/);
+    assert.match(text, /  assets: \[icomposer_catalog_list\]/);
+    assert.match(text, /  sdk: \[icomposer_sdk_query\]/);
+    assert.match(text, /  verify: \[icomposer_verify_utils\]/);
+    assert.match(text, /auth:\n  none: graph, query, explain, assets, sdk, non-semantic search\n  active_profile: semantic embedding\/search, verify/);
+    assert.match(text, /- Use workspace_id exactly; tool schemas are authoritative\./);
+    assert.match(text, /- If the graph is stale, run ici_build before ici_explain\./);
+    assert.match(text, /model is required; reference and earliest start are optional\./);
+    assert.match(text, /- Use only artifact paths returned by tools\./);
+    assert.match(text, /- active_profile ops: Workbench Active Profile; never CLI defaults\./);
+    assert.doesNotMatch(text, /This is iComposer workspace/);
+    assert.doesNotMatch(text, /canonical path|artifact layout|finals\//);
+    assert.doesNotMatch(text, /imo auth|imo devops/);
+    assert.equal(Buffer.byteLength(text, "utf8") <= 850, true);
     assert.equal((await step(fx.service, current)).messages?.length, 0);
     assert.equal((await step(fx.service, current, 2)).messages?.length, 0);
+  } finally { await fx.fiber.dispose(); }
+});
+
+test("TASK-061 ICI context stays within the byte gate at the maximum workspace id", async () => {
+  const longId = "a".repeat(128);
+  const fx = await fixture([{ workspaceId: longId, canonicalPath: "/repo/long", detectedIcomposer: true, binding: null }]);
+  try {
+    const current = agent("/repo/long");
+    const first = await step(fx.service, current);
+    const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
+    assert.equal(Buffer.byteLength(text, "utf8") <= 850, true);
+    assert.match(text, new RegExp(`workspace_id: ${longId}`));
   } finally { await fx.fiber.dispose(); }
 });
 

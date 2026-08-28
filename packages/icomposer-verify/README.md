@@ -51,6 +51,10 @@ Registered under `ctx.tools` (all `isConcurrencySafe`, effect-free, structured
 - `ici_status` — read-only Code Intelligence diagnostics
 - `ici_explain` — prepare one API with `query`, or one 2–10 API batch with `queries`, for a single Workbench confirmation card
 
+## Injected context (TASK-061)
+
+`IciContextService` injects one compact structured block per session (step 1, dedup by digest, re-assert after compact/policy change): header `[iComposer workspace]`, `workspace_id`, grouped `tools:` (graph/inspect/explain/assets/sdk/verify), `auth:` (which tool groups need the Workbench Active Profile), and short `rules:`. It is a stable 850-byte-bounded summary only — tool schemas/system prompts remain the authoritative detail, and the block never carries canonical paths, artifact layouts, CLI examples, or secrets.
+
 ## Errors
 
 `workspace-not-bound`/`workspace-not-found`/`invalid-workspace-id`/
