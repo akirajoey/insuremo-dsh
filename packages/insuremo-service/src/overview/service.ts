@@ -8,6 +8,7 @@ import type { ImoSkills } from "../skills.ts";
 import type { ImoSkillActivation } from "../skill-activation.ts";
 import type { OperationLogLike } from "../operation-log-face.ts";
 import { buildOverview, type OverviewDependencies } from "./snapshot.ts";
+import { IMO_INSTALL_COMPLETED_EVENT, IMO_INSTALL_FAILED_EVENT } from "../imo-install.ts";
 import { buildWorkspaceStatuses, DEFAULT_EMBEDDING_ENDPOINT } from "./workspaces-status.ts";
 import type { OverviewOperationsSection, ImoOverviewView } from "./types.ts";
 
@@ -63,6 +64,7 @@ export class ImoOverviewService extends Service implements ImoOverview {
       imoSkillActivation: ctx.get<ImoSkillActivation>("imoSkillActivation")!,
       operationLog: ctx.get<OperationLogLike>("operationLog")!,
       imoUpgrade: ctx.get<{ upgradeStatus(): { running: boolean } }>("imoUpgrade"),
+      imoInstall: ctx.get<{ installStatus(): { running: boolean } }>("imoInstall"),
     };
     this.snapshot = this.snapshot.bind(this);
     this.snapshotFast = this.snapshotFast.bind(this);
@@ -75,8 +77,25 @@ export class ImoOverviewService extends Service implements ImoOverview {
         // active selection. The old promise may finish, but cannot publish.
         this.#inflight = undefined;
       });
+      // TASK-076: an install completion flips imo availability; drop every
+      // cached projection and rebuild in the background so the fast channel
+      // (Desktop web windows included) reflects the new CLI promptly.
+      const offInstallCompleted = this.ctx.on(IMO_INSTALL_COMPLETED_EVENT, () => {
+        this.#cacheGeneration += 1;
+        this.#cached = undefined;
+        this.#lastImo = undefined;
+        this.#inflight = undefined;
+        void this.snapshot(undefined).catch(() => { /* best-effort rebuild */ });
+      });
+      const offInstallFailed = this.ctx.on(IMO_INSTALL_FAILED_EVENT, () => {
+        this.#cacheGeneration += 1;
+        this.#cached = undefined;
+        this.#inflight = undefined;
+      });
       return () => {
         off?.();
+        offInstallCompleted?.();
+        offInstallFailed?.();
         this.#disposed = true;
         this.#cached = undefined;
         this.#inflight = undefined;

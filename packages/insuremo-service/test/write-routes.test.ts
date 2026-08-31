@@ -74,6 +74,7 @@ function baseServices(overrides: {
   upgrade?: unknown;
   skillActions?: unknown;
   authActions?: unknown;
+  imoInstall?: unknown;
 } = {}) {
   return {
     imoUpgrade: overrides.upgrade ?? {
@@ -85,6 +86,10 @@ function baseServices(overrides: {
     },
     imoAuthActions: overrides.authActions ?? {
       runDirectDefaultSwitch: async (input: { profile: string }) => ({ ok: true, receipt: { status: "completed", profile: input.profile } }),
+    },
+    imoInstall: overrides.imoInstall ?? {
+      installStatus: () => ({ running: false }),
+      install: async () => ({ ok: true, receipt: { status: "completed", packageManager: "npm", after: "0.2.14" } }),
     },
   };
 }
@@ -162,6 +167,43 @@ test("body limits: >8KB → 413, invalid JSON → 400, non-object → 400", asyn
     const arrayBody = await call(h.server, "imo-upgrade", { body: "[1,2]" });
     assert.equal(arrayBody.status, 400);
     assert.equal(JSON.parse(arrayBody.body).error.code, "body-shape");
+  } finally { await h.dispose(); }
+});
+
+test("TASK-076 imo-install: POST envelope, result mapping, and error passthrough", async () => {
+  const h = await fixture();
+  try {
+    // Body is ignored by design (constants live server-side).
+    const ok = await call(h.server, "imo-install", { body: JSON.stringify({ registry: "https://evil.example", package: "@evil/x" }) });
+    assert.equal(ok.status, 200);
+    const okBody = JSON.parse(ok.body);
+    assert.equal(okBody.ok, true);
+    assert.equal(okBody.result.status, "completed");
+    assert.equal(okBody.result.packageManager, "npm");
+    assert.equal(okBody.result.currentVersion, "0.2.14");
+
+    const busy = await fixture(baseServices({
+      imoInstall: { installStatus: () => ({ running: true }), install: async () => ({ ok: false, error: { code: "busy" } }) },
+    }));
+    try {
+      const busyResponse = await call(busy.server, "imo-install");
+      assert.equal(busyResponse.status, 200);
+      assert.equal(JSON.parse(busyResponse.body).error.code, "busy");
+    } finally { await busy.dispose(); }
+
+    const rejected = await fixture(baseServices({
+      imoInstall: {
+        installStatus: () => ({ running: false }),
+        install: async () => ({ ok: false, error: { code: "already-installed", message: "IMO CLI is already installed (version 0.2.14)" } }),
+      },
+    }));
+    try {
+      const response = await call(rejected.server, "imo-install");
+      assert.equal(response.status, 200);
+      const body = JSON.parse(response.body);
+      assert.equal(body.ok, false);
+      assert.equal(body.error.code, "already-installed");
+    } finally { await rejected.dispose(); }
   } finally { await h.dispose(); }
 });
 

@@ -15,6 +15,8 @@ export interface OverviewImoSection extends OverviewSectionBase {
   readonly updateAvailable: boolean;
   /** True while an upgrade action is executing (single in-memory lock). */
   readonly busy?: boolean;
+  /** True while a one-shot IMO install is executing (TASK-076 lock). */
+  readonly installBusy?: boolean;
 }
 
 /** Sanitized auth profile: exactly the browser needs, nothing sensitive. */

@@ -60,6 +60,10 @@ interface FakeIo {
   skillsConfigPath?: string;
   /** args-only invocation history. */
   invocations: string[][];
+  /** Commands resolveExecutable must reject (default: none missing). */
+  missingCommands: readonly string[];
+  /** Non-null makes the global install step exit non-zero. */
+  installExitCode: number | null;
   /** Exact auth argv responses; fake-only, never a real prepare. */
   authResponses: Map<string, FakeAuthResponse>;
   /** Pending fake handles exposed only to race/disposal tests. */
@@ -74,6 +78,8 @@ export function makeFakeIo(over: Partial<FakeIo> = {}): FakeIo {
     smokeFailures: new Map(),
     pendingKey: null,
     invocations: [],
+    missingCommands: [],
+    installExitCode: null,
     authResponses: new Map(),
     pendingHandles: [],
     ...over,
@@ -119,7 +125,8 @@ export function fakeSubprocess(io: FakeIo): FakeSubprocess {
     async resolveExecutable(command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal) {
       (fake.resolves as Array<unknown>).push({ command, env, signal });
       if (signal?.aborted) throw signal.reason ?? new Error("aborted");
-      return "/opt/homebrew/bin/imo";
+      if (io.missingCommands.includes(command)) throw new Error(`executable "${command}" was not found`);
+      return `/opt/homebrew/bin/${command}`;
     },
     spawn(spec: SubprocessSpawnSpec) {
       (fake.spawns as SubprocessSpawnSpec[]).push(spec);
@@ -156,6 +163,16 @@ export function fakeSubprocess(io: FakeIo): FakeSubprocess {
       } else if (io.smokeFailures.has(key)) {
         exitCode = io.smokeFailures.get(key) ?? 0;
         stderr = "smoke failed";
+      } else if (args[0] === "config" && args[1] === "set") {
+        stdout = "config set\n";
+      } else if ((args[0] === "install" || args[0] === "add") && args[1] === "-g") {
+        if (io.installExitCode !== null) {
+          exitCode = io.installExitCode;
+          stderr = "install failed";
+        } else {
+          io.missingCommands = io.missingCommands.filter(name => name !== "imo");
+          stdout = `added 1 package in 1s\n`;
+        }
       } else if (args[0] === "auth" || args[0] === "skills" || args[0] === "icomposer") {
         stdout = `${key} help\n`;
       } else {
@@ -170,7 +187,7 @@ export function fakeSubprocess(io: FakeIo): FakeSubprocess {
   return fake;
 }
 
-function fakeOperationLog(): {
+export function fakeOperationLog(): {
   api: OperationLogLike;
   records: Map<string, Record<string, unknown>>;
 } {

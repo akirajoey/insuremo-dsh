@@ -253,27 +253,27 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"refresh": "wb7fdb0fb4_refresh",
-	"hint": "wb7fdb0fb4_hint",
 	"pending": "wb7fdb0fb4_pending",
-	"description": "wb7fdb0fb4_description",
-	"list": "wb7fdb0fb4_list",
-	"chevronOpen": "wb7fdb0fb4_chevronOpen",
-	"toggle": "wb7fdb0fb4_toggle",
-	"cardOpen": "wb7fdb0fb4_cardOpen",
-	"card": "wb7fdb0fb4_card",
-	"name": "wb7fdb0fb4_name",
-	"footer": "wb7fdb0fb4_footer",
 	"controlThumb": "wb7fdb0fb4_controlThumb",
-	"headText": "wb7fdb0fb4_headText",
-	"error": "wb7fdb0fb4_error",
-	"controlTrack": "wb7fdb0fb4_controlTrack",
-	"header": "wb7fdb0fb4_header",
-	"small": "wb7fdb0fb4_small",
-	"body": "wb7fdb0fb4_body",
+	"chevron": "wb7fdb0fb4_chevron",
+	"chevronOpen": "wb7fdb0fb4_chevronOpen",
+	"description": "wb7fdb0fb4_description",
+	"footer": "wb7fdb0fb4_footer",
 	"region": "wb7fdb0fb4_region",
+	"headText": "wb7fdb0fb4_headText",
+	"toggle": "wb7fdb0fb4_toggle",
+	"list": "wb7fdb0fb4_list",
+	"cardOpen": "wb7fdb0fb4_cardOpen",
 	"meta": "wb7fdb0fb4_meta",
-	"chevron": "wb7fdb0fb4_chevron"
+	"hint": "wb7fdb0fb4_hint",
+	"small": "wb7fdb0fb4_small",
+	"refresh": "wb7fdb0fb4_refresh",
+	"error": "wb7fdb0fb4_error",
+	"header": "wb7fdb0fb4_header",
+	"name": "wb7fdb0fb4_name",
+	"controlTrack": "wb7fdb0fb4_controlTrack",
+	"body": "wb7fdb0fb4_body",
+	"card": "wb7fdb0fb4_card"
 };
 
 //#endregion
@@ -426,14 +426,87 @@ function ImoRegion(props) {
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: imo.available ? imo.current ?? "—" : t("imoUnavailable") }),
 				imo.updateAvailable && imo.target !== void 0 ? ` → ${imo.target}` : ""
 			] }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UpgradeButton, {
+			imo.available ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(UpgradeButton, {
 				t,
 				imo,
+				onChanged: props.onChanged
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InstallButton, {
+				t,
 				onChanged: props.onChanged
 			})
 		]
 	});
 }
+/**
+* One-shot IMO CLI installer (TASK-076): rendered only while the overview
+* reports the CLI unavailable. The visible hint names both side effects —
+* the user-level @insuremo registry write and the global package install —
+* and the failure line explains why retrying without rollback is safe.
+*/
+var InstallButton = class extends react.Component {
+	state = { install: { phase: "idle" } };
+	async run() {
+		this.setState({ install: { phase: "busy" } });
+		const outcome = await postAction$1("imo-install", {});
+		if (outcome.ok && outcome.result.status === "completed") {
+			this.setState({ install: {
+				phase: "done",
+				message: outcome.result.currentVersion ?? "?"
+			} });
+			this.props.onChanged();
+		} else if (outcome.ok) this.setState({ install: {
+			phase: "failed",
+			message: "post-install probe failed"
+		} });
+		else {
+			const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
+			this.setState({ install: {
+				phase: "failed",
+				message
+			} });
+		}
+	}
+	render() {
+		const { t } = this.props;
+		const busy = this.state.install.phase === "busy";
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", { children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				disabled: busy,
+				"aria-busy": busy,
+				onClick: () => void this.run(),
+				"aria-label": busy ? t("cliInstalling") : t("cliInstall"),
+				children: busy ? t("cliInstalling") : t("cliInstall")
+			}),
+			this.state.install.phase === "done" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+				role: "status",
+				"data-install": "done",
+				children: [
+					t("cliInstalled"),
+					": ",
+					this.state.install.message
+				]
+			}) : null,
+			this.state.install.phase === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+				role: "alert",
+				"data-install": "failed",
+				className: InsuremoCard_module_css_default.error,
+				children: [
+					t("cliInstallFailed"),
+					": ",
+					this.state.install.message
+				]
+			}) : null
+		] }), this.state.install.phase === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+			className: InsuremoCard_module_css_default.hint,
+			"data-install-retry": "1",
+			children: t("cliInstallRetryHint")
+		}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+			className: InsuremoCard_module_css_default.hint,
+			children: t("cliInstallHint")
+		})] });
+	}
+};
 var UpgradeButton = class extends react.Component {
 	state = { upgrade: { phase: "idle" } };
 	async run() {
@@ -704,6 +777,12 @@ const zh$2 = {
 	cliUpdating: "进行中…",
 	cliUpdated: "已更新",
 	cliUpdateFailed: "更新失败",
+	cliInstall: "一键安装 IMO CLI",
+	cliInstalling: "安装中…",
+	cliInstalled: "已安装",
+	cliInstallFailed: "安装失败",
+	cliInstallHint: "将配置 @insuremo registry（写入用户级 .npmrc）并全局安装 @insuremo/imo；全局安装可能需要数分钟。",
+	cliInstallRetryHint: "@insuremo registry 配置可能已写入用户级 .npmrc；直接重试即可（幂等），无需先回退。",
 	authSetDefault: "设为默认",
 	authCliHint: "新增或登录 profile 请使用 imo auth login CLI",
 	skillsToggle: "启用/停用",
@@ -776,6 +855,12 @@ const en$2 = {
 	cliUpdating: "In progress…",
 	cliUpdated: "Updated",
 	cliUpdateFailed: "Update failed",
+	cliInstall: "Install IMO CLI",
+	cliInstalling: "Installing…",
+	cliInstalled: "Installed",
+	cliInstallFailed: "Install failed",
+	cliInstallHint: "Configures the @insuremo registry (writes the user-level .npmrc) and installs @insuremo/imo globally; the global install may take a few minutes.",
+	cliInstallRetryHint: "The @insuremo registry entry may already be in the user-level .npmrc; retrying is safe and idempotent — no rollback needed.",
 	authSetDefault: "Set default",
 	authCliHint: "Add or log in to profiles via the imo auth login CLI",
 	skillsToggle: "Enable/disable",
@@ -911,15 +996,15 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"railHost": "wb1683cb0f_railHost",
+	"wordmarkInner": "wb1683cb0f_wordmarkInner",
+	"dsh": "wb1683cb0f_dsh",
 	"wordmarkDark": "wb1683cb0f_wordmarkDark",
+	"railMark": "wb1683cb0f_railMark",
+	"railHost": "wb1683cb0f_railHost",
+	"driver": "wb1683cb0f_driver",
 	"wordmarkHost": "wb1683cb0f_wordmarkHost",
 	"wordmarkLight": "wb1683cb0f_wordmarkLight",
-	"dsh": "wb1683cb0f_dsh",
-	"wordmarkInner": "wb1683cb0f_wordmarkInner",
-	"driver": "wb1683cb0f_driver",
-	"wordmark": "wb1683cb0f_wordmark",
-	"railMark": "wb1683cb0f_railMark"
+	"wordmark": "wb1683cb0f_wordmark"
 };
 
 //#endregion
@@ -1092,8 +1177,8 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
-	"icon": "wb8730382c_icon",
 	"rowIcons": "wb8730382c_rowIcons",
+	"icon": "wb8730382c_icon",
 	"driver": "wb8730382c_driver"
 };
 
@@ -1386,16 +1471,16 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"list": "wba94a6eca_list",
-	"row": "wba94a6eca_row",
 	"trigger": "wba94a6eca_trigger",
-	"hint": "wba94a6eca_hint",
-	"label": "wba94a6eca_label",
-	"picker": "wba94a6eca_picker",
 	"dot": "wba94a6eca_dot",
-	"rowName": "wba94a6eca_rowName",
-	"error": "wba94a6eca_error",
+	"hint": "wba94a6eca_hint",
+	"row": "wba94a6eca_row",
+	"label": "wba94a6eca_label",
+	"list": "wba94a6eca_list",
 	"closeMark": "wba94a6eca_closeMark",
+	"error": "wba94a6eca_error",
+	"rowName": "wba94a6eca_rowName",
+	"picker": "wba94a6eca_picker",
 	"pickerHeader": "wba94a6eca_pickerHeader",
 	"rowMark": "wba94a6eca_rowMark"
 };
@@ -1697,9 +1782,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 var JobNode_module_css_default = {
 	"kind": "wb6cd975b4_kind",
 	"status": "wb6cd975b4_status",
-	"row": "wb6cd975b4_row",
+	"digest": "wb6cd975b4_digest",
 	"icon": "wb6cd975b4_icon",
-	"digest": "wb6cd975b4_digest"
+	"row": "wb6cd975b4_row"
 };
 
 //#endregion
@@ -1756,24 +1841,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"header": "wb13b81332_header",
-	"hint": "wb13b81332_hint",
-	"done": "wb13b81332_done",
-	"session": "wb13b81332_session",
 	"error": "wb13b81332_error",
-	"field": "wb13b81332_field",
-	"runMeta": "wb13b81332_runMeta",
-	"summary": "wb13b81332_summary",
-	"referenceActions": "wb13b81332_referenceActions",
-	"batchJobRow": "wb13b81332_batchJobRow",
-	"card": "wb13b81332_card",
-	"selectedReference": "wb13b81332_selectedReference",
-	"consent": "wb13b81332_consent",
-	"fieldset": "wb13b81332_fieldset",
-	"status": "wb13b81332_status",
 	"errorText": "wb13b81332_errorText",
+	"hint": "wb13b81332_hint",
+	"runMeta": "wb13b81332_runMeta",
+	"status": "wb13b81332_status",
+	"done": "wb13b81332_done",
+	"summary": "wb13b81332_summary",
+	"selectedReference": "wb13b81332_selectedReference",
+	"fieldset": "wb13b81332_fieldset",
+	"consent": "wb13b81332_consent",
+	"field": "wb13b81332_field",
+	"session": "wb13b81332_session",
+	"actions": "wb13b81332_actions",
+	"referenceActions": "wb13b81332_referenceActions",
+	"header": "wb13b81332_header",
+	"card": "wb13b81332_card",
 	"progress": "wb13b81332_progress",
-	"actions": "wb13b81332_actions"
+	"batchJobRow": "wb13b81332_batchJobRow"
 };
 
 //#endregion

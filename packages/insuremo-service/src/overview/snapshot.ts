@@ -29,6 +29,8 @@ export interface OverviewDependencies {
   readonly operationLog: OperationLogLike;
   /** Optional upgrade face for the busy indicator. */
   readonly imoUpgrade?: { upgradeStatus(): { running: boolean } };
+  /** Optional install face for the install-busy indicator (TASK-076). */
+  readonly imoInstall?: { installStatus(): { running: boolean } };
 }
 
 /** Build the read-only allowlist overview; every section is best-effort. */
@@ -52,7 +54,9 @@ export async function buildOverview(deps: OverviewDependencies, signal?: AbortSi
 }
 
 async function imoSection(deps: OverviewDependencies, signal?: AbortSignal): Promise<OverviewImoSection> {
-  let section: OverviewImoSection = Object.freeze({ status: "error", code: "unavailable", available: false, updateAvailable: false });
+  const installBusy = deps.imoInstall?.installStatus().running === true;
+  const installFlag = installBusy ? Object.freeze({ installBusy }) : {};
+  let section: OverviewImoSection = Object.freeze({ status: "error", code: "unavailable", available: false, updateAvailable: false, ...installFlag });
   try {
     const probe = await deps.imoCli.probe(signal);
     if (!probe.ok) {
@@ -61,6 +65,7 @@ async function imoSection(deps: OverviewDependencies, signal?: AbortSignal): Pro
         code: probe.error.code === "cancelled" ? "cancelled" : probe.error.code,
         available: false,
         updateAvailable: false,
+        ...installFlag,
       });
       return section;
     }
@@ -86,9 +91,10 @@ async function imoSection(deps: OverviewDependencies, signal?: AbortSignal): Pro
       ...(target === undefined ? {} : { target }),
       updateAvailable,
       ...(busy ? { busy } : {}),
+      ...installFlag,
     });
   } catch {
-    section = Object.freeze({ status: "error", code: "unavailable", available: false, updateAvailable: false });
+    section = Object.freeze({ status: "error", code: "unavailable", available: false, updateAvailable: false, ...installFlag });
   }
   return section;
 }

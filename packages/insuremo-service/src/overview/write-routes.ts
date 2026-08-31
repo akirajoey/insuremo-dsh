@@ -180,6 +180,28 @@ export function mountWriteRoutes(ctx: Context): () => void {
     }
   }));
 
+  // imo-install: one-shot installer (TASK-076). The POST body is ignored:
+  // registry, scope, and package are service-side constants, so no client
+  // input can reach the spawned argv.
+  register(actionRoute(`${ACTIONS_PREFIX}/imo-install`, async (_body, signal) => {
+    const install = ctx.get("imoInstall" as never) as unknown as {
+      installStatus(): { running: boolean };
+      install(signal?: AbortSignal): Promise<
+        | { ok: true; receipt: { status: string; packageManager: string; after: string | null } }
+        | { ok: false; error: { code?: string; message?: string } }
+      >;
+    } | undefined;
+    if (install === undefined) return faceError(undefined, "service-unavailable");
+    if (install.installStatus().running) return faceError({ code: "busy", message: "an IMO install is already running" }, "busy");
+    try {
+      const outcome = await install.install(signal);
+      if (!outcome.ok) return faceError(outcome.error, "install-failed");
+      return { ok: true, result: { status: outcome.receipt.status, packageManager: outcome.receipt.packageManager, currentVersion: outcome.receipt.after } };
+    } catch {
+      return faceError(undefined, "install-failed");
+    }
+  }));
+
   // skill-activation: durable activation domain (unchanged semantics).
   register(actionRoute(`${ACTIONS_PREFIX}/skill-activation`, async (body, signal) => {
     const activation = ctx.get("imoSkillActivation" as never) as unknown as {
