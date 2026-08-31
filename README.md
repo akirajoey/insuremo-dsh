@@ -64,8 +64,12 @@ installation routes are documented in that package's README:
 # 1) local offline distribution via tarball (recommended; no npm registry needed)
 dsh plugin --profile web add icomposer-workbench-0.1.0.tgz
 
-# 2) GitHub path spec
-dsh plugin --profile web add github:<org>/insuremo-dsh#path:packages/icomposer-workbench-dist
+# 2) GitHub prebuilt path (tracked git-dist/icomposer-workbench; no build on install).
+#    Pin an exact commit — the SHA is published in the Release receipt:
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+
+#    Convenience (follows main; content drifts between releases):
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
 
 # 3) npm (future publication)
 dsh plugin --profile web add @icomposer/workbench
@@ -76,7 +80,23 @@ tarball (`dist-release/icomposer-workbench-<version>.tgz`, prebuilt `lib/`,
 no sibling sources) and `node scripts/verify-standard-install.mjs` proves
 the installs end to end in isolated DSH_HOME profiles — including a real
 boot smoke (port line + no loader/module errors), not just a dump. The
-tarball is the recommended form: directory `add .` is a link: install whose
+`pack:dist`, `pack:git-dist`, and `check:git-dist` commands are **single-writer**:
+tsdown rewrites the shared source `lib/` during each build, while the Git
+destination uses an atomic-ish staging/backup swap. In a clean checkout,
+the Harness preset must be checked out beside Workbench at `../deepseek-harness`
+at the exact `compatibility.json` commit (tag `dsh-v0.1.0-rc.7`, currently
+`99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`) and installed separately before
+running these commands; CI performs this pinned sibling checkout and hard
+commit check. For example:
+
+```sh
+git clone --branch dsh-v0.1.0-rc.7 https://github.com/deepseek-ai/deepseek-harness ../deepseek-harness
+(cd ../deepseek-harness && pnpm install --frozen-lockfile --ignore-scripts)
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm check:git-dist
+```
+
+The tarball is the recommended form: directory `add .` is a link: install whose
 bare-import resolution depends on the surrounding node_modules layout. The
 `pnpm setup-profile` flow below is the **development-mode** profile wiring
 (symlinks the source bundle); end users install the distributable instead.

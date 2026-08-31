@@ -164,10 +164,15 @@ peer 沿祖先链可被 dsh loader 解析。目录式 `add .` 为 link: 安装�
 import 解析依赖周围 node_modules 布局（曾实测 `ERR_MODULE_NOT_FOUND`），
 仅当该目录自身可解析 harness 包时可用；请统一使用 tgz。
 
-**方式二：GitHub 路径**：
+**方式二：GitHub 预构建路径**（跟踪的 `git-dist/icomposer-workbench`，安装零构建；
+推荐精确 pin commit，SHA 以 Release receipt 发布为准；spec 整体加引号，`&` 在
+bash/PowerShell 中都需引号保护）：
 
 ```sh
-dsh plugin --profile web add github:<org>/insuremo-dsh#path:packages/icomposer-workbench-dist
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+
+# 便捷形式（跟随 main，内容随发布漂移）
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
 ```
 
 **方式三：npm（未来发布）**：`dsh plugin --profile web add @icomposer/workbench`。

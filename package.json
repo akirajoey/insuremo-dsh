@@ -14,6 +14,11 @@
     "bundle": "pnpm --filter @icomposer/ui-insuremo-settings --filter @icomposer/ui-insuremo-status --filter @icomposer/ui-workbench-jobs run bundle",
     "bundle:client": "pnpm --filter @icomposer/ui-insuremo-settings --filter @icomposer/ui-insuremo-status --filter @icomposer/ui-workbench-jobs run bundle",
     "typecheck": "pnpm --recursive --if-present run typecheck",
-    "test": "pnpm --recursive --if-present run test"
+    "test": "pnpm --recursive --if-present run test",
+    "pack:dist": "node scripts/pack-dist.mjs",
+    "pack:git-dist": "node scripts/pack-git-dist.mjs",
+    "check:git-dist": "node scripts/check-git-dist.mjs",
+    "test:git-dist": "node --test --test-concurrency=1 test/git-dist.test.mjs test/pack-git-dist.test.mjs",
+    "test:git-install": "node test/git-install.e2e.mjs"
   }
 }

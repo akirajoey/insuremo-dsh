@@ -1,0 +1,54 @@
+name: check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  git-dist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # Keep the repository layout expected by compatibility.json:
+      # <parent>/icomposer-workbench and <parent>/deepseek-harness.
+      - uses: actions/checkout@v4
+        with:
+          path: icomposer-workbench
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: dsh-v0.1.0-rc.7
+          path: deepseek-harness
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - name: Verify pinned Harness checkout
+        working-directory: deepseek-harness
+        run: |
+          node -e 'const expected = "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca"; const actual = require("node:child_process").execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(); if (actual !== expected) { throw new Error("Harness pin mismatch: " + actual + " != " + expected); }'
+      - name: Install pinned Harness preset dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: deepseek-harness
+      - name: Install Workbench dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: icomposer-workbench
+      - name: Build, pack, and enforce git-dist zero drift
+        run: |
+          pnpm pack:dist
+          pnpm pack:git-dist
+          pnpm check:git-dist
+        working-directory: icomposer-workbench
+      - name: git-dist contract tests
+        run: pnpm test:git-dist
+        working-directory: icomposer-workbench
+      - name: Stock dsh git-selector install e2e (Plugin Only)
+        run: pnpm test:git-install
+        working-directory: icomposer-workbench
+      - name: Compatibility gate
+        run: pnpm check
+        working-directory: icomposer-workbench

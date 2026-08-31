@@ -9,3 +9,7 @@ coverage/
 .env*
 **/*.tmp.mts
 dist-release/
+
+# Tracked prebuilt plugin directory (TASK-075): re-include the nested lib
+# that the blanket `lib/` rule above would otherwise exclude.
+!git-dist/icomposer-workbench/lib/
