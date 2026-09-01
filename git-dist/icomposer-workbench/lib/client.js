@@ -30,10 +30,15 @@ const __deepseek_ai_dsh_client_ui_primitives = __toESM(require("@deepseek-ai/dsh
 
 //#region ../ui-insuremo-settings/src/client/ChevronIcon.tsx
 /**
+
 * Down-chevron disclosure icon mirroring the platform's
+
 * `IconChevronDownOutline14` (14px outline chevron). Inlined so the card
+
 * bundle keeps zero non-platform dependencies; the CSS rotation animates
+
 * the open state exactly like the official PluginCard.
+
 */
 function ChevronIcon(props) {
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
@@ -242,7 +247,7 @@ async function postAction$1(action, body, signal) {
 }
 
 //#endregion
-//#region \0dsh-css:asset
+//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-settings\src\client\InsuremoCard.module.css.mjs
 const css$5 = ".wb7fdb0fb4_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.wb7fdb0fb4_card:hover{border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.wb7fdb0fb4_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.wb7fdb0fb4_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.wb7fdb0fb4_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.wb7fdb0fb4_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.wb7fdb0fb4_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.wb7fdb0fb4_chevronOpen{transform:rotate(180deg)}.wb7fdb0fb4_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.wb7fdb0fb4_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.wb7fdb0fb4_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.wb7fdb0fb4_refresh{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.wb7fdb0fb4_refresh:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_refresh:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wb7fdb0fb4_region{flex-direction:column;gap:6px;display:flex}.wb7fdb0fb4_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.wb7fdb0fb4_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.wb7fdb0fb4_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wb7fdb0fb4_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.wb7fdb0fb4_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.wb7fdb0fb4_toggle:disabled{cursor:not-allowed;opacity:.55}.wb7fdb0fb4_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.wb7fdb0fb4_toggle[aria-checked=true] .wb7fdb0fb4_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.wb7fdb0fb4_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.wb7fdb0fb4_toggle[aria-checked=true] .wb7fdb0fb4_controlThumb{transform:translate(12px)}.wb7fdb0fb4_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.wb7fdb0fb4_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.wb7fdb0fb4_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.wb7fdb0fb4_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.wb7fdb0fb4_small:hover{color:var(--dsw-alias-state-error-primary)}";
 const tagId$5 = "@icomposer/workbench/InsuremoCard.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$5) + "]") === null) {
@@ -254,37 +259,44 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 }
 var InsuremoCard_module_css_default = {
 	"pending": "wb7fdb0fb4_pending",
-	"controlThumb": "wb7fdb0fb4_controlThumb",
-	"chevron": "wb7fdb0fb4_chevron",
-	"chevronOpen": "wb7fdb0fb4_chevronOpen",
+	"body": "wb7fdb0fb4_body",
 	"description": "wb7fdb0fb4_description",
-	"footer": "wb7fdb0fb4_footer",
-	"region": "wb7fdb0fb4_region",
-	"headText": "wb7fdb0fb4_headText",
-	"toggle": "wb7fdb0fb4_toggle",
-	"list": "wb7fdb0fb4_list",
-	"cardOpen": "wb7fdb0fb4_cardOpen",
-	"meta": "wb7fdb0fb4_meta",
-	"hint": "wb7fdb0fb4_hint",
-	"small": "wb7fdb0fb4_small",
 	"refresh": "wb7fdb0fb4_refresh",
-	"error": "wb7fdb0fb4_error",
-	"header": "wb7fdb0fb4_header",
 	"name": "wb7fdb0fb4_name",
 	"controlTrack": "wb7fdb0fb4_controlTrack",
-	"body": "wb7fdb0fb4_body",
-	"card": "wb7fdb0fb4_card"
+	"meta": "wb7fdb0fb4_meta",
+	"small": "wb7fdb0fb4_small",
+	"cardOpen": "wb7fdb0fb4_cardOpen",
+	"error": "wb7fdb0fb4_error",
+	"card": "wb7fdb0fb4_card",
+	"headText": "wb7fdb0fb4_headText",
+	"list": "wb7fdb0fb4_list",
+	"chevron": "wb7fdb0fb4_chevron",
+	"controlThumb": "wb7fdb0fb4_controlThumb",
+	"header": "wb7fdb0fb4_header",
+	"toggle": "wb7fdb0fb4_toggle",
+	"footer": "wb7fdb0fb4_footer",
+	"hint": "wb7fdb0fb4_hint",
+	"region": "wb7fdb0fb4_region",
+	"chevronOpen": "wb7fdb0fb4_chevronOpen"
 };
 
 //#endregion
 //#region ../ui-insuremo-settings/src/client/InsuremoCard.tsx
 /**
+
 * The InsureMO card inside the Plugins settings tab (TASK-041): collapsed by
+
 * default to a one-line summary (CLI version · default profile · skills
+
 * count); expanding reveals the IMO CLI / Skills / Code Intelligence regions.
+
 * The Auth region was removed — the sidebar ProfilePicker owns profile
+
 * switching. Data loads through the fast channel (`?fast=1`); the Refresh
+
 * button builds the full CLI-backed view.
+
 */
 var InsuremoCard = class extends react.Component {
 	state = {
@@ -299,6 +311,7 @@ var InsuremoCard = class extends react.Component {
 		this.#controller?.abort();
 	}
 	/** Silent refresh for post-action reloads: keeps regions mounted so child
+	
 	* state (upgrade success lines, per-skill errors) is not destroyed. */
 	async silentReload() {
 		try {
@@ -438,10 +451,15 @@ function ImoRegion(props) {
 	});
 }
 /**
+
 * One-shot IMO CLI installer (TASK-076): rendered only while the overview
+
 * reports the CLI unavailable. The visible hint names both side effects —
+
 * the user-level @insuremo registry write and the global package install —
+
 * and the failure line explains why retrying without rollback is safe.
+
 */
 var InstallButton = class extends react.Component {
 	state = { install: { phase: "idle" } };
@@ -586,9 +604,13 @@ var SkillsRegion = class extends react.Component {
 		});
 	}
 	/**
+	
 	* Last-write-wins (TASK-041): no expectedRevision is sent — the server
+	
 	* commits against its own latest revision and returns the new one, which
+	
 	* removes the revision-conflict storms when the card holds a stale view.
+	
 	*/
 	async toggle(name, next, previous) {
 		this.setState((prev) => ({ rows: {
@@ -892,10 +914,15 @@ function apply$1(ctx) {
 //#endregion
 //#region ../ui-insuremo-status/src/client/HealthGlyphs.tsx
 /**
+
 * Consistent 16×16 inline health glyphs (TASK-044 A). All three share the
+
 * same viewBox and stroke style, use `currentColor` so the CSS state tokens
+
 * (`--dsw-alias-state-*` / `--dsw-alias-label-*`) color them, and are never
+
 * opaque squares/dots.
+
 */
 function baseProps() {
 	return {
@@ -973,21 +1000,9 @@ function IntelligenceGlyph(props) {
 }
 
 //#endregion
-//#region ../ui-insuremo-status/assets/insuremo-wordmark-dark.png
-var insuremo_wordmark_dark_default = undefined;
-
-//#endregion
-//#region ../ui-insuremo-status/assets/insuremo-wordmark-light.png
-var insuremo_wordmark_light_default = undefined;
-
-//#endregion
-//#region ../ui-insuremo-status/assets/insuremo-globe.png
-var insuremo_globe_default = undefined;
-
-//#endregion
-//#region \0dsh-css:asset
-const css$4 = ".wb1683cb0f_driver{display:none}.wb1683cb0f_wordmarkHost,.wb1683cb0f_railHost{pointer-events:none;z-index:1;position:absolute;inset:0}.wb1683cb0f_wordmarkHost{justify-content:flex-start;align-items:center;display:flex;overflow:hidden}.wb1683cb0f_wordmarkInner{white-space:nowrap;align-items:center;gap:8px;height:24px;line-height:1;display:inline-flex}.wb1683cb0f_wordmark{flex:none;width:99px;height:24px;display:block}.wb1683cb0f_wordmark img{object-fit:contain;image-rendering:auto;width:99px;height:24px;display:block}.wb1683cb0f_wordmarkDark{display:none!important}body[data-ds-dark-theme] .wb1683cb0f_wordmarkLight{display:none!important}body[data-ds-dark-theme] .wb1683cb0f_wordmarkDark{display:block!important}.wb1683cb0f_dsh{color:currentColor;font-family:var(--ds-font-family,Inter, system-ui, sans-serif);letter-spacing:-.045em;font-size:22px;font-weight:650;line-height:24px;display:inline-block}.wb1683cb0f_railHost{justify-content:center;align-items:center;display:flex}.wb1683cb0f_railMark{width:24px;height:24px;color:var(--dsw-alias-label-primary);flex:none;display:block}.wb1683cb0f_railMark img{object-fit:contain;image-rendering:auto;width:24px;height:24px;display:block}button:hover .wb1683cb0f_railHost{visibility:hidden}";
-const tagId$4 = "@icomposer/workbench/BrandChrome.module.css";
+//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-status\src\client\WorkspaceHealth.module.css.mjs
+const css$4 = ".wb8730382c_driver{display:none}.wb8730382c_rowIcons{flex:none;align-items:center;gap:4px;margin-left:auto;display:inline-flex}.wb8730382c_rowIcons .wb8730382c_icon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);border-radius:4px;flex:none;justify-content:center;align-items:center;display:inline-flex;position:relative}.wb8730382c_rowIcons .wb8730382c_icon svg{display:block}.wb8730382c_rowIcons .wb8730382c_icon:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:2px}.wb8730382c_rowIcons .wb8730382c_icon[data-state=detected]{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}.wb8730382c_rowIcons .wb8730382c_icon[data-state=on]{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent)}.wb8730382c_rowIcons .wb8730382c_icon[data-state=off]{color:var(--dsw-alias-label-tertiary);opacity:.32}";
+const tagId$4 = "@icomposer/workbench/WorkspaceHealth.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$4) + "]") === null) {
 	const tag = document.createElement("style");
 	tag.dataset.plugin = "@icomposer/workbench";
@@ -995,191 +1010,10 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	tag.textContent = css$4;
 	document.head.appendChild(tag);
 }
-var BrandChrome_module_css_default = {
-	"wordmarkInner": "wb1683cb0f_wordmarkInner",
-	"dsh": "wb1683cb0f_dsh",
-	"wordmarkDark": "wb1683cb0f_wordmarkDark",
-	"railMark": "wb1683cb0f_railMark",
-	"railHost": "wb1683cb0f_railHost",
-	"driver": "wb1683cb0f_driver",
-	"wordmarkHost": "wb1683cb0f_wordmarkHost",
-	"wordmarkLight": "wb1683cb0f_wordmarkLight",
-	"wordmark": "wb1683cb0f_wordmark"
-};
-
-//#endregion
-//#region ../ui-insuremo-status/src/client/BrandChrome.tsx
-/** Stable DOM signatures owned by the Harness sidebar shell. */
-const WORDMARK_VIEWBOX = "0 0 182 24";
-const FISH_VIEWBOX = "0 0 23.16 17.04";
-const PANEL_VIEWBOX = "0 0 16 16";
-const BRAND_ASSET_URL = "/api/icomposer-workbench/ui/assets";
-const BRAND_HOST_ATTRIBUTE = "data-icomposer-brand-host";
-function svgButton(svg, kind) {
-	if (svg.getAttribute("viewBox") !== (kind === "wordmark" ? WORDMARK_VIEWBOX : FISH_VIEWBOX)) return null;
-	const button = svg.parentElement;
-	if (button === null || button.tagName !== "BUTTON") return null;
-	const nativeButton = button;
-	const hasPanel = button.querySelector(`svg[viewBox="${PANEL_VIEWBOX}"]`) !== null;
-	if (kind === "rail") return hasPanel ? nativeButton : null;
-	const row = button.parentElement;
-	if (row === null) return null;
-	const siblingPanel = Array.from(row.children).some((child) => child !== button && child.tagName === "BUTTON" && child.querySelector(`svg[viewBox="${PANEL_VIEWBOX}"]`) !== null);
-	return siblingPanel ? nativeButton : null;
-}
-function Asset({ kind }) {
-	if (kind === "wordmark") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-		className: BrandChrome_module_css_default.wordmark,
-		"data-icomposer-brand-asset": kind,
-		"data-emitted-brand-assets": `${insuremo_wordmark_light_default}|${insuremo_wordmark_dark_default}`,
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-			className: BrandChrome_module_css_default.wordmarkLight,
-			src: `${BRAND_ASSET_URL}/insuremo-wordmark-light.png`,
-			alt: "",
-			width: 312,
-			height: 76,
-			decoding: "async"
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-			className: BrandChrome_module_css_default.wordmarkDark,
-			src: `${BRAND_ASSET_URL}/insuremo-wordmark-dark.png`,
-			alt: "",
-			width: 312,
-			height: 76,
-			decoding: "async"
-		})]
-	});
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-		className: BrandChrome_module_css_default.railMark,
-		"data-icomposer-brand-asset": kind,
-		"data-emitted-brand-asset": insuremo_globe_default,
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-			src: `${BRAND_ASSET_URL}/insuremo-globe.png`,
-			alt: "",
-			width: 65,
-			height: 62,
-			decoding: "async"
-		})
-	});
-}
-function OwnedWordmark() {
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-		className: BrandChrome_module_css_default.wordmarkInner,
-		"aria-hidden": "true",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Asset, { kind: "wordmark" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			className: BrandChrome_module_css_default.dsh,
-			children: "dsh"
-		})]
-	});
-}
-function OwnedRailMark() {
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Asset, { kind: "rail" });
-}
-/**
-* Hidden client driver that overlays only the two Harness-owned brand SVGs.
-* The source buttons remain the click/focus/tooltip owners; each original SVG
-* is merely visibility-hidden and restored, while every portal host is removed
-* on unmount or when the shell replaces a button.
-*/
-var BrandChrome = class extends react.Component {
-	#driverRef = null;
-	#observer;
-	#ports = /* @__PURE__ */ new Map();
-	#mounted = false;
-	componentDidMount() {
-		this.#mounted = true;
-		const doc = this.#driverRef?.ownerDocument;
-		if (doc === void 0) return;
-		const Observer = doc.defaultView?.MutationObserver ?? globalThis.MutationObserver;
-		if (Observer !== void 0) {
-			this.#observer = new Observer(() => {
-				this.sync(doc);
-			});
-			this.#observer.observe(doc.body, {
-				childList: true,
-				subtree: true
-			});
-		}
-		this.sync(doc);
-	}
-	componentWillUnmount() {
-		this.#mounted = false;
-		this.#observer?.disconnect();
-		this.#observer = void 0;
-		for (const original of [...this.#ports.keys()]) this.drop(original);
-	}
-	ensure(doc, original, button, kind) {
-		if (this.#ports.has(original)) return;
-		const originalStyle = original.getAttribute("style");
-		const buttonStyle = button.getAttribute("style");
-		const host = doc.createElement("span");
-		host.setAttribute(BRAND_HOST_ATTRIBUTE, kind);
-		host.setAttribute("aria-hidden", "true");
-		host.className = kind === "wordmark" ? BrandChrome_module_css_default.wordmarkHost : BrandChrome_module_css_default.railHost;
-		button.style.position = "relative";
-		original.style.visibility = "hidden";
-		button.appendChild(host);
-		const root = (0, react_dom_client.createRoot)(host);
-		root.render(kind === "wordmark" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OwnedWordmark, {}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OwnedRailMark, {}));
-		this.#ports.set(original, {
-			original,
-			button,
-			host,
-			root,
-			originalStyle,
-			buttonStyle
-		});
-	}
-	drop(original) {
-		const port = this.#ports.get(original);
-		if (port === void 0) return;
-		port.root.unmount();
-		port.host.remove();
-		if (port.originalStyle === null) port.original.removeAttribute("style");
-		else port.original.setAttribute("style", port.originalStyle);
-		if (port.buttonStyle === null) port.button.removeAttribute("style");
-		else port.button.setAttribute("style", port.buttonStyle);
-		this.#ports.delete(original);
-	}
-	sync(doc) {
-		if (!this.#mounted) return;
-		const matched = /* @__PURE__ */ new Set();
-		for (const kind of ["wordmark", "rail"]) {
-			const selector = `svg[viewBox="${kind === "wordmark" ? WORDMARK_VIEWBOX : FISH_VIEWBOX}"]`;
-			for (const original of Array.from(doc.querySelectorAll(selector))) {
-				const button = svgButton(original, kind);
-				if (button === null) continue;
-				matched.add(original);
-				this.ensure(doc, original, button, kind);
-			}
-		}
-		for (const [original, port] of this.#ports) if (!matched.has(original) || !original.isConnected || !port.host.isConnected) this.drop(original);
-	}
-	render() {
-		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			ref: (element) => {
-				this.#driverRef = element;
-			},
-			className: BrandChrome_module_css_default.driver,
-			"data-icomposer-brand-driver": ""
-		});
-	}
-};
-
-//#endregion
-//#region \0dsh-css:asset
-const css$3 = ".wb8730382c_driver{display:none}.wb8730382c_rowIcons{flex:none;align-items:center;gap:4px;margin-left:auto;display:inline-flex}.wb8730382c_rowIcons .wb8730382c_icon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);border-radius:4px;flex:none;justify-content:center;align-items:center;display:inline-flex;position:relative}.wb8730382c_rowIcons .wb8730382c_icon svg{display:block}.wb8730382c_rowIcons .wb8730382c_icon:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:2px}.wb8730382c_rowIcons .wb8730382c_icon[data-state=detected]{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}.wb8730382c_rowIcons .wb8730382c_icon[data-state=on]{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent)}.wb8730382c_rowIcons .wb8730382c_icon[data-state=off]{color:var(--dsw-alias-label-tertiary);opacity:.32}";
-const tagId$3 = "@icomposer/workbench/WorkspaceHealth.module.css";
-if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$3) + "]") === null) {
-	const tag = document.createElement("style");
-	tag.dataset.plugin = "@icomposer/workbench";
-	tag.dataset.pluginCss = tagId$3;
-	tag.textContent = css$3;
-	document.head.appendChild(tag);
-}
 var WorkspaceHealth_module_css_default = {
-	"rowIcons": "wb8730382c_rowIcons",
+	"driver": "wb8730382c_driver",
 	"icon": "wb8730382c_icon",
-	"driver": "wb8730382c_driver"
+	"rowIcons": "wb8730382c_rowIcons"
 };
 
 //#endregion
@@ -1389,7 +1223,7 @@ var WorkspaceHealth = class extends react.Component {
 	}
 	render() {
 		const { t } = this.props;
-		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(BrandChrome, {}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 			ref: (element) => {
 				this.#driverRef = element;
 			},
@@ -1397,7 +1231,7 @@ var WorkspaceHealth = class extends react.Component {
 			role: "status",
 			"aria-label": t("health.strip"),
 			"data-icomposer-workspace-health-driver": ""
-		})] });
+		}) });
 	}
 };
 
@@ -1460,29 +1294,29 @@ async function postAction(action, body, signal) {
 }
 
 //#endregion
-//#region \0dsh-css:asset
-const css$2 = ".wba94a6eca_trigger{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_trigger:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.wba94a6eca_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_picker{flex-direction:column;gap:2px;padding:2px 0;display:flex}.wba94a6eca_pickerHeader{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_closeMark{color:var(--dsw-alias-label-tertiary);margin-left:auto}.wba94a6eca_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.wba94a6eca_row{box-sizing:border-box;width:100%;min-height:26px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:6px;padding:3px 9px 3px 22px;font-size:12px;line-height:17px;display:inline-flex;overflow:hidden}.wba94a6eca_row:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_row[data-default=\"1\"]{color:var(--dsw-alias-label-primary)}.wba94a6eca_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_rowMark{color:var(--dsw-alias-state-success-primary);flex:none}.wba94a6eca_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:2px 9px;font-size:11px}.wba94a6eca_error{color:var(--dsw-alias-state-error-primary);padding:2px 9px;font-size:11px}";
-const tagId$2 = "@icomposer/workbench/ProfilePicker.module.css";
-if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
+//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-status\src\client\ProfilePicker.module.css.mjs
+const css$3 = ".wba94a6eca_trigger{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_trigger:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.wba94a6eca_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_picker{flex-direction:column;gap:2px;padding:2px 0;display:flex}.wba94a6eca_pickerHeader{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_closeMark{color:var(--dsw-alias-label-tertiary);margin-left:auto}.wba94a6eca_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.wba94a6eca_row{box-sizing:border-box;width:100%;min-height:26px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:6px;padding:3px 9px 3px 22px;font-size:12px;line-height:17px;display:inline-flex;overflow:hidden}.wba94a6eca_row:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_row[data-default=\"1\"]{color:var(--dsw-alias-label-primary)}.wba94a6eca_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_rowMark{color:var(--dsw-alias-state-success-primary);flex:none}.wba94a6eca_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:2px 9px;font-size:11px}.wba94a6eca_error{color:var(--dsw-alias-state-error-primary);padding:2px 9px;font-size:11px}";
+const tagId$3 = "@icomposer/workbench/ProfilePicker.module.css";
+if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$3) + "]") === null) {
 	const tag = document.createElement("style");
 	tag.dataset.plugin = "@icomposer/workbench";
-	tag.dataset.pluginCss = tagId$2;
-	tag.textContent = css$2;
+	tag.dataset.pluginCss = tagId$3;
+	tag.textContent = css$3;
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"trigger": "wba94a6eca_trigger",
-	"dot": "wba94a6eca_dot",
-	"hint": "wba94a6eca_hint",
-	"row": "wba94a6eca_row",
-	"label": "wba94a6eca_label",
-	"list": "wba94a6eca_list",
 	"closeMark": "wba94a6eca_closeMark",
-	"error": "wba94a6eca_error",
-	"rowName": "wba94a6eca_rowName",
 	"picker": "wba94a6eca_picker",
+	"row": "wba94a6eca_row",
+	"list": "wba94a6eca_list",
+	"trigger": "wba94a6eca_trigger",
 	"pickerHeader": "wba94a6eca_pickerHeader",
-	"rowMark": "wba94a6eca_rowMark"
+	"rowMark": "wba94a6eca_rowMark",
+	"error": "wba94a6eca_error",
+	"label": "wba94a6eca_label",
+	"hint": "wba94a6eca_hint",
+	"dot": "wba94a6eca_dot",
+	"rowName": "wba94a6eca_rowName"
 };
 
 //#endregion
@@ -1496,15 +1330,22 @@ function tooltipOf(profile, fallback) {
 	return parts.length > 0 ? parts.join(" · ") : fallback;
 }
 /**
+
 * Sidebar Active Profile selector (TASK-047): rendered as plain text rows
+
 * matching the session rows — collapsed shows the current active profile
+
 * name; expanded lists profile names with env/account/tenant on hover.
+
 * Data comes from the fast overview channel (sanitized overview read, no CLI
+
 * subprocess); the switch still goes through the write bridge.
+
 */
 var ProfilePicker = class extends react.Component {
 	state = { phase: "collapsed" };
 	/** Fetch the current Active Profile once on mount so the collapsed row
+	
 	* shows the selected profile name, not a placeholder. */
 	componentDidMount() {
 		this.warmActive();
@@ -1523,6 +1364,7 @@ var ProfilePicker = class extends react.Component {
 		} catch {}
 	}
 	/** One retry after a short delay: a Host restart / plugin reinstall window
+	
 	* answers transiently and should not immediately show "cannot connect". */
 	async fetchFastRetry() {
 		const url = `${OVERVIEW_URL}?fast=1`;
@@ -1704,6 +1546,96 @@ var ProfilePicker = class extends react.Component {
 };
 
 //#endregion
+//#region ../ui-insuremo-status/assets/insuremo-globe.png
+var insuremo_globe_default = undefined;
+
+//#endregion
+//#region ../ui-insuremo-status/assets/insuremo-wordmark-dark.png
+var insuremo_wordmark_dark_default = undefined;
+
+//#endregion
+//#region ../ui-insuremo-status/assets/insuremo-wordmark-light.png
+var insuremo_wordmark_light_default = undefined;
+
+//#endregion
+//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-status\src\client\BrandChrome.module.css.mjs
+const css$2 = ".wb1683cb0f_driver{display:none}.wb1683cb0f_wordmarkHost,.wb1683cb0f_railHost{pointer-events:none;z-index:1;position:absolute;inset:0}.wb1683cb0f_wordmarkHost{justify-content:flex-start;align-items:center;display:flex;overflow:hidden}.wb1683cb0f_wordmarkInner{white-space:nowrap;align-items:center;gap:8px;height:24px;line-height:1;display:inline-flex}.wb1683cb0f_wordmark{flex:none;width:99px;height:24px;display:block}.wb1683cb0f_wordmark img{object-fit:contain;image-rendering:auto;width:99px;height:24px;display:block}.wb1683cb0f_wordmarkDark{display:none!important}body[data-ds-dark-theme] .wb1683cb0f_wordmarkLight{display:none!important}body[data-ds-dark-theme] .wb1683cb0f_wordmarkDark{display:block!important}.wb1683cb0f_dsh{color:currentColor;font-family:var(--ds-font-family,Inter, system-ui, sans-serif);letter-spacing:-.045em;font-size:22px;font-weight:650;line-height:24px;display:inline-block}.wb1683cb0f_railHost{justify-content:center;align-items:center;display:flex}.wb1683cb0f_railMark{width:24px;height:24px;color:var(--dsw-alias-label-primary);flex:none;display:block}.wb1683cb0f_railMark img{object-fit:contain;image-rendering:auto;width:24px;height:24px;display:block}button:hover .wb1683cb0f_railHost{visibility:hidden}";
+const tagId$2 = "@icomposer/workbench/BrandChrome.module.css";
+if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
+	const tag = document.createElement("style");
+	tag.dataset.plugin = "@icomposer/workbench";
+	tag.dataset.pluginCss = tagId$2;
+	tag.textContent = css$2;
+	document.head.appendChild(tag);
+}
+var BrandChrome_module_css_default = {
+	"driver": "wb1683cb0f_driver",
+	"railHost": "wb1683cb0f_railHost",
+	"wordmark": "wb1683cb0f_wordmark",
+	"dsh": "wb1683cb0f_dsh",
+	"wordmarkInner": "wb1683cb0f_wordmarkInner",
+	"railMark": "wb1683cb0f_railMark",
+	"wordmarkHost": "wb1683cb0f_wordmarkHost",
+	"wordmarkDark": "wb1683cb0f_wordmarkDark",
+	"wordmarkLight": "wb1683cb0f_wordmarkLight"
+};
+
+//#endregion
+//#region ../ui-insuremo-status/src/client/InsuremoBrand.tsx
+/** Same-origin brand assets served by the host-side brand-assets-server. */
+const BRAND_ASSET_URL = "/api/icomposer-workbench/ui/assets";
+/**
+* The mark slot feeds two hosts with identical props: the wide identity row
+* (mark + name lockup — the wordmark already carries the brand, so the mark
+* must stay empty there, matching the pre-slot overlay look) and the
+* collapsed rail toggle (mark only). The rail host is the button that also
+* holds the panel icon; detect it after mount and render only there.
+*/
+function InsuremoBrandMark({ size = 24 }) {
+	const hostRef = (0, react.useRef)(null);
+	const [inRail, setInRail] = (0, react.useState)(false);
+	(0, react.useLayoutEffect)(() => {
+		const button = hostRef.current?.closest("button");
+		setInRail(button?.querySelector("svg") !== null);
+	}, []);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		ref: hostRef,
+		children: inRail ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
+			src: `${BRAND_ASSET_URL}/insuremo-globe.png`,
+			alt: "",
+			width: size,
+			height: Math.round(size * 62 / 65),
+			decoding: "async",
+			"data-emitted-brand-asset": insuremo_globe_default
+		}) : null
+	});
+}
+/** The wordmark rendered into `sidebar.brand.name` (99×24, theme-switched
+* through the same CSS the overlay used). */
+function InsuremoBrandName() {
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+		className: BrandChrome_module_css_default.wordmark,
+		"data-icomposer-brand-asset": "wordmark",
+		"data-emitted-brand-assets": `${insuremo_wordmark_light_default}|${insuremo_wordmark_dark_default}`,
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
+			className: BrandChrome_module_css_default.wordmarkLight,
+			src: `${BRAND_ASSET_URL}/insuremo-wordmark-light.png`,
+			alt: "",
+			width: 312,
+			height: 76,
+			decoding: "async"
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
+			className: BrandChrome_module_css_default.wordmarkDark,
+			src: `${BRAND_ASSET_URL}/insuremo-wordmark-dark.png`,
+			alt: "",
+			width: 312,
+			height: 76,
+			decoding: "async"
+		})]
+	});
+}
+
+//#endregion
 //#region ../ui-insuremo-status/src/client/locales.ts
 /** Copy for the InsureMO sidebar status + workspace health strip. */
 const zh$1 = {
@@ -1751,6 +1683,20 @@ function apply$2(ctx) {
 		zh: zh$1,
 		en: en$1
 	}), "ui-insuremo-status: dictionaries");
+	ctx.slots.inject("sidebar.brand.name", () => ctx.slots.inject("conversation.hero.brand.mark", function* () {
+		yield ctx.slots.register({
+			name: "sidebar.brand.mark",
+			priority: -1
+		}, InsuremoBrandMark);
+		yield ctx.slots.register({
+			name: "sidebar.brand.name",
+			priority: -1
+		}, InsuremoBrandName);
+		yield ctx.slots.register({
+			name: "conversation.hero.brand.mark",
+			priority: -1
+		}, InsuremoBrandMark);
+	}));
 	const t = ctx.locale.bind(NS$1);
 	ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
 		name: "sidebar.footer.action",
@@ -1769,7 +1715,7 @@ function apply$2(ctx) {
 }
 
 //#endregion
-//#region \0dsh-css:asset
+//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-workbench-jobs\src\client\JobNode.module.css.mjs
 const css$1 = ".wb6cd975b4_row{box-sizing:border-box;width:100%;min-height:36px;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:8px;padding:7px 12px;font-size:13px;line-height:20px;display:flex}.wb6cd975b4_row:hover{background:var(--dsw-alias-interactive-bg-hover)}.wb6cd975b4_icon{color:var(--dsw-alias-label-secondary);flex:none}.wb6cd975b4_kind{min-width:0;color:var(--dsw-alias-label-primary);text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.wb6cd975b4_status{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:999px;flex:none;margin-left:auto;padding:1px 6px;font-size:11px;line-height:16px}.wb6cd975b4_digest{max-width:180px;color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;flex:none;overflow:hidden}";
 const tagId$1 = "@icomposer/workbench/JobNode.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
@@ -1780,11 +1726,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"kind": "wb6cd975b4_kind",
 	"status": "wb6cd975b4_status",
+	"row": "wb6cd975b4_row",
 	"digest": "wb6cd975b4_digest",
 	"icon": "wb6cd975b4_icon",
-	"row": "wb6cd975b4_row"
+	"kind": "wb6cd975b4_kind"
 };
 
 //#endregion
@@ -1830,7 +1776,7 @@ function JobNode({ node, t }) {
 }
 
 //#endregion
-//#region \0dsh-css:asset
+//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-workbench-jobs\src\client\IciExplainToolview.module.css.mjs
 const css = ".wb13b81332_card{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);width:100%;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-radius:10px;padding:12px;font-size:13px}.wb13b81332_header{align-items:center;gap:8px;min-height:24px;display:flex}.wb13b81332_status{color:var(--dsw-alias-label-secondary);margin-left:auto;font-size:12px}.wb13b81332_summary,.wb13b81332_hint,.wb13b81332_consent,.wb13b81332_progress,.wb13b81332_done,.wb13b81332_error{margin:8px 0}.wb13b81332_hint{color:var(--dsw-alias-label-tertiary)}.wb13b81332_consent{color:var(--dsw-alias-label-secondary)}.wb13b81332_fieldset{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;gap:6px;margin:8px 0;padding:8px;display:grid}.wb13b81332_fieldset legend{color:var(--dsw-alias-label-secondary)}.wb13b81332_selectedReference{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;margin:0}.wb13b81332_referenceActions{flex-wrap:wrap;gap:8px;display:flex}.wb13b81332_field{align-items:center;gap:8px;margin:8px 0;display:flex}.wb13b81332_field span{min-width:76px;color:var(--dsw-alias-label-secondary)}.wb13b81332_field select{min-width:150px;max-width:100%}.wb13b81332_actions{gap:8px;margin-top:10px;display:flex}.wb13b81332_actions button,.wb13b81332_referenceActions button,.wb13b81332_card>button{border:1px solid var(--dsw-alias-border-l2);min-height:28px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);cursor:pointer;border-radius:6px;padding:4px 12px}.wb13b81332_actions button:first-child{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-active)}button:disabled,select:disabled,input:disabled{cursor:not-allowed;opacity:.55}.wb13b81332_error,.wb13b81332_errorText{color:var(--dsw-alias-state-error-primary)}.wb13b81332_done{color:var(--dsw-alias-state-success-primary);overflow-wrap:anywhere}.wb13b81332_runMeta{color:var(--dsw-alias-label-tertiary);margin:4px 0;font-size:12px}.wb13b81332_session{cursor:pointer;user-select:all}.wb13b81332_batchJobRow{overflow-wrap:anywhere;margin:4px 0}";
 const tagId = "@icomposer/workbench/IciExplainToolview.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -1841,24 +1787,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"error": "wb13b81332_error",
-	"errorText": "wb13b81332_errorText",
-	"hint": "wb13b81332_hint",
-	"runMeta": "wb13b81332_runMeta",
-	"status": "wb13b81332_status",
-	"done": "wb13b81332_done",
-	"summary": "wb13b81332_summary",
-	"selectedReference": "wb13b81332_selectedReference",
-	"fieldset": "wb13b81332_fieldset",
-	"consent": "wb13b81332_consent",
+	"header": "wb13b81332_header",
 	"field": "wb13b81332_field",
 	"session": "wb13b81332_session",
-	"actions": "wb13b81332_actions",
-	"referenceActions": "wb13b81332_referenceActions",
-	"header": "wb13b81332_header",
 	"card": "wb13b81332_card",
+	"done": "wb13b81332_done",
+	"fieldset": "wb13b81332_fieldset",
+	"actions": "wb13b81332_actions",
+	"selectedReference": "wb13b81332_selectedReference",
+	"status": "wb13b81332_status",
+	"referenceActions": "wb13b81332_referenceActions",
+	"summary": "wb13b81332_summary",
+	"hint": "wb13b81332_hint",
+	"batchJobRow": "wb13b81332_batchJobRow",
+	"consent": "wb13b81332_consent",
+	"runMeta": "wb13b81332_runMeta",
+	"error": "wb13b81332_error",
 	"progress": "wb13b81332_progress",
-	"batchJobRow": "wb13b81332_batchJobRow"
+	"errorText": "wb13b81332_errorText"
 };
 
 //#endregion
