@@ -123,6 +123,72 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     expect(view.view.queryByRole("radio")).toBeNull();
   });
 
+  it("TASK-076: install button renders only while the IMO CLI is unavailable", async () => {
+    const unavailableView = { ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } };
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(unavailableView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    expect(await view.view.findByRole("button", { name: zh.cliInstall })).toBeTruthy();
+    expect((await view.view.findAllByText(new RegExp(zh.imoUnavailable))).length).toBeGreaterThan(0);
+    // The side-effect hint names the registry write and the global install.
+    expect(await view.view.findByText(new RegExp("npmrc"))).toBeTruthy();
+
+  });
+
+  it("TASK-076: install button is absent once the IMO CLI is available", async () => {
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    await view.view.findByRole("button", { name: zh.cliUpdate });
+    expect(view.view.queryAllByRole("button", { name: zh.cliInstall })).toHaveLength(0);
+  });
+
+  it("TASK-076: one-click install posts, shows the success line, and refreshes the overview", async () => {
+    const unavailableView = { ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } };
+    const availableView = { ...fixtureView };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/imo-install")) {
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>)["X-Workbench-Action"]).toBe("1");
+        return jsonResponse({ ok: true, result: { status: "completed", packageManager: "npm", currentVersion: "0.2.14" } });
+      }
+      if (url.includes("fast=0")) return jsonResponse(availableView);
+      return jsonResponse(unavailableView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    (await view.view.findByRole("button", { name: zh.cliInstall })).click();
+    await vi.waitFor(() => {
+      const actionCall = fetchMock.mock.calls.find(call => String(call[0]).includes("/actions/imo-install"));
+      expect(actionCall).toBeTruthy();
+    });
+    expect(await view.view.findByText(new RegExp(zh.cliInstalled))).toBeTruthy();
+    // The silent reload re-reads the full overview so the card flips available.
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(call => String(call[0]).includes("fast=0"))).toBe(true);
+    });
+  });
+
+  it("TASK-076: install failure renders inline with the idempotent retry hint", async () => {
+    const unavailableView = { ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/actions/imo-install")) {
+        return jsonResponse({ ok: false, error: { code: "no-package-manager", message: "neither npm nor pnpm was found on PATH; install Node.js first" } });
+      }
+      return jsonResponse(unavailableView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    (await view.view.findByRole("button", { name: zh.cliInstall })).click();
+    expect(await view.view.findByText(/no-package-manager: neither npm nor pnpm/)).toBeTruthy();
+    expect(await view.view.findByText(new RegExp(zh.cliInstallRetryHint.slice(0, 12)))).toBeTruthy();
+  });
+
   it("update-available badge rides the collapsed header (pending slot)", async () => {
     const updateView = { ...fixtureView, imo: { ...fixtureView.imo, updateAvailable: true, target: "0.2.18" } };
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(updateView));

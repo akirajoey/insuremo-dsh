@@ -122,9 +122,60 @@ function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged
         {t("imoCurrent")}: <code>{imo.available ? (imo.current ?? "—") : t("imoUnavailable")}</code>
         {imo.updateAvailable && imo.target !== undefined ? ` → ${imo.target}` : ""}
       </p>
-      <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} />
+      {imo.available ? <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} /> : <InstallButton t={t} onChanged={props.onChanged} />}
     </div>
   );
+}
+
+/**
+ * One-shot IMO CLI installer (TASK-076): rendered only while the overview
+ * reports the CLI unavailable. The visible hint names both side effects —
+ * the user-level @insuremo registry write and the global package install —
+ * and the failure line explains why retrying without rollback is safe.
+ */
+class InstallButton extends Component<{ t: Translate; onChanged: () => void }, { install: UpgradeState }> {
+  override state: { install: UpgradeState } = { install: { phase: "idle" } };
+
+  private async run(): Promise<void> {
+    this.setState({ install: { phase: "busy" } });
+    const outcome = await postAction<{ status: string; currentVersion: string | null }>("imo-install", {});
+    if (outcome.ok && outcome.result.status === "completed") {
+      this.setState({ install: { phase: "done", message: outcome.result.currentVersion ?? "?" } });
+      this.props.onChanged();
+    } else if (outcome.ok) {
+      this.setState({ install: { phase: "failed", message: "post-install probe failed" } });
+    } else {
+      const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
+      this.setState({ install: { phase: "failed", message } });
+    }
+  }
+
+  override render(): ReactNode {
+    const { t } = this.props;
+    const busy = this.state.install.phase === "busy";
+    return (
+      <div>
+        <p>
+          <button
+            type="button"
+            disabled={busy}
+            aria-busy={busy}
+            onClick={() => void this.run()}
+            aria-label={busy ? t("cliInstalling") : t("cliInstall")}
+          >
+            {busy ? t("cliInstalling") : t("cliInstall")}
+          </button>
+          {this.state.install.phase === "done" ? <span role="status" data-install="done">{t("cliInstalled")}: {this.state.install.message}</span> : null}
+          {this.state.install.phase === "failed" ? <span role="alert" data-install="failed" className={css.error}>{t("cliInstallFailed")}: {this.state.install.message}</span> : null}
+        </p>
+        {this.state.install.phase === "failed" ? (
+          <p className={css.hint} data-install-retry="1">{t("cliInstallRetryHint")}</p>
+        ) : (
+          <p className={css.hint}>{t("cliInstallHint")}</p>
+        )}
+      </div>
+    );
+  }
 }
 
 interface UpgradeState {
