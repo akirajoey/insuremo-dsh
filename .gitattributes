@@ -1,0 +1,8 @@
+# Normalize line endings: builds must be byte-identical across platforms
+# (rolldown content hashes chunk files; CRLF checkouts change emitted
+# comment bytes and therefore chunk names, breaking the git-dist drift gate).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.woff binary
+*.woff2 binary
