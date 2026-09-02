@@ -375,10 +375,11 @@ class SkillsRegion extends Component<
     return (
       <div className={css.region}>
         <h4>{t("skillsTitle")}</h4>
-        <p>
+        <div className={css.controls}>
           <label>
             <span className={css.meta}>{t("skillsScenarioLabel")}</span>{" "}
             <select
+              className={css.select}
               value={this.state.scenario}
               disabled={busy}
               aria-label={t("skillsScenarioLabel")}
@@ -386,26 +387,28 @@ class SkillsRegion extends Component<
             >
               {SKILL_SCENARIOS.map(id => <option key={id} value={id}>{id}</option>)}
             </select>
-          </label>{" "}
+          </label>
           <button
             type="button"
+            className={css.action}
             disabled={busy}
             aria-busy={run.phase === "busy" || undefined}
             onClick={() => void this.syncScenario()}
-            aria-label={run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")}
+            aria-label={`${t("skillsScenarioInstall")}: ${this.state.scenario}`}
           >
             {run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")}
-          </button>{" "}
+          </button>
           <button
             type="button"
+            className={css.action}
             disabled={busy}
             aria-busy={this.state.updatingAll || undefined}
             onClick={() => void this.updateAll()}
-            aria-label={this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")}
+            aria-label={`${t("skillsUpdateAll")} · ${t("skillsScopeHint")}`}
           >
             {this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")}
           </button>
-        </p>
+        </div>
         {run.phase === "done" ? (
           <p role="status" data-scenario="done">{t("skillsScenarioDone")}{run.diff === undefined ? "" : `: ${diffText(run.diff, t)}`}</p>
         ) : null}

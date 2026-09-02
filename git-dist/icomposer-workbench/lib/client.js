@@ -243,7 +243,7 @@ async function postAction$1(action, body, signal) {
 
 //#endregion
 //#region \0dsh-css:asset
-const css$5 = ".wb7fdb0fb4_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.wb7fdb0fb4_card:hover{border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.wb7fdb0fb4_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.wb7fdb0fb4_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.wb7fdb0fb4_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.wb7fdb0fb4_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.wb7fdb0fb4_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.wb7fdb0fb4_chevronOpen{transform:rotate(180deg)}.wb7fdb0fb4_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.wb7fdb0fb4_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.wb7fdb0fb4_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.wb7fdb0fb4_refresh{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.wb7fdb0fb4_refresh:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_refresh:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wb7fdb0fb4_region{flex-direction:column;gap:6px;display:flex}.wb7fdb0fb4_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.wb7fdb0fb4_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.wb7fdb0fb4_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wb7fdb0fb4_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.wb7fdb0fb4_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.wb7fdb0fb4_toggle:disabled{cursor:not-allowed;opacity:.55}.wb7fdb0fb4_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.wb7fdb0fb4_toggle[aria-checked=true] .wb7fdb0fb4_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.wb7fdb0fb4_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.wb7fdb0fb4_toggle[aria-checked=true] .wb7fdb0fb4_controlThumb{transform:translate(12px)}.wb7fdb0fb4_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.wb7fdb0fb4_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.wb7fdb0fb4_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.wb7fdb0fb4_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.wb7fdb0fb4_small:hover{color:var(--dsw-alias-state-error-primary)}";
+const css$5 = ".wbf3683280_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.wbf3683280_card:hover{border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.wbf3683280_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.wbf3683280_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.wbf3683280_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.wbf3683280_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.wbf3683280_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.wbf3683280_chevronOpen{transform:rotate(180deg)}.wbf3683280_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.wbf3683280_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.wbf3683280_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.wbf3683280_refresh,.wbf3683280_action{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.wbf3683280_refresh:hover,.wbf3683280_action:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_refresh:focus-visible,.wbf3683280_action:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wbf3683280_action:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_controls{flex-wrap:wrap;align-items:center;gap:8px;margin:0;display:flex}.wbf3683280_select{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:220px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 10px;font-size:13px}.wbf3683280_select:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.wbf3683280_select:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_region{flex-direction:column;gap:6px;display:flex}.wbf3683280_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.wbf3683280_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.wbf3683280_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wbf3683280_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.wbf3683280_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.wbf3683280_toggle:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.wbf3683280_toggle[aria-checked=true] .wbf3683280_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.wbf3683280_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.wbf3683280_toggle[aria-checked=true] .wbf3683280_controlThumb{transform:translate(12px)}.wbf3683280_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.wbf3683280_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.wbf3683280_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.wbf3683280_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.wbf3683280_small:hover{color:var(--dsw-alias-state-error-primary)}";
 const tagId$5 = "@icomposer/workbench/InsuremoCard.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$5) + "]") === null) {
 	const tag = document.createElement("style");
@@ -253,27 +253,30 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"name": "wb7fdb0fb4_name",
-	"hint": "wb7fdb0fb4_hint",
-	"body": "wb7fdb0fb4_body",
-	"small": "wb7fdb0fb4_small",
-	"footer": "wb7fdb0fb4_footer",
-	"header": "wb7fdb0fb4_header",
-	"description": "wb7fdb0fb4_description",
-	"toggle": "wb7fdb0fb4_toggle",
-	"error": "wb7fdb0fb4_error",
-	"pending": "wb7fdb0fb4_pending",
-	"controlTrack": "wb7fdb0fb4_controlTrack",
-	"meta": "wb7fdb0fb4_meta",
-	"chevronOpen": "wb7fdb0fb4_chevronOpen",
-	"card": "wb7fdb0fb4_card",
-	"controlThumb": "wb7fdb0fb4_controlThumb",
-	"chevron": "wb7fdb0fb4_chevron",
-	"list": "wb7fdb0fb4_list",
-	"refresh": "wb7fdb0fb4_refresh",
-	"cardOpen": "wb7fdb0fb4_cardOpen",
-	"headText": "wb7fdb0fb4_headText",
-	"region": "wb7fdb0fb4_region"
+	"pending": "wbf3683280_pending",
+	"list": "wbf3683280_list",
+	"toggle": "wbf3683280_toggle",
+	"body": "wbf3683280_body",
+	"footer": "wbf3683280_footer",
+	"controls": "wbf3683280_controls",
+	"controlTrack": "wbf3683280_controlTrack",
+	"controlThumb": "wbf3683280_controlThumb",
+	"hint": "wbf3683280_hint",
+	"error": "wbf3683280_error",
+	"name": "wbf3683280_name",
+	"meta": "wbf3683280_meta",
+	"select": "wbf3683280_select",
+	"small": "wbf3683280_small",
+	"chevron": "wbf3683280_chevron",
+	"cardOpen": "wbf3683280_cardOpen",
+	"headText": "wbf3683280_headText",
+	"region": "wbf3683280_region",
+	"action": "wbf3683280_action",
+	"card": "wbf3683280_card",
+	"refresh": "wbf3683280_refresh",
+	"description": "wbf3683280_description",
+	"chevronOpen": "wbf3683280_chevronOpen",
+	"header": "wbf3683280_header"
 };
 
 //#endregion
@@ -713,46 +716,50 @@ var SkillsRegion = class extends react.Component {
 			className: InsuremoCard_module_css_default.region,
 			children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", { children: t("skillsTitle") }),
-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", { children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: InsuremoCard_module_css_default.meta,
-							children: t("skillsScenarioLabel")
-						}),
-						" ",
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-							value: this.state.scenario,
-							disabled: busy,
-							"aria-label": t("skillsScenarioLabel"),
-							onChange: (event) => this.setState({
-								scenario: event.target.value,
-								scenarioRun: { phase: "idle" }
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: InsuremoCard_module_css_default.controls,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: InsuremoCard_module_css_default.meta,
+								children: t("skillsScenarioLabel")
 							}),
-							children: SKILL_SCENARIOS.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-								value: id,
-								children: id
-							}, id))
+							" ",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+								className: InsuremoCard_module_css_default.select,
+								value: this.state.scenario,
+								disabled: busy,
+								"aria-label": t("skillsScenarioLabel"),
+								onChange: (event) => this.setState({
+									scenario: event.target.value,
+									scenarioRun: { phase: "idle" }
+								}),
+								children: SKILL_SCENARIOS.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+									value: id,
+									children: id
+								}, id))
+							})
+						] }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: InsuremoCard_module_css_default.action,
+							disabled: busy,
+							"aria-busy": run.phase === "busy" || void 0,
+							onClick: () => void this.syncScenario(),
+							"aria-label": `${t("skillsScenarioInstall")}: ${this.state.scenario}`,
+							children: run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: InsuremoCard_module_css_default.action,
+							disabled: busy,
+							"aria-busy": this.state.updatingAll || void 0,
+							onClick: () => void this.updateAll(),
+							"aria-label": `${t("skillsUpdateAll")} · ${t("skillsScopeHint")}`,
+							children: this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")
 						})
-					] }),
-					" ",
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						disabled: busy,
-						"aria-busy": run.phase === "busy" || void 0,
-						onClick: () => void this.syncScenario(),
-						"aria-label": run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall"),
-						children: run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")
-					}),
-					" ",
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						disabled: busy,
-						"aria-busy": this.state.updatingAll || void 0,
-						onClick: () => void this.updateAll(),
-						"aria-label": this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll"),
-						children: this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")
-					})
-				] }),
+					]
+				}),
 				run.phase === "done" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
 					role: "status",
 					"data-scenario": "done",
@@ -933,13 +940,13 @@ const zh$2 = {
 	authCliHint: "新增或登录 profile 请使用 imo auth login CLI",
 	skillsToggle: "启用/停用",
 	skillsScenarioLabel: "场景",
-	skillsScenarioInstall: "安装/同步场景",
-	skillsScenarioInstalling: "场景同步中…",
+	skillsScenarioInstall: "Install",
+	skillsScenarioInstalling: "Installing…",
 	skillsScenarioDone: "场景已同步",
 	skillsScenarioFailed: "场景同步失败",
 	skillsInstallFirstHint: "选择场景并同步即可完成首次安装。",
-	skillsUpdateAll: "更新已装 Skills（全部来源）",
-	skillsUpdatingAll: "更新中…",
+	skillsUpdateAll: "Update",
+	skillsUpdatingAll: "Updating…",
 	skillsUpdateDone: "已更新",
 	skillsUpdateFailed: "更新失败",
 	skillsScopeHint: "更新仅拉取已安装的 Skill 来源；场景同步可安装或补齐场景成员。",
@@ -1022,12 +1029,12 @@ const en$2 = {
 	authCliHint: "Add or log in to profiles via the imo auth login CLI",
 	skillsToggle: "Enable/disable",
 	skillsScenarioLabel: "Scenario",
-	skillsScenarioInstall: "Install/sync scenario",
-	skillsScenarioInstalling: "Syncing scenario…",
+	skillsScenarioInstall: "Install",
+	skillsScenarioInstalling: "Installing…",
 	skillsScenarioDone: "Scenario synced",
 	skillsScenarioFailed: "Scenario sync failed",
 	skillsInstallFirstHint: "Pick a scenario and sync to install your first skills.",
-	skillsUpdateAll: "Update installed skills (all sources)",
+	skillsUpdateAll: "Update",
 	skillsUpdatingAll: "Updating…",
 	skillsUpdateDone: "Updated",
 	skillsUpdateFailed: "Update failed",
@@ -1446,17 +1453,17 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"hint": "wba94a6eca_hint",
 	"error": "wba94a6eca_error",
-	"dot": "wba94a6eca_dot",
-	"rowMark": "wba94a6eca_rowMark",
-	"label": "wba94a6eca_label",
-	"trigger": "wba94a6eca_trigger",
-	"pickerHeader": "wba94a6eca_pickerHeader",
-	"closeMark": "wba94a6eca_closeMark",
-	"list": "wba94a6eca_list",
 	"picker": "wba94a6eca_picker",
+	"closeMark": "wba94a6eca_closeMark",
 	"row": "wba94a6eca_row",
+	"trigger": "wba94a6eca_trigger",
+	"dot": "wba94a6eca_dot",
+	"pickerHeader": "wba94a6eca_pickerHeader",
+	"rowMark": "wba94a6eca_rowMark",
+	"hint": "wba94a6eca_hint",
+	"list": "wba94a6eca_list",
+	"label": "wba94a6eca_label",
 	"rowName": "wba94a6eca_rowName"
 };
 
@@ -1702,15 +1709,15 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"driver": "wb1683cb0f_driver",
-	"wordmark": "wb1683cb0f_wordmark",
 	"dsh": "wb1683cb0f_dsh",
-	"wordmarkInner": "wb1683cb0f_wordmarkInner",
-	"wordmarkLight": "wb1683cb0f_wordmarkLight",
 	"railMark": "wb1683cb0f_railMark",
 	"railHost": "wb1683cb0f_railHost",
+	"driver": "wb1683cb0f_driver",
+	"wordmarkInner": "wb1683cb0f_wordmarkInner",
+	"wordmark": "wb1683cb0f_wordmark",
 	"wordmarkHost": "wb1683cb0f_wordmarkHost",
-	"wordmarkDark": "wb1683cb0f_wordmarkDark"
+	"wordmarkDark": "wb1683cb0f_wordmarkDark",
+	"wordmarkLight": "wb1683cb0f_wordmarkLight"
 };
 
 //#endregion
@@ -1859,11 +1866,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"row": "wb6cd975b4_row",
-	"icon": "wb6cd975b4_icon",
-	"status": "wb6cd975b4_status",
 	"digest": "wb6cd975b4_digest",
-	"kind": "wb6cd975b4_kind"
+	"row": "wb6cd975b4_row",
+	"status": "wb6cd975b4_status",
+	"kind": "wb6cd975b4_kind",
+	"icon": "wb6cd975b4_icon"
 };
 
 //#endregion
@@ -1920,24 +1927,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"errorText": "wb13b81332_errorText",
-	"selectedReference": "wb13b81332_selectedReference",
-	"session": "wb13b81332_session",
-	"header": "wb13b81332_header",
-	"error": "wb13b81332_error",
 	"progress": "wb13b81332_progress",
-	"fieldset": "wb13b81332_fieldset",
-	"field": "wb13b81332_field",
-	"summary": "wb13b81332_summary",
 	"referenceActions": "wb13b81332_referenceActions",
-	"status": "wb13b81332_status",
-	"card": "wb13b81332_card",
 	"done": "wb13b81332_done",
-	"runMeta": "wb13b81332_runMeta",
+	"batchJobRow": "wb13b81332_batchJobRow",
+	"hint": "wb13b81332_hint",
+	"header": "wb13b81332_header",
+	"fieldset": "wb13b81332_fieldset",
 	"actions": "wb13b81332_actions",
 	"consent": "wb13b81332_consent",
-	"hint": "wb13b81332_hint",
-	"batchJobRow": "wb13b81332_batchJobRow"
+	"runMeta": "wb13b81332_runMeta",
+	"summary": "wb13b81332_summary",
+	"field": "wb13b81332_field",
+	"errorText": "wb13b81332_errorText",
+	"session": "wb13b81332_session",
+	"selectedReference": "wb13b81332_selectedReference",
+	"status": "wb13b81332_status",
+	"error": "wb13b81332_error",
+	"card": "wb13b81332_card"
 };
 
 //#endregion

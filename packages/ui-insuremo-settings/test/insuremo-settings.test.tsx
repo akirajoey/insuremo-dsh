@@ -344,7 +344,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const select = await view.view.findByRole("combobox", { name: zh.skillsScenarioLabel });
     const options = [...select.querySelectorAll("option")].map(option => option.getAttribute("value"));
     expect(options).toEqual(SCENARIO_IDS);
-    expect(await view.view.findByRole("button", { name: zh.skillsScenarioInstall })).toBeTruthy();
+    expect(await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) })).toBeTruthy();
     expect(await view.view.findByText(zh.skillsScopeHint)).toBeTruthy();
   });
 
@@ -371,7 +371,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("settings.plugin.item", {});
     await expand(view);
-    (await view.view.findByRole("button", { name: zh.skillsScenarioInstall })).click();
+    (await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) })).click();
     const done = await view.view.findByText(new RegExp(zh.skillsScenarioDone));
     expect(done.textContent).toContain("2");
     expect(done.textContent).toContain("insuremo-auth-cli");
@@ -391,7 +391,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("settings.plugin.item", {});
     await expand(view);
-    const install = await view.view.findByRole("button", { name: zh.skillsScenarioInstall });
+    const install = await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) });
     for (const status of ["failed", "partial-failure"]) {
       receipt = { status, added: ["insuremo-auth-cli"] };
       install.click();
@@ -419,7 +419,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("settings.plugin.item", {});
     await expand(view);
-    (await view.view.findByRole("button", { name: zh.skillsUpdateAll })).click();
+    (await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsUpdateAll}\\b`) })).click();
     const alert = await vi.waitFor(() => {
       const element = view.container.querySelector('[data-update="failed"]');
       if (element === null) throw new Error("update failure alert not rendered");
@@ -435,7 +435,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", receiptMock);
-    (await view.view.findByRole("button", { name: zh.skillsUpdateAll })).click();
+    (await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsUpdateAll}\\b`) })).click();
     await view.view.findByText(new RegExp(`${zh.skillsUpdateFailed}: failed`));
     expect(view.container.querySelector('[data-update="done"]')).toBeNull();
   });
@@ -451,18 +451,20 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("settings.plugin.item", {});
     await expand(view);
-    const install = await view.view.findByRole("button", { name: zh.skillsScenarioInstall });
+    const install = await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) });
     install.click();
     await vi.waitFor(() => {
-      expect((view.view.getByRole("button", { name: zh.skillsScenarioInstalling }) as HTMLButtonElement).disabled).toBe(true);
-      expect((view.view.getByRole("button", { name: zh.skillsUpdateAll }) as HTMLButtonElement).disabled).toBe(true);
+      // Busy flips the visible label; the descriptive aria-label stays stable.
+      expect(view.view.getByText(zh.skillsScenarioInstalling)).toBeTruthy();
+      expect((view.view.getByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) }) as HTMLButtonElement).disabled).toBe(true);
+      expect((view.view.getByRole("button", { name: new RegExp(`^${zh.skillsUpdateAll}\\b`) }) as HTMLButtonElement).disabled).toBe(true);
       const toggle = view.view.getAllByRole("switch").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper"))!;
       expect((toggle as HTMLButtonElement).disabled).toBe(true);
       expect((view.view.getByRole("combobox", { name: zh.skillsScenarioLabel }) as HTMLSelectElement).disabled).toBe(true);
     });
     resolveInstall?.(jsonResponse({ ok: true, result: { status: "completed", beforeCount: 2, afterCount: 3, added: ["insuremo-auth-cli"], removed: [], updated: [] } }));
     await vi.waitFor(() => {
-      expect((view.view.getByRole("button", { name: zh.skillsUpdateAll }) as HTMLButtonElement).disabled).toBe(false);
+      expect((view.view.getByRole("button", { name: new RegExp(`^${zh.skillsUpdateAll}\\b`) }) as HTMLButtonElement).disabled).toBe(false);
     });
   });
 
@@ -473,9 +475,9 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const view = runtime.renderSlot("settings.plugin.item", {});
     const header = await view.view.findByRole("button", { name: new RegExp(`${en.expand}: ${en.title}`) });
     header.click();
-    expect(await view.view.findByRole("button", { name: en.skillsScenarioInstall })).toBeTruthy();
+    expect(await view.view.findByRole("button", { name: new RegExp(`^${en.skillsScenarioInstall}`) })).toBeTruthy();
     expect(await view.view.findByRole("combobox", { name: en.skillsScenarioLabel })).toBeTruthy();
-    expect(await view.view.findByRole("button", { name: en.skillsUpdateAll })).toBeTruthy();
+    expect(await view.view.findByRole("button", { name: new RegExp(`^${en.skillsUpdateAll} \\u00b7`) })).toBeTruthy();
     expect(await view.view.findByText(en.skillsScopeHint)).toBeTruthy();
   });
 
