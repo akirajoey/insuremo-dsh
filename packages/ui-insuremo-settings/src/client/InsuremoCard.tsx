@@ -26,6 +26,7 @@ type LoadState =
 export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { expanded: boolean }> {
   override state: LoadState & { expanded: boolean } = { status: "loading", expanded: false };
   #controller: AbortController | undefined;
+  #autoUpgraded = false;
 
   override componentDidMount(): void {
     void this.load("fast");
@@ -35,8 +36,7 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
     this.#controller?.abort();
   }
 
-  /** Silent refresh for post-action reloads: keeps regions mounted so child
-   * state (upgrade success lines, per-skill errors) is not destroyed. */
+  /** Silent refresh for post-action reloads: keeps regions mounted so child state is preserved. */
   private async silentReload(): Promise<void> {
     try {
       const response = await fetch(`${OVERVIEW_URL}?fast=0`, { headers: { Accept: "application/json" } });
@@ -56,7 +56,17 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
       if (!response.ok) throw new Error(`overview fetch failed: ${response.status}`);
       const view = parseOverview(await response.json());
       if (view === null) throw new Error("overview payload was not recognized");
-      if (!controller.signal.aborted) this.setState(prev => ({ ...prev, status: "ready", view }));
+      if (!controller.signal.aborted) {
+        this.setState(prev => ({ ...prev, status: "ready", view }));
+        // Cold-start auto-upgrade (TASK-079c): a fast projection carrying any
+        // fast-uncached section triggers exactly ONE silent full refresh, so
+        // the user never sees a false "CLI not detected" first paint.
+        if (channel === "fast" && !this.#autoUpgraded
+          && [view.imo.code, view.skills.code, view.auth.code].includes("fast-uncached")) {
+          this.#autoUpgraded = true;
+          void this.silentReload();
+        }
+      }
     } catch {
       if (!controller.signal.aborted && this.state.status !== "ready") this.setState({ status: "error" });
     }
@@ -69,8 +79,10 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
   override render(): ReactNode {
     const state = this.state;
     const t = this.t.bind(this);
+    const imoCold = state.status === "ready" && state.view.imo.code === "fast-uncached";
+    const skillsCold = state.status === "ready" && state.view.skills.code === "fast-uncached";
     const summary = state.status === "ready"
-      ? `${state.view.imo.available ? (state.view.imo.current ?? "—") : t("imoUnavailable")} · ${state.view.auth.activeProfileName ?? "—"} · ${t("skillsTitle")} ${state.view.skills.enabled}/${state.view.skills.installed}`
+      ? `${state.view.imo.available ? (state.view.imo.current ?? "—") : imoCold ? t("imoLoading") : state.view.imo.code === "not-found" ? t("imoUnavailable") : t("imoDetectFailed")} · ${state.view.auth.activeProfileName ?? "—"} · ${t("skillsTitle")} ${skillsCold ? "…" : `${state.view.skills.enabled}/${state.view.skills.installed}`}`
       : state.status === "loading" ? t("loading") : t("error");
     return (
       <section className={`${css.card}${state.expanded ? ` ${css.cardOpen}` : ""}`}>
@@ -115,14 +127,30 @@ type Translate = (key: InsuremoLocaleKey) => string;
 
 function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void }): ReactNode {
   const { t, imo } = props;
+  if (imo.code === "fast-uncached") {
+    // Cold fast projection: loading skeleton, never a false "not detected".
+    return (
+      <div className={css.region}>
+        <h4>{t("imoTitle")}</h4>
+        <p className={css.hint} data-skeleton="1" aria-busy="true">{t("imoLoading")}</p>
+      </div>
+    );
+  }
+  // Install is offered only on a genuine full-read not-found. Transient or
+  // unknown failures (timeout/spawn-failed/unavailable/cancelled/...) render
+  // a sanitized detection-failed alert and never an install affordance.
+  const missing = !imo.available && imo.code === "not-found";
+  const failed = !imo.available && !missing;
   return (
     <div className={css.region}>
       <h4>{t("imoTitle")}</h4>
       <p>
-        {t("imoCurrent")}: <code>{imo.available ? (imo.current ?? "—") : t("imoUnavailable")}</code>
+        {t("imoCurrent")}: <code data-imo-state={imo.available ? "ok" : missing ? "missing" : "error"}>{imo.available ? (imo.current ?? "—") : missing ? t("imoUnavailable") : t("imoDetectFailed")}</code>
         {imo.updateAvailable && imo.target !== undefined ? ` → ${imo.target}` : ""}
       </p>
-      {imo.available ? <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} /> : <InstallButton t={t} onChanged={props.onChanged} />}
+      {failed ? <p role="alert" data-imo-state="error" className={css.error}>{t("imoDetectFailed")}: {imo.code}</p> : null}
+      {imo.available ? <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} /> : null}
+      {missing ? <InstallButton t={t} onChanged={props.onChanged} /> : null}
     </div>
   );
 }
@@ -305,11 +333,7 @@ class SkillsRegion extends Component<
     return this.state.updatingAll || this.state.scenarioRun.phase === "busy";
   }
 
-  /**
-   * Last-write-wins (TASK-041): no expectedRevision is sent — the server
-   * commits against its own latest revision and returns the new one, which
-   * removes the revision-conflict storms when the card holds a stale view.
-   */
+  /** Last-write-wins (TASK-041): server commits on its own revision; no CAS storms. */
   private async toggle(name: string, next: boolean, previous: boolean): Promise<void> {
     // Optimistically move the thumb and lock only this row while the action is
     // in flight. A failed request restores the server value explicitly.

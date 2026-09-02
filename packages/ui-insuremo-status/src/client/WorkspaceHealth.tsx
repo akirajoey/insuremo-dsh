@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Tooltip } from "@deepseek-ai/dsh-client-ui-primitives";
+import { BrandChrome } from "./BrandChrome.tsx";
 import type {
 	PropsLocale,
 	PropsRuntime,
@@ -313,6 +314,10 @@ export class WorkspaceHealth extends Component<
 		const { t } = this.props;
 		return (
 			<>
+				{/* Brand overlay driver (TASK-079d): a no-op on rc.2+ runtimes where
+				    the brand slots replace the native SVGs, and the rc.7 branding
+				    restoration when they do not exist. */}
+				<BrandChrome />
 				<div
 					ref={(element: HTMLDivElement | null): void => {
 						this.#driverRef = element;

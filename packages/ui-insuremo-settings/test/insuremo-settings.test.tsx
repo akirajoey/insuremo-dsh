@@ -173,6 +173,91 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     });
   });
 
+  const coldFastView = {
+    ...fixtureView,
+    imo: { status: "warning", code: "fast-uncached", available: false, updateAvailable: false },
+    skills: { ...fixtureView.skills, code: "fast-uncached" },
+  };
+
+  it("TASK-079c: cold fast projection renders skeletons without install/upgrade buttons or a false 'not detected' summary, and auto-upgrades exactly once", async () => {
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(coldFastView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await vi.waitFor(() => {
+      const summary = view.container.querySelector('[data-summary="1"]');
+      if (summary === null || !summary.textContent?.includes(zh.imoLoading)) throw new Error("cold summary not ready");
+      expect(summary.textContent).not.toContain(zh.imoUnavailable);
+      expect(summary.textContent).toContain("Skills …");
+    });
+    // Exactly one silent full refresh replaces the manual Refresh.
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("fast=0"))).toHaveLength(1);
+    });
+    await expand(view);
+    expect(await view.view.findByText(zh.imoLoading)).toBeTruthy();
+    expect(view.view.queryByRole("button", { name: zh.cliInstall })).toBeNull();
+    expect(view.view.queryByRole("button", { name: zh.cliUpdate })).toBeNull();
+    // The skills cold skeleton does not regress.
+    expect(await view.view.findByText(zh.skillsLoadingSlow)).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("fast=0"))).toHaveLength(1);
+  });
+
+  it("TASK-079c: auto upgrade renders the full available view without a manual refresh", async () => {
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      return jsonResponse(String(input).includes("fast=0") ? fixtureView : coldFastView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("fast=0"))).toHaveLength(1);
+    });
+    await vi.waitFor(() => {
+      if (!view.container.textContent?.includes(`${zh.imoCurrent}: 0.2.17`)) throw new Error("full imo view not rendered");
+    });
+    expect(view.view.queryByRole("button", { name: zh.cliInstall })).toBeNull();
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("fast=0"))).toHaveLength(1);
+  });
+
+  it("TASK-079c: transient/unknown IMO errors never show the install button and never claim 'not detected'", async () => {
+    const codes = ["timeout", "spawn-failed", "unavailable", "cancelled"];
+    let current = codes[0];
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse({ ...fixtureView, imo: { status: "error", code: current, available: false, updateAvailable: false } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    for (const code of codes) {
+      // eslint-disable-next-line no-await-in-loop
+      const alert = await vi.waitFor(() => {
+        const found = view.container.querySelector('[data-imo-state="error"][role="alert"]');
+        if (found === null || !found.textContent?.includes(code)) throw new Error(`alert for ${code} not rendered`);
+        return found;
+      });
+      expect(alert.textContent).toContain(zh.imoDetectFailed);
+      expect(view.view.queryAllByRole("button", { name: zh.cliInstall })).toHaveLength(0);
+      const summary = view.container.querySelector('[data-summary="1"]');
+      expect(summary?.textContent).toContain(zh.imoDetectFailed);
+      expect(summary?.textContent).not.toContain(zh.imoUnavailable);
+      expect(summary?.textContent).not.toContain(zh.imoLoading);
+      current = codes[(codes.indexOf(code) + 1) % codes.length]!;
+      if (code !== codes[codes.length - 1]) (view.view.getByRole("button", { name: new RegExp(`^${zh.refresh}`) })).click();
+    }
+  });
+
+  it("TASK-079c: the install button appears only after a full read reports not-found", async () => {
+    const unavailableFullView = { ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      return jsonResponse(String(input).includes("fast=0") ? unavailableFullView : coldFastView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("fast=0"))).toHaveLength(1);
+    });
+    expect(await view.view.findByRole("button", { name: zh.cliInstall })).toBeTruthy();
+  });
+
   it("TASK-076: install failure renders inline with the idempotent retry hint", async () => {
     const unavailableView = { ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } };
     const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {

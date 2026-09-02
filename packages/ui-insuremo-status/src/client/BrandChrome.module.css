@@ -90,6 +90,30 @@
   image-rendering: auto;
 }
 
+/* Hero overlay (TASK-079d): the New Session empty-state fish lives inside a
+   plain span hitbox; the span becomes the relative host and the globe rides
+   on top at the fish's visual size (~34px, 65:62 raster ratio). */
+.heroHost {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.heroMark {
+  display: block;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 32px;
+}
+
+.heroMark img {
+  display: block;
+  width: 34px;
+  height: 32px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
 /* The shell's native panel icon appears on hover; hide only our resting mark. */
 :global(button:hover) .railHost {
   visibility: hidden;

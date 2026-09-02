@@ -11,18 +11,29 @@ const FISH_VIEWBOX = "0 0 23.16 17.04";
 const PANEL_VIEWBOX = "0 0 16 16";
 const BRAND_ASSET_URL = "/api/icomposer-workbench/ui/assets";
 export const BRAND_HOST_ATTRIBUTE = "data-icomposer-brand-host";
-type HostKind = "wordmark" | "rail";
+type HostKind = "wordmark" | "rail" | "hero";
 
 interface BrandPort {
   readonly original: SVGElement;
-  readonly button: HTMLButtonElement;
+  readonly anchor: HTMLElement;
   readonly host: HTMLSpanElement;
   readonly root: Root;
   readonly originalStyle: string | null;
-  readonly buttonStyle: string | null;
+  readonly anchorStyle: string | null;
 }
 
-function svgButton(svg: SVGElement, kind: HostKind): HTMLButtonElement | null {
+/**
+ * Resolves the overlay anchor for one kind. wordmark/rail ride the Harness
+ * button shell; the hero fish lives inside a plain span (New Session empty
+ * state), so its span becomes the relative overlay host instead.
+ */
+function svgAnchor(svg: SVGElement, kind: HostKind): HTMLElement | null {
+  if (kind === "hero") {
+    if (svg.getAttribute("viewBox") !== FISH_VIEWBOX) return null;
+    const parent = svg.parentElement;
+    if (parent === null || parent.tagName === "BUTTON") return null;
+    return parent as HTMLElement;
+  }
   if (svg.getAttribute("viewBox") !== (kind === "wordmark" ? WORDMARK_VIEWBOX : FISH_VIEWBOX)) return null;
   const button = svg.parentElement;
   if (button === null || button.tagName !== "BUTTON") return null;
@@ -42,13 +53,23 @@ function svgButton(svg: SVGElement, kind: HostKind): HTMLButtonElement | null {
 function Asset({ kind }: { kind: HostKind }): ReactNode {
   if (kind === "wordmark") {
     return (
-      <span
-        className={css.wordmark}
-        data-icomposer-brand-asset={kind}
-        data-emitted-brand-assets={`${wordmarkLightUrl}|${wordmarkDarkUrl}`}
-      >
-        <img className={css.wordmarkLight} src={`${BRAND_ASSET_URL}/insuremo-wordmark-light.png`} alt="" width={312} height={76} decoding="async" />
-        <img className={css.wordmarkDark} src={`${BRAND_ASSET_URL}/insuremo-wordmark-dark.png`} alt="" width={312} height={76} decoding="async" />
+      <span className={css.wordmarkInner} aria-hidden="true">
+        <span
+          className={css.wordmark}
+          data-icomposer-brand-asset={kind}
+          data-emitted-brand-assets={`${wordmarkLightUrl}|${wordmarkDarkUrl}`}
+        >
+          <img className={css.wordmarkLight} src={`${BRAND_ASSET_URL}/insuremo-wordmark-light.png`} alt="" width={312} height={76} decoding="async" />
+          <img className={css.wordmarkDark} src={`${BRAND_ASSET_URL}/insuremo-wordmark-dark.png`} alt="" width={312} height={76} decoding="async" />
+        </span>
+        <span className={css.dsh}>dsh</span>
+      </span>
+    );
+  }
+  if (kind === "hero") {
+    return (
+      <span className={css.heroMark} data-icomposer-brand-asset={kind} data-emitted-brand-asset={globeUrl}>
+        <img src={`${BRAND_ASSET_URL}/insuremo-globe.png`} alt="" width={34} height={32} decoding="async" />
       </span>
     );
   }
@@ -59,19 +80,12 @@ function Asset({ kind }: { kind: HostKind }): ReactNode {
   );
 }
 
-function OwnedWordmark(): ReactNode {
-  return <span className={css.wordmarkInner} aria-hidden="true"><Asset kind="wordmark" /><span className={css.dsh}>dsh</span></span>;
-}
-
-function OwnedRailMark(): ReactNode {
-  return <Asset kind="rail" />;
-}
-
 /**
- * Hidden client driver that overlays only the two Harness-owned brand SVGs.
+ * Hidden client driver that overlays only the Harness-owned brand SVGs.
  * The source buttons remain the click/focus/tooltip owners; each original SVG
  * is merely visibility-hidden and restored, while every portal host is removed
- * on unmount or when the shell replaces a button.
+ * on unmount or when the shell replaces a button. On rc.2+ runtimes the brand
+ * slots replace the native SVGs, so the driver simply finds nothing to own.
  */
 export class BrandChrome extends Component {
   #driverRef: HTMLDivElement | null = null;
@@ -98,22 +112,22 @@ export class BrandChrome extends Component {
     for (const original of [...this.#ports.keys()]) this.drop(original);
   }
 
-  private ensure(doc: Document, original: SVGElement, button: HTMLButtonElement, kind: HostKind): void {
+  private ensure(doc: Document, original: SVGElement, anchor: HTMLElement, kind: HostKind): void {
     if (this.#ports.has(original)) return;
     const originalStyle = original.getAttribute("style");
-    const buttonStyle = button.getAttribute("style");
+    const anchorStyle = anchor.getAttribute("style");
     const host = doc.createElement("span");
     host.setAttribute(BRAND_HOST_ATTRIBUTE, kind);
     host.setAttribute("aria-hidden", "true");
-    host.className = kind === "wordmark" ? css.wordmarkHost : css.railHost;
+    host.className = kind === "wordmark" ? css.wordmarkHost : kind === "rail" ? css.railHost : css.heroHost;
     // Make the owned host an overlay so the hidden native SVG keeps its
-    // geometry and the button keeps its native layout and hit target.
-    button.style.position = "relative";
+    // geometry and the source element keeps its native layout and hit target.
+    anchor.style.position = "relative";
     original.style.visibility = "hidden";
-    button.appendChild(host);
+    anchor.appendChild(host);
     const root = createRoot(host);
-    root.render(kind === "wordmark" ? <OwnedWordmark /> : <OwnedRailMark />);
-    this.#ports.set(original, { original, button, host, root, originalStyle, buttonStyle });
+    root.render(<Asset kind={kind} />);
+    this.#ports.set(original, { original, anchor, host, root, originalStyle, anchorStyle });
   }
 
   private drop(original: SVGElement): void {
@@ -123,21 +137,21 @@ export class BrandChrome extends Component {
     port.host.remove();
     if (port.originalStyle === null) port.original.removeAttribute("style");
     else port.original.setAttribute("style", port.originalStyle);
-    if (port.buttonStyle === null) port.button.removeAttribute("style");
-    else port.button.setAttribute("style", port.buttonStyle);
+    if (port.anchorStyle === null) port.anchor.removeAttribute("style");
+    else port.anchor.setAttribute("style", port.anchorStyle);
     this.#ports.delete(original);
   }
 
   private sync(doc: Document): void {
     if (!this.#mounted) return;
     const matched = new Set<SVGElement>();
-    for (const kind of ["wordmark", "rail"] as const) {
+    for (const kind of ["wordmark", "rail", "hero"] as const) {
       const selector = `svg[viewBox="${kind === "wordmark" ? WORDMARK_VIEWBOX : FISH_VIEWBOX}"]`;
       for (const original of Array.from(doc.querySelectorAll<SVGElement>(selector))) {
-        const button = svgButton(original, kind);
-        if (button === null) continue;
+        const anchor = svgAnchor(original, kind);
+        if (anchor === null) continue;
         matched.add(original);
-        this.ensure(doc, original, button, kind);
+        this.ensure(doc, original, anchor, kind);
       }
     }
     for (const [original, port] of this.#ports) {

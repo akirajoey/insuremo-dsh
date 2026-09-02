@@ -104,6 +104,46 @@ describe("TASK-063 owned brand chrome", () => {
     expect(shell.brand.getAttribute("style")).toBe("position: fixed");
   });
 
+  it("TASK-079d: overlays the hero fish (non-button span) with the globe and restores on dispose", async () => {
+    const row = document.createElement("div");
+    const hitbox = document.createElement("span");
+    hitbox.className = "fishHitbox";
+    const native = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    native.setAttribute("viewBox", "0 0 23.16 17.04");
+    hitbox.append(native);
+    row.append(hitbox);
+    document.body.append(row);
+    const view = mount(<BrandChrome />);
+    let host!: HTMLElement;
+    await eventually(() => { host = document.querySelector<HTMLElement>(`[${BRAND_HOST_ATTRIBUTE}="hero"]`)!; expect(host).toBeTruthy(); });
+    expect(hitbox.style.position).toBe("relative");
+    expect(native.style.visibility).toBe("hidden");
+    expect(host.querySelector('img[src*="insuremo-globe"]')).toBeTruthy();
+    expect(host.querySelector('img[src*="insuremo-globe"]')?.getAttribute("width")).toBe("34");
+    expect(document.querySelectorAll("button")).toHaveLength(0);
+    await view.unmount();
+    await eventually(() => expect(document.querySelector(`[${BRAND_HOST_ATTRIBUTE}="hero"]`)).toBeNull());
+    expect(native.style.visibility).toBe("");
+    expect(hitbox.getAttribute("style")).toBeNull();
+  });
+
+  it("TASK-079d: keeps a button-wrapped fish on the rail branch instead of the hero overlay", async () => {
+    const shell = railShell();
+    const view = mount(<BrandChrome />);
+    await eventually(() => expect(document.querySelector(`[${BRAND_HOST_ATTRIBUTE}="rail"]`)).toBeTruthy());
+    expect(document.querySelector(`[${BRAND_HOST_ATTRIBUTE}="hero"]`)).toBeNull();
+    expect(shell.native.style.visibility).toBe("hidden");
+    await view.unmount();
+  });
+
+  it("TASK-079d: WorkspaceHealth mounts the brand overlay driver", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ workspaces: [] }), { status: 200 })));
+    const view = mount(<WorkspaceHealth t={t} wide />);
+    await eventually(() => expect(document.querySelector("[data-icomposer-brand-driver]")).toBeTruthy());
+    await view.unmount();
+    expect(document.querySelector("[data-icomposer-brand-driver]")).toBeNull();
+  });
+
   it("swaps the collapsed resting mark while retaining the panel hover icon and restoring on dispose", async () => {
     const shell = railShell();
     const view = mount(<BrandChrome />);
