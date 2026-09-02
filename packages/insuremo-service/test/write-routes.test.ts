@@ -289,14 +289,15 @@ test("skill-activation direct: happy path + conflict mapping + controller seam",
   } finally { await h.dispose(); }
 });
 
-test("skill-update/install/remove direct kernels + default-profile direct", async () => {
+test("skill scenario/update/remove direct kernels + default-profile direct", async () => {
   const directCalls: string[] = [];
   const services = baseServices({
     skillActions: {
-      runDirect: async (input: { kind: string; skills?: readonly string[]; names?: readonly string[] }) => {
-        directCalls.push(`${input.kind}:${(input.skills ?? input.names ?? ["__all__"]).join(",")}`);
-        if (input.kind === "skill-remove") return { ok: true, receipt: { status: "completed", removed: ["old-skill"] } };
-        return { ok: true, receipt: { status: "completed", updated: ["a", "b"] } };
+      runDirect: async (input: { kind: string; source?: unknown; agent?: string; skills?: readonly string[]; names?: readonly string[] }) => {
+        directCalls.push(`${input.kind}:${JSON.stringify(input.source ?? input.names ?? "all")}:${input.agent ?? ""}`);
+        if (input.kind === "skill-remove") return { ok: true, receipt: { status: "completed", beforeCount: 2, afterCount: 1, added: [], removed: ["old-skill"], updated: [] } };
+        if (input.kind === "skill-install") return { ok: true, receipt: { status: "completed", beforeCount: 1, afterCount: 3, added: ["insuremo-auth-cli", "insuremo-deep-search"], removed: [], updated: [] } };
+        return { ok: true, receipt: { status: "completed", beforeCount: 2, afterCount: 2, added: [], removed: [], updated: ["a", "b"] } };
       },
     },
     authActions: {
@@ -305,18 +306,57 @@ test("skill-update/install/remove direct kernels + default-profile direct", asyn
   });
   const h = await fixture(services);
   try {
-    const update = await call(h.server, "skill-update", { body: JSON.stringify({}) });
-    assert.deepEqual(JSON.parse(update.body).result, { status: "completed", names: ["a", "b"] });
-    const install = await call(h.server, "skill-install", { body: JSON.stringify({ name: "imo-new", source: { type: "alias", value: "imo" } }) });
-    assert.equal(JSON.parse(install.body).ok, true);
+    // update: the whole body is ignored by design (whole-inventory scope).
+    const update = await call(h.server, "skill-update", { body: JSON.stringify({ junk: true, agent: "evil" }) });
+    assert.deepEqual(JSON.parse(update.body).result, { status: "completed", beforeCount: 2, afterCount: 2, added: [], removed: [], updated: ["a", "b"] });
+    // install: scenario-only, allowlisted, server-owned argv shape.
+    const install = await call(h.server, "skill-install", { body: JSON.stringify({ scenario: "ask-insuremo", source: "https://evil", agent: "codex" }) });
+    assert.deepEqual(JSON.parse(install.body).result, { status: "completed", beforeCount: 1, afterCount: 3, added: ["insuremo-auth-cli", "insuremo-deep-search"], removed: [], updated: [] });
     const remove = await call(h.server, "skill-remove", { body: JSON.stringify({ name: "old-skill" }) });
-    assert.deepEqual(JSON.parse(remove.body).result, { status: "completed", names: ["old-skill"] });
+    assert.deepEqual(JSON.parse(remove.body).result, { status: "completed", beforeCount: 2, afterCount: 1, added: [], removed: ["old-skill"], updated: [] });
     const dp = await call(h.server, "default-profile", { body: JSON.stringify({ profile: "portal:mo-re" }) });
     assert.deepEqual(JSON.parse(dp.body).result, { status: "completed", profile: "portal:mo-re" });
-    assert.deepEqual(directCalls, ["skill-update:__all__", "skill-install:imo-new", "skill-remove:old-skill", "default:portal:mo-re"]);
-    const noSource = await call(h.server, "skill-install", { body: JSON.stringify({ name: "x", source: "https://evil" }) });
-    assert.equal(JSON.parse(noSource.body).error.code, "invalid-input");
+    assert.deepEqual(directCalls, [
+      'skill-update:"all":',
+      'skill-install:{"type":"scenario","scenario":"ask-insuremo"}:universal',
+      'skill-remove:["old-skill"]:universal',
+      "default:portal:mo-re",
+    ]);
+    // Unknown/malformed scenario is rejected with zero action calls.
+    const attempts = directCalls.length;
+    for (const scenario of ["not-allowed", 42, undefined, "../../evil", "ask-insuremo "]) {
+      const bad = await call(h.server, "skill-install", { body: JSON.stringify({ scenario }) });
+      assert.equal(JSON.parse(bad.body).error.code, "invalid-input");
+    }
+    assert.equal(directCalls.length, attempts);
   } finally { await h.dispose(); }
+});
+
+test("failed and partial skill receipts stay structured ok envelopes; UI must inspect status", async () => {
+  for (const [status, diff] of [
+    ["failed", { added: [], removed: [], updated: [] }],
+    ["partial-failure", { added: ["insuremo-auth-cli"], removed: ["stale"], updated: [] }],
+  ] as const) {
+    const h = await fixture(baseServices({
+      skillActions: { runDirect: async () => ({ ok: true, receipt: { status, beforeCount: 2, afterCount: 3, ...diff } }) },
+    }));
+    try {
+      const res = await call(h.server, "skill-install", { body: JSON.stringify({ scenario: "uic-developer" }) });
+      const payload = JSON.parse(res.body);
+      assert.equal(payload.ok, true);
+      assert.equal(payload.result.status, status);
+      assert.deepEqual(payload.result.added, diff.added);
+      assert.deepEqual(payload.result.removed, diff.removed);
+      assert.deepEqual(payload.result.updated, diff.updated);
+    } finally { await h.dispose(); }
+  }
+  const h2 = await fixture(baseServices({
+    skillActions: { runDirect: async () => ({ ok: false, error: { code: "tool-unavailable", message: "npx is unavailable" } }) },
+  }));
+  try {
+    const res = await call(h2.server, "skill-install", { body: JSON.stringify({ scenario: "uic-developer" }) });
+    assert.equal(JSON.parse(res.body).error.code, "tool-unavailable");
+  } finally { await h2.dispose(); }
 });
 
 test("TASK-047 active-profile route delegates only to Active Profile and maps failures", async () => {

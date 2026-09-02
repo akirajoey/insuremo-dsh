@@ -62,7 +62,8 @@ test("approved update reports same-path digest changes and preserves enablement"
     assert.deepEqual(result.receipt.added, []);
     assert.deepEqual(result.receipt.removed, []);
     assert.equal(result.receipt.catalogInvalidated, true);
-    assert.equal(fx.state.invocations.some(args => args.join(" ") === "skills update --all"), true);
+    const updateArgs = fx.state.invocations.find(args => args.includes("@insuremo/skills-tool")) ?? [];
+    assert.equal(updateArgs.at(-3), "update", "update runs via the skills-tool adapter");
     const state = await fx.activation.snapshot(["alpha"]);
     assert.deepEqual(state.enabled, ["alpha"]);
   });

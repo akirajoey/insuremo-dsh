@@ -108,7 +108,8 @@ export type SkillActionErrorCode =
   | "not-found"
   | "spawn-failed"
   | "non-zero-exit"
-  | "timeout";
+  | "timeout"
+  | "tool-unavailable";
 
 export interface SkillActionError {
   readonly code: SkillActionErrorCode;
@@ -239,6 +240,7 @@ export type PendingSkillAction = {
 
 export interface SkillActionConfig {
   readonly command: string;
+  /** Long bounded deadline for the external skills-tool action. */
   readonly timeoutMs: number;
   readonly allowedGitHosts: readonly string[];
 }

@@ -1,5 +1,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isSkillName } from "@deepseek-ai/dsh-skill";
+import { SKILL_SCENARIOS, type SkillScenario } from "../skill-actions/types.ts";
 import { OVERVIEW_PATH } from "./paths.ts";
 
 const JSON_TYPE = "application/json; charset=utf-8";
@@ -135,6 +137,15 @@ function str(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function parseScenario(value: unknown): SkillScenario | undefined {
+  return typeof value === "string" && SKILL_SCENARIOS.includes(value as SkillScenario) ? value as SkillScenario : undefined;
+}
+
+function boundedNames(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((name): name is string => typeof name === "string" && isSkillName(name)))].slice(0, 100);
+}
+
 /** Map a face error object ({code,message}) into the action envelope. */
 function faceError(error: { code?: string; message?: string } | undefined, fallback: string): { ok: false; error: { code: string; message: string; detail?: string } } {
   const code = typeof error?.code === "string" && /^[a-z0-9-]{1,64}$/.test(error.code) ? error.code : fallback;
@@ -234,17 +245,14 @@ export function mountWriteRoutes(ctx: Context): () => void {
     return directSkillOutcome(outcome);
   }));
 
-  // skill-install: {name, source} direct install.
+  // skill-install: scenario sync is intentionally server-owned: source,
+  // agent, selected skills, registry and argv are not accepted from the UI.
   register(actionRoute(`${ACTIONS_PREFIX}/skill-install`, async (body, signal) => {
     const actions = ctx.get("imoSkillActions" as never) as unknown as DirectSkillActionsFace | undefined;
     if (actions === undefined) return faceError(undefined, "service-unavailable");
-    const name = str(body.name);
-    if (name === undefined) return faceError({ code: "invalid-input", message: "skill name is required" }, "invalid-input");
-    const source = body.source;
-    if (typeof source !== "object" || source === null || Array.isArray(source)) {
-      return faceError({ code: "invalid-input", message: "source must be an object (alias/git/npm/scenario)" }, "invalid-input");
-    }
-    const outcome = await actions.runDirect({ kind: "skill-install", source, agent: "workbench-ui", skills: [name] }, signal);
+    const scenario = parseScenario(body.scenario);
+    if (scenario === undefined) return faceError({ code: "invalid-input", message: "scenario is not in the built-in allowlist" }, "invalid-input");
+    const outcome = await actions.runDirect({ kind: "skill-install", source: { type: "scenario", scenario }, agent: "universal", skills: [] }, signal);
     return directSkillOutcome(outcome);
   }));
 
@@ -254,7 +262,7 @@ export function mountWriteRoutes(ctx: Context): () => void {
     if (actions === undefined) return faceError(undefined, "service-unavailable");
     const name = str(body.name);
     if (name === undefined) return faceError({ code: "invalid-input", message: "skill name is required" }, "invalid-input");
-    const outcome = await actions.runDirect({ kind: "skill-remove", agent: "workbench-ui", names: [name] }, signal);
+    const outcome = await actions.runDirect({ kind: "skill-remove", agent: "universal", names: [name] }, signal);
     return directSkillOutcome(outcome);
   }));
 
@@ -293,18 +301,40 @@ export function mountWriteRoutes(ctx: Context): () => void {
   return () => { for (const dispose of disposers) dispose(); };
 }
 
+interface DirectSkillReceipt {
+  status: string;
+  beforeCount?: number;
+  afterCount?: number;
+  added?: readonly string[];
+  removed?: readonly string[];
+  updated?: readonly string[];
+}
+
 interface DirectSkillActionsFace {
   runDirect(input: { kind: string; source?: unknown; agent?: string; skills?: readonly string[]; names?: readonly string[] }, signal?: AbortSignal): Promise<
-    | { ok: true; receipt: { status: string; added?: readonly string[]; removed?: readonly string[]; updated?: readonly string[] } }
+    | { ok: true; receipt: DirectSkillReceipt }
     | { ok: false; error: { code?: string; message?: string } }
   >;
 }
 
 function directSkillOutcome(outcome: Awaited<ReturnType<DirectSkillActionsFace["runDirect"]>>): ActionOutcome<unknown> {
-  if (outcome.ok) {
-    return { ok: true, result: { status: outcome.receipt.status, names: outcome.receipt.updated ?? outcome.receipt.added ?? outcome.receipt.removed ?? [] } };
-  }
-  return faceError(outcome.error, "action-failed");
+  if (!outcome.ok) return faceError(outcome.error, "action-failed");
+  // A receipt is evidence even when the mutation failed or was partial. Keep
+  // the structured diff in the result; the UI must inspect status explicitly.
+  return { ok: true, result: directSkillResult(outcome.receipt) };
+}
+
+function directSkillResult(receipt: DirectSkillReceipt): Record<string, unknown> {
+  // The three diff arrays are always reported separately (never a legacy
+  // collapsed "names"); counts ride along only when the receipt has them.
+  return {
+    status: receipt.status,
+    ...(receipt.beforeCount === undefined ? {} : { beforeCount: receipt.beforeCount }),
+    ...(receipt.afterCount === undefined ? {} : { afterCount: receipt.afterCount }),
+    added: boundedNames(receipt.added ?? []),
+    updated: boundedNames(receipt.updated ?? []),
+    removed: boundedNames(receipt.removed ?? []),
+  };
 }
 
 /** Activation controller seam resolved through the composed context. */

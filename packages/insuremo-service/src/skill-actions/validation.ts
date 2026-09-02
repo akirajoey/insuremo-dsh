@@ -49,6 +49,11 @@ function normalizeInstall(
   if (!skills.ok) return skills;
   const source = normalizeSource(input.source, allowedGitHosts);
   if (!source.ok) return source;
+  // Scenario sync is a fixed universal/global flow (TASK-079); any other
+  // agent would diverge the executed argv from the approved parameters.
+  if (source.value.type === "scenario" && agent.value !== "universal") {
+    return failure("invalid-agent", "scenario install requires the universal agent");
+  }
   return { ok: true, value: { kind: SKILL_INSTALL_KIND, scope, agent: agent.value, source: source.value, skills: skills.value } };
 }
 

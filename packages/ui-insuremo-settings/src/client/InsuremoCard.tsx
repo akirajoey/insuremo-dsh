@@ -221,8 +221,62 @@ interface SkillRowState {
   readonly retry?: boolean;
 }
 
-class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void }, { rows: Readonly<Record<string, SkillRowState>>; updatingAll: boolean }> {
-  override state: { rows: Readonly<Record<string, SkillRowState>>; updatingAll: boolean } = { rows: {}, updatingAll: false };
+/** Allowlisted server scenario ids (TASK-079): no arbitrary agent/source argv. */
+const SKILL_SCENARIOS = [
+  "icomposer-full-stack", "icomposer-coding-lite", "icomposer-api-design", "uic-developer", "ask-insuremo",
+] as const;
+type SkillScenarioId = typeof SKILL_SCENARIOS[number];
+
+interface SkillDiff {
+  readonly added: readonly string[];
+  readonly updated: readonly string[];
+  readonly removed: readonly string[];
+}
+
+interface SkillActionResultView {
+  readonly status: string;
+  readonly added?: readonly string[];
+  readonly updated?: readonly string[];
+  readonly removed?: readonly string[];
+}
+
+function diffOf(result: SkillActionResultView): SkillDiff {
+  return { added: result.added ?? [], updated: result.updated ?? [], removed: result.removed ?? [] };
+}
+
+function diffText(diff: SkillDiff, t: Translate): string {
+  const parts: string[] = [];
+  if (diff.added.length > 0) parts.push(`${t("skillsAdded")} ${diff.added.length}: ${diff.added.join(", ")}`);
+  if (diff.updated.length > 0) parts.push(`${t("skillsUpdated")} ${diff.updated.length}: ${diff.updated.join(", ")}`);
+  if (diff.removed.length > 0) parts.push(`${t("skillsRemoved")} ${diff.removed.length}: ${diff.removed.join(", ")}`);
+  return parts.join(" · ");
+}
+
+interface ScenarioRunState {
+  readonly phase: "idle" | "busy" | "done" | "failed";
+  readonly message?: string;
+  readonly diff?: SkillDiff;
+}
+
+class SkillsRegion extends Component<
+  { t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void },
+  {
+    rows: Readonly<Record<string, SkillRowState>>;
+    updatingAll: boolean;
+    updateResult?: SkillActionResultView;
+    updateError?: string;
+    scenario: SkillScenarioId;
+    scenarioRun: ScenarioRunState;
+  }
+> {
+  override state: {
+    rows: Readonly<Record<string, SkillRowState>>;
+    updatingAll: boolean;
+    updateResult?: SkillActionResultView;
+    updateError?: string;
+    scenario: SkillScenarioId;
+    scenarioRun: ScenarioRunState;
+  } = { rows: {}, updatingAll: false, scenario: SKILL_SCENARIOS[0], scenarioRun: { phase: "idle" } };
 
   override componentDidUpdate(): void {
     // Keep a successful optimistic value visible until silentReload delivers
@@ -245,6 +299,10 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
       }
       return { ...prev, rows };
     });
+  }
+
+  get #busy(): boolean {
+    return this.state.updatingAll || this.state.scenarioRun.phase === "busy";
   }
 
   /**
@@ -271,35 +329,109 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
     }
   }
 
+  /** `imo skills update --all` equivalent: only already-installed sources. */
   private async updateAll(): Promise<void> {
-    this.setState({ updatingAll: true });
-    const outcome = await postAction<{ status: string }>("skill-update", { name: "__all__" });
-    this.setState({ updatingAll: false });
-    if (outcome.ok) this.props.onChanged();
+    if (this.#busy) return;
+    this.setState({ updatingAll: true, updateError: undefined, updateResult: undefined });
+    const outcome = await postAction<SkillActionResultView>("skill-update", {});
+    if (outcome.ok) {
+      const result = outcome.result;
+      // Only status "completed" is success; failed/partial-failure receipts
+      // (structured, with any real diff) must render as alerts.
+      this.setState({ updatingAll: false, updateResult: result, updateError: result.status === "completed" ? undefined : `${result.status}` });
+      this.props.onChanged();
+    } else {
+      const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
+      this.setState({ updatingAll: false, updateError: message });
+    }
+  }
+
+  /** Explicit install/sync of the selected allowlisted scenario. */
+  private async syncScenario(): Promise<void> {
+    if (this.#busy) return;
+    this.setState({ scenarioRun: { phase: "busy" } });
+    const outcome = await postAction<SkillActionResultView>("skill-install", { scenario: this.state.scenario });
+    if (outcome.ok) {
+      const result = outcome.result;
+      const diff = diffOf(result);
+      this.setState({
+        scenarioRun: result.status === "completed"
+          ? { phase: "done", diff }
+          : { phase: "failed", message: result.status, diff },
+      });
+      this.props.onChanged();
+    } else {
+      const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
+      this.setState({ scenarioRun: { phase: "failed", message } });
+    }
   }
 
   override render(): ReactNode {
     const { t, skills } = this.props;
     const entries = skills.entries ?? [];
     const cold = skills.code === "fast-uncached";
+    const busy = this.#busy;
+    const run = this.state.scenarioRun;
     return (
       <div className={css.region}>
         <h4>{t("skillsTitle")}</h4>
         <p>
-          <button type="button" disabled={this.state.updatingAll} onClick={() => void this.updateAll()} aria-label={t("skillsUpdateAll")}>
+          <label>
+            <span className={css.meta}>{t("skillsScenarioLabel")}</span>{" "}
+            <select
+              value={this.state.scenario}
+              disabled={busy}
+              aria-label={t("skillsScenarioLabel")}
+              onChange={event => this.setState({ scenario: event.target.value as SkillScenarioId, scenarioRun: { phase: "idle" } })}
+            >
+              {SKILL_SCENARIOS.map(id => <option key={id} value={id}>{id}</option>)}
+            </select>
+          </label>{" "}
+          <button
+            type="button"
+            disabled={busy}
+            aria-busy={run.phase === "busy" || undefined}
+            onClick={() => void this.syncScenario()}
+            aria-label={run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")}
+          >
+            {run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")}
+          </button>{" "}
+          <button
+            type="button"
+            disabled={busy}
+            aria-busy={this.state.updatingAll || undefined}
+            onClick={() => void this.updateAll()}
+            aria-label={this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")}
+          >
             {this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")}
           </button>
         </p>
+        {run.phase === "done" ? (
+          <p role="status" data-scenario="done">{t("skillsScenarioDone")}{run.diff === undefined ? "" : `: ${diffText(run.diff, t)}`}</p>
+        ) : null}
+        {run.phase === "failed" ? (
+          <p role="alert" data-scenario="failed" className={css.error}>
+            {t("skillsScenarioFailed")}: {run.message}{run.diff === undefined ? "" : ` · ${diffText(run.diff, t)}`} · {t("skillsRetryHint")}
+          </p>
+        ) : null}
+        {this.state.updateResult !== undefined && this.state.updateResult.status === "completed" ? (
+          <p role="status" data-update="done">{t("skillsUpdateDone")}: {diffText(diffOf(this.state.updateResult), t) || "0"}</p>
+        ) : null}
+        {this.state.updateError !== undefined ? (
+          <p role="alert" data-update="failed" className={css.error}>
+            {t("skillsUpdateFailed")}: {this.state.updateError}{this.state.updateResult !== undefined && this.state.updateResult.status !== "completed" ? ` · ${diffText(diffOf(this.state.updateResult), t)}` : ""} · {t("skillsRetryHint")}
+          </p>
+        ) : null}
         {cold ? (
           <p className={css.hint} data-skeleton="1" aria-busy="true">{t("skillsLoadingSlow")}</p>
         ) : entries.length === 0 ? (
-          <p>{t("skillsNone")} · <code>imo skills install</code></p>
+          <p>{t("skillsNone")} · {t("skillsInstallFirstHint")}</p>
         ) : (
           <ul className={css.list}>
             {entries.map(entry => {
               const row = this.state.rows[entry.name] ?? {};
               const enabled = row.enabled ?? entry.enabled;
-              const busy = row.busy === true;
+              const rowBusy = row.busy === true || busy;
               return (
                 <li key={entry.name}>
                   <button
@@ -307,9 +439,9 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
                     role="switch"
                     className={css.toggle}
                     aria-checked={enabled}
-                    aria-busy={busy || undefined}
+                    aria-busy={row.busy === true || undefined}
                     aria-label={`${t("skillsToggle")}: ${entry.name}`}
-                    disabled={busy}
+                    disabled={rowBusy}
                     onClick={() => void this.toggle(entry.name, !enabled, entry.enabled)}
                   >
                     <span className={css.controlTrack} aria-hidden="true"><span className={css.controlThumb} /></span>
@@ -321,7 +453,7 @@ class SkillsRegion extends Component<{ t: Translate; skills: ImoOverviewView["sk
             })}
           </ul>
         )}
-        <p className={css.hint}>{t("skillsCliHint")}</p>
+        <p className={css.hint}>{t("skillsScopeHint")}</p>
       </div>
     );
   }

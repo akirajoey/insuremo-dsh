@@ -120,6 +120,7 @@ test("TASK-039 P0: frozen face exposes runDirect; direct run succeeds without op
     const outcome = await face!.runDirect!({ kind: "skill-update" });
     assert.equal(outcome.ok, true, `runDirect should complete: ${JSON.stringify(outcome.error)}`);
     assert.equal(fx.opLog.records.size, before, "runDirect must not append operation records");
-    assert.equal(findInvocation(fx, "update") !== undefined, true, "direct kernel still runs the CLI");
+    const updateArgs = fx.state.invocations.find(args => args.includes("@insuremo/skills-tool")) ?? [];
+    assert.equal(updateArgs.at(-3), "update", "direct kernel still runs the skills-tool CLI");
   });
 });

@@ -6,6 +6,8 @@ export interface Config {
   command: string;
   /** Per one-shot read deadline, including lookup and process exit. */
   timeoutMs: number;
+  /** Bounded deadline for mutating Skills scenario/update actions. */
+  skillActionTimeoutMs: number;
   /** Deadline for the longer-running `imo upgrade` command. */
   upgradeTimeoutMs: number;
   /** Read-only smoke commands (argv after the executable) run after an upgrade. */
@@ -31,6 +33,7 @@ export const DEFAULT_SMOKE_COMMANDS: readonly (readonly string[])[] = [
 export const Config: z<Config> = z.object({
   command: z.string().default("imo"),
   timeoutMs: z.natural().min(1).default(15_000),
+  skillActionTimeoutMs: z.natural().min(1).default(180_000),
   upgradeTimeoutMs: z.natural().min(1).default(180_000),
   smokeCommands: z.array(z.array(z.string())).default(DEFAULT_SMOKE_COMMANDS),
   allowedGitHosts: z.array(z.string()).default(["github.com"]),
@@ -42,6 +45,7 @@ export function resolveConfig(config: Partial<Config> = {}): Config {
   return {
     command: config.command ?? "imo",
     timeoutMs: config.timeoutMs ?? 15_000,
+    skillActionTimeoutMs: Math.max(1, Math.min(300_000, config.skillActionTimeoutMs ?? 180_000)),
     upgradeTimeoutMs: config.upgradeTimeoutMs ?? 180_000,
     smokeCommands: config.smokeCommands ?? DEFAULT_SMOKE_COMMANDS,
     allowedGitHosts: config.allowedGitHosts ?? ["github.com"],

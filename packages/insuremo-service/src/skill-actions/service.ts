@@ -11,7 +11,7 @@ import { diffInventory } from "./diff.ts";
 import { buildSkillReceipt, type SkillReceiptInput } from "./finalize.ts";
 import { ExecutionJournal, type ExecutionJournalEntry } from "./execution-journal.ts";
 import { recoverInventory, type RecoveryReport } from "./recovery.ts";
-import { executionArgs, previewSkillAction } from "./preview.ts";
+import { actionCommand, executionArgs, previewSkillAction, SKILLS_TOOL_COMMAND } from "./preview.ts";
 import { installSourceProvenance, normalizeSkillAction, skillActionParamsDigest } from "./validation.ts";
 import {
   SKILL_ACTION_COMPLETED_EVENT,
@@ -20,18 +20,10 @@ import {
   SKILL_INSTALL_KIND,
   SKILL_REMOVE_KIND,
   SKILL_UPDATE_KIND,
-  type ImoSkillActions,
-  type NormalizedSkillAction,
-  type PendingSkillAction,
-  type SkillActionConfig,
-  type SkillActionError,
-  type SkillActionEvent,
-  type SkillActionExecution,
-  type SkillActionInput,
-  type SkillActionReceipt,
-  type SkillActionRequest,
-  type SkillActionResult,
-  type SkillActionStatus,
+  type ImoSkillActions, type NormalizedSkillAction, type PendingSkillAction,
+  type SkillActionConfig, type SkillActionError, type SkillActionEvent,
+  type SkillActionExecution, type SkillActionInput, type SkillActionReceipt,
+  type SkillActionRequest, type SkillActionResult, type SkillActionStatus,
   type SkillInventorySnapshot,
 } from "./types.ts";
 
@@ -39,12 +31,6 @@ const EMPTY_DIGEST = digest("");
 const EMPTY_DIFF = Object.freeze({ added: [], removed: [], updated: [] });
 
 /** Approval-gated global IMO Skills install/update/remove/activation actions. */
-/**
- * Instance state outside the class body (TASK-036-2b): cordis Service hands
- * callers a proxy receiver where native `#private` fields throw. The service
- * is a per-host singleton; one module-level slot is identity-stable across
- * instance and proxy receivers, and a remount resets it wholesale.
- */
 interface SkillActionsState {
   pending: Map<string, PendingSkillAction>;
   journal: ExecutionJournal;
@@ -70,7 +56,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
   constructor(ctx: Context, config: Partial<ImoConfig> = {}) {
     super(ctx, "imoSkillActions");
     const resolved = resolveConfig(config);
-    this.#config = { command: resolved.command, timeoutMs: resolved.timeoutMs, allowedGitHosts: resolved.allowedGitHosts };
+    this.#config = { command: resolved.command, timeoutMs: resolved.skillActionTimeoutMs, allowedGitHosts: resolved.allowedGitHosts };
     this.#skills = ctx.get<ImoSkills>("imoSkills")!;
     this.#activation = ctx.get<ImoSkillActivation>("imoSkillActivation")!;
     this.#controller = skillActivationControllerFor(this.#activation);
@@ -122,26 +108,20 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     return { ok: true, value: { operationId: record.id, kind: normalized.value.kind, paramsDigest, preview: preview.value } };
   }
 
-  /**
-   * Direct execution for one-shot UI actions (TASK-039): runs the same
-   * preview + execution kernel as the approval loop but never touches the
-   * operation log — the caller gets the receipt-style outcome immediately.
-   * Reuses the single-flight lock and the one-shot journal semantics.
-   */
+  /** One-shot UI execution (TASK-039): same kernel, no operation log. */
   async runDirect(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionExecution> {
     if (skillActionsStateFor(this).disposed) return executionFailure("service-disposed", "IMO skill action service is disposed", "");
     if (signal?.aborted) return executionFailure("cancelled", "skill action was cancelled", "");
-    if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", "");
     const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
     if (!normalized.ok) return normalized as unknown as SkillActionExecution;
-    const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
-    if (!preview.ok) return preview as unknown as SkillActionExecution;
+    if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", "");
     const operationId = `direct:${normalized.value.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-    const pending: PendingSkillAction = { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest: skillActionParamsDigest(normalized.value) };
-    skillActionsStateFor(this).running = { operationId, kind: pending.kind };
+    skillActionsStateFor(this).running = { operationId, kind: normalized.value.kind };
     try {
-      const outcome = await this.executeDirectKernel(operationId, pending, signal);
-      return outcome;
+      const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
+      if (!preview.ok) return preview as unknown as SkillActionExecution;
+      const pending: PendingSkillAction = { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest: skillActionParamsDigest(normalized.value) };
+      return await this.executeDirectKernel(operationId, pending, signal);
     } finally {
       skillActionsStateFor(this).running = null;
     }
@@ -213,7 +193,12 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
   }
 
   private async directCli(operationId: string, pending: PendingSkillAction, before: SkillInventorySnapshot, initialized: ImoSkillActivationSnapshot, expectedRevision: number | undefined, startedAt: string, signal?: AbortSignal): Promise<SkillActionExecution> {
-    const run = await runCapture(this.ctx.subprocess, { command: this.#config.command, args: executionArgs(pending.input), timeoutMs: this.#config.timeoutMs, signal });
+    const run = await runCapture(this.ctx.subprocess, { command: actionCommand(pending.input, this.#config.command), args: executionArgs(pending.input), timeoutMs: this.#config.timeoutMs, signal });
+    if (!run.ok && run.error.code === "not-found" && actionCommand(pending.input, this.#config.command) === SKILLS_TOOL_COMMAND) {
+      // npx never resolved: nothing ran, so surface the structured tool error
+      // instead of a misleading failed receipt.
+      return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId);
+    }
     const recovery: RecoveryReport = await recoverInventory({ ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation, kind: pending.input.kind, beforeNames: before.names, expectedRevision });
     const after = recovery.after;
     const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
@@ -384,7 +369,10 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     startedAt: string,
     signal: AbortSignal | undefined,
   ): Promise<SkillActionExecution> {
-    const run = await runCapture(this.ctx.subprocess, { command: this.#config.command, args: executionArgs(pending.input), timeoutMs: this.#config.timeoutMs, signal });
+    const run = await runCapture(this.ctx.subprocess, { command: actionCommand(pending.input, this.#config.command), args: executionArgs(pending.input), timeoutMs: this.#config.timeoutMs, signal });
+    if (!run.ok && run.error.code === "not-found" && actionCommand(pending.input, this.#config.command) === SKILLS_TOOL_COMMAND) {
+      return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId);
+    }
     // Once the external attempt has started, recovery is best-effort always.
     const recovery: RecoveryReport = await recoverInventory({
       ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation,

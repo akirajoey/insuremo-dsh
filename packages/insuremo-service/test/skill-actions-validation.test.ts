@@ -66,10 +66,15 @@ test("npm and scenario sources build the exact preview argv", async () => {
     assert.deepEqual(npmArgs.slice(0, 5), ["skills", "install", "--from-npm", "@scope/pkg@1.2.3", "-g"]);
     assert.equal(npmArgs.includes("--list"), true);
     fx.state.invocations.length = 0;
-    const scenario = await fx.actions.request(installInput({ source: { type: "scenario", value: "uic-developer" } }));
+    const scenario = await fx.actions.request(installInput({ source: { type: "scenario", value: "uic-developer" }, agent: "universal" }));
     assert.equal(scenario.ok, true);
-    const scenarioArgs = findInvocation(fx, "install") ?? [];
-    assert.deepEqual(scenarioArgs.slice(0, 5), ["skills", "install", "--scenario", "uic-developer", "-g"]);
+    // TASK-079: scenario actions run through the unpinned skills-tool adapter
+    // with the trusted registry and the fixed universal agent.
+    const scenarioArgs = fx.state.invocations.find(args => args.includes("@insuremo/skills-tool")) ?? [];
+    assert.deepEqual(scenarioArgs.slice(0, 11), [
+      "-y", "--registry=https://public.insuremo.com/artifactory/api/npm/npm/", "@insuremo/skills-tool",
+      "add", "insuremo-skills", "-g", "-a", "universal", "-s", "uic-developer", "-l",
+    ]);
   });
 });
 

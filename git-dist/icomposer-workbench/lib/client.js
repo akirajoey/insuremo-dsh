@@ -253,27 +253,27 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"chevron": "wb7fdb0fb4_chevron",
-	"pending": "wb7fdb0fb4_pending",
-	"header": "wb7fdb0fb4_header",
-	"card": "wb7fdb0fb4_card",
-	"cardOpen": "wb7fdb0fb4_cardOpen",
 	"name": "wb7fdb0fb4_name",
-	"body": "wb7fdb0fb4_body",
-	"headText": "wb7fdb0fb4_headText",
-	"region": "wb7fdb0fb4_region",
-	"controlTrack": "wb7fdb0fb4_controlTrack",
-	"description": "wb7fdb0fb4_description",
-	"refresh": "wb7fdb0fb4_refresh",
-	"chevronOpen": "wb7fdb0fb4_chevronOpen",
-	"footer": "wb7fdb0fb4_footer",
-	"list": "wb7fdb0fb4_list",
-	"meta": "wb7fdb0fb4_meta",
-	"error": "wb7fdb0fb4_error",
-	"controlThumb": "wb7fdb0fb4_controlThumb",
 	"hint": "wb7fdb0fb4_hint",
+	"body": "wb7fdb0fb4_body",
 	"small": "wb7fdb0fb4_small",
-	"toggle": "wb7fdb0fb4_toggle"
+	"footer": "wb7fdb0fb4_footer",
+	"header": "wb7fdb0fb4_header",
+	"description": "wb7fdb0fb4_description",
+	"toggle": "wb7fdb0fb4_toggle",
+	"error": "wb7fdb0fb4_error",
+	"pending": "wb7fdb0fb4_pending",
+	"controlTrack": "wb7fdb0fb4_controlTrack",
+	"meta": "wb7fdb0fb4_meta",
+	"chevronOpen": "wb7fdb0fb4_chevronOpen",
+	"card": "wb7fdb0fb4_card",
+	"controlThumb": "wb7fdb0fb4_controlThumb",
+	"chevron": "wb7fdb0fb4_chevron",
+	"list": "wb7fdb0fb4_list",
+	"refresh": "wb7fdb0fb4_refresh",
+	"cardOpen": "wb7fdb0fb4_cardOpen",
+	"headText": "wb7fdb0fb4_headText",
+	"region": "wb7fdb0fb4_region"
 };
 
 //#endregion
@@ -560,10 +560,34 @@ var UpgradeButton = class extends react.Component {
 		] });
 	}
 };
+/** Allowlisted server scenario ids (TASK-079): no arbitrary agent/source argv. */
+const SKILL_SCENARIOS = [
+	"icomposer-full-stack",
+	"icomposer-coding-lite",
+	"icomposer-api-design",
+	"uic-developer",
+	"ask-insuremo"
+];
+function diffOf(result) {
+	return {
+		added: result.added ?? [],
+		updated: result.updated ?? [],
+		removed: result.removed ?? []
+	};
+}
+function diffText(diff, t) {
+	const parts = [];
+	if (diff.added.length > 0) parts.push(`${t("skillsAdded")} ${diff.added.length}: ${diff.added.join(", ")}`);
+	if (diff.updated.length > 0) parts.push(`${t("skillsUpdated")} ${diff.updated.length}: ${diff.updated.join(", ")}`);
+	if (diff.removed.length > 0) parts.push(`${t("skillsRemoved")} ${diff.removed.length}: ${diff.removed.join(", ")}`);
+	return parts.join(" · ");
+}
 var SkillsRegion = class extends react.Component {
 	state = {
 		rows: {},
-		updatingAll: false
+		updatingAll: false,
+		scenario: SKILL_SCENARIOS[0],
+		scenarioRun: { phase: "idle" }
 	};
 	componentDidUpdate() {
 		const confirmed = new Set((this.props.skills.entries ?? []).filter((entry) => {
@@ -584,6 +608,9 @@ var SkillsRegion = class extends react.Component {
 				rows
 			};
 		});
+	}
+	get #busy() {
+		return this.state.updatingAll || this.state.scenarioRun.phase === "busy";
 	}
 	/**
 	* Last-write-wins (TASK-041): no expectedRevision is sent — the server
@@ -626,27 +653,146 @@ var SkillsRegion = class extends react.Component {
 			if (conflict) this.props.onChanged();
 		}
 	}
+	/** `imo skills update --all` equivalent: only already-installed sources. */
 	async updateAll() {
-		this.setState({ updatingAll: true });
-		const outcome = await postAction$1("skill-update", { name: "__all__" });
-		this.setState({ updatingAll: false });
-		if (outcome.ok) this.props.onChanged();
+		if (this.#busy) return;
+		this.setState({
+			updatingAll: true,
+			updateError: void 0,
+			updateResult: void 0
+		});
+		const outcome = await postAction$1("skill-update", {});
+		if (outcome.ok) {
+			const result = outcome.result;
+			this.setState({
+				updatingAll: false,
+				updateResult: result,
+				updateError: result.status === "completed" ? void 0 : `${result.status}`
+			});
+			this.props.onChanged();
+		} else {
+			const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
+			this.setState({
+				updatingAll: false,
+				updateError: message
+			});
+		}
+	}
+	/** Explicit install/sync of the selected allowlisted scenario. */
+	async syncScenario() {
+		if (this.#busy) return;
+		this.setState({ scenarioRun: { phase: "busy" } });
+		const outcome = await postAction$1("skill-install", { scenario: this.state.scenario });
+		if (outcome.ok) {
+			const result = outcome.result;
+			const diff = diffOf(result);
+			this.setState({ scenarioRun: result.status === "completed" ? {
+				phase: "done",
+				diff
+			} : {
+				phase: "failed",
+				message: result.status,
+				diff
+			} });
+			this.props.onChanged();
+		} else {
+			const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
+			this.setState({ scenarioRun: {
+				phase: "failed",
+				message
+			} });
+		}
 	}
 	render() {
 		const { t, skills } = this.props;
 		const entries = skills.entries ?? [];
 		const cold = skills.code === "fast-uncached";
+		const busy = this.#busy;
+		const run = this.state.scenarioRun;
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: InsuremoCard_module_css_default.region,
 			children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", { children: t("skillsTitle") }),
-				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-					type: "button",
-					disabled: this.state.updatingAll,
-					onClick: () => void this.updateAll(),
-					"aria-label": t("skillsUpdateAll"),
-					children: this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")
-				}) }),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: InsuremoCard_module_css_default.meta,
+							children: t("skillsScenarioLabel")
+						}),
+						" ",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+							value: this.state.scenario,
+							disabled: busy,
+							"aria-label": t("skillsScenarioLabel"),
+							onChange: (event) => this.setState({
+								scenario: event.target.value,
+								scenarioRun: { phase: "idle" }
+							}),
+							children: SKILL_SCENARIOS.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+								value: id,
+								children: id
+							}, id))
+						})
+					] }),
+					" ",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						disabled: busy,
+						"aria-busy": run.phase === "busy" || void 0,
+						onClick: () => void this.syncScenario(),
+						"aria-label": run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall"),
+						children: run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")
+					}),
+					" ",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						disabled: busy,
+						"aria-busy": this.state.updatingAll || void 0,
+						onClick: () => void this.updateAll(),
+						"aria-label": this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll"),
+						children: this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")
+					})
+				] }),
+				run.phase === "done" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					role: "status",
+					"data-scenario": "done",
+					children: [t("skillsScenarioDone"), run.diff === void 0 ? "" : `: ${diffText(run.diff, t)}`]
+				}) : null,
+				run.phase === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					role: "alert",
+					"data-scenario": "failed",
+					className: InsuremoCard_module_css_default.error,
+					children: [
+						t("skillsScenarioFailed"),
+						": ",
+						run.message,
+						run.diff === void 0 ? "" : ` · ${diffText(run.diff, t)}`,
+						" · ",
+						t("skillsRetryHint")
+					]
+				}) : null,
+				this.state.updateResult !== void 0 && this.state.updateResult.status === "completed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					role: "status",
+					"data-update": "done",
+					children: [
+						t("skillsUpdateDone"),
+						": ",
+						diffText(diffOf(this.state.updateResult), t) || "0"
+					]
+				}) : null,
+				this.state.updateError !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					role: "alert",
+					"data-update": "failed",
+					className: InsuremoCard_module_css_default.error,
+					children: [
+						t("skillsUpdateFailed"),
+						": ",
+						this.state.updateError,
+						this.state.updateResult !== void 0 && this.state.updateResult.status !== "completed" ? ` · ${diffText(diffOf(this.state.updateResult), t)}` : "",
+						" · ",
+						t("skillsRetryHint")
+					]
+				}) : null,
 				cold ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 					className: InsuremoCard_module_css_default.hint,
 					"data-skeleton": "1",
@@ -655,22 +801,22 @@ var SkillsRegion = class extends react.Component {
 				}) : entries.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", { children: [
 					t("skillsNone"),
 					" · ",
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: "imo skills install" })
+					t("skillsInstallFirstHint")
 				] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
 					className: InsuremoCard_module_css_default.list,
 					children: entries.map((entry) => {
 						const row = this.state.rows[entry.name] ?? {};
 						const enabled = row.enabled ?? entry.enabled;
-						const busy = row.busy === true;
+						const rowBusy = row.busy === true || busy;
 						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
 								role: "switch",
 								className: InsuremoCard_module_css_default.toggle,
 								"aria-checked": enabled,
-								"aria-busy": busy || void 0,
+								"aria-busy": row.busy === true || void 0,
 								"aria-label": `${t("skillsToggle")}: ${entry.name}`,
-								disabled: busy,
+								disabled: rowBusy,
 								onClick: () => void this.toggle(entry.name, !enabled, entry.enabled),
 								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: InsuremoCard_module_css_default.controlTrack,
@@ -689,7 +835,7 @@ var SkillsRegion = class extends react.Component {
 				}),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 					className: InsuremoCard_module_css_default.hint,
-					children: t("skillsCliHint")
+					children: t("skillsScopeHint")
 				})
 			]
 		});
@@ -786,9 +932,20 @@ const zh$2 = {
 	authSetDefault: "设为默认",
 	authCliHint: "新增或登录 profile 请使用 imo auth login CLI",
 	skillsToggle: "启用/停用",
-	skillsUpdateAll: "更新全部",
-	skillsUpdatingAll: "更新全部中…",
-	skillsCliHint: "安装新技能请使用 imo skills CLI",
+	skillsScenarioLabel: "场景",
+	skillsScenarioInstall: "安装/同步场景",
+	skillsScenarioInstalling: "场景同步中…",
+	skillsScenarioDone: "场景已同步",
+	skillsScenarioFailed: "场景同步失败",
+	skillsInstallFirstHint: "选择场景并同步即可完成首次安装。",
+	skillsUpdateAll: "更新已装 Skills（全部来源）",
+	skillsUpdatingAll: "更新中…",
+	skillsUpdateDone: "已更新",
+	skillsUpdateFailed: "更新失败",
+	skillsScopeHint: "更新仅拉取已安装的 Skill 来源；场景同步可安装或补齐场景成员。",
+	skillsAdded: "新增",
+	skillsUpdated: "更新",
+	skillsRemoved: "移除",
 	skillsRetryHint: "状态已变化，已刷新，请重试",
 	errorNetwork: "无法连接"
 };
@@ -864,9 +1021,20 @@ const en$2 = {
 	authSetDefault: "Set default",
 	authCliHint: "Add or log in to profiles via the imo auth login CLI",
 	skillsToggle: "Enable/disable",
-	skillsUpdateAll: "Update all",
-	skillsUpdatingAll: "Updating all…",
-	skillsCliHint: "Install new skills via the imo skills CLI",
+	skillsScenarioLabel: "Scenario",
+	skillsScenarioInstall: "Install/sync scenario",
+	skillsScenarioInstalling: "Syncing scenario…",
+	skillsScenarioDone: "Scenario synced",
+	skillsScenarioFailed: "Scenario sync failed",
+	skillsInstallFirstHint: "Pick a scenario and sync to install your first skills.",
+	skillsUpdateAll: "Update installed skills (all sources)",
+	skillsUpdatingAll: "Updating…",
+	skillsUpdateDone: "Updated",
+	skillsUpdateFailed: "Update failed",
+	skillsScopeHint: "Update only pulls already-installed sources; scenario sync can install or reconcile members.",
+	skillsAdded: "Added",
+	skillsUpdated: "Updated",
+	skillsRemoved: "Removed",
 	skillsRetryHint: "State changed; refreshed — please retry",
 	errorNetwork: "Cannot connect"
 };
@@ -984,9 +1152,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
+	"icon": "wb8730382c_icon",
 	"rowIcons": "wb8730382c_rowIcons",
-	"driver": "wb8730382c_driver",
-	"icon": "wb8730382c_icon"
+	"driver": "wb8730382c_driver"
 };
 
 //#endregion
@@ -1278,18 +1446,18 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"rowName": "wba94a6eca_rowName",
-	"rowMark": "wba94a6eca_rowMark",
 	"hint": "wba94a6eca_hint",
-	"trigger": "wba94a6eca_trigger",
 	"error": "wba94a6eca_error",
-	"pickerHeader": "wba94a6eca_pickerHeader",
 	"dot": "wba94a6eca_dot",
+	"rowMark": "wba94a6eca_rowMark",
+	"label": "wba94a6eca_label",
+	"trigger": "wba94a6eca_trigger",
+	"pickerHeader": "wba94a6eca_pickerHeader",
+	"closeMark": "wba94a6eca_closeMark",
 	"list": "wba94a6eca_list",
 	"picker": "wba94a6eca_picker",
-	"closeMark": "wba94a6eca_closeMark",
-	"label": "wba94a6eca_label",
-	"row": "wba94a6eca_row"
+	"row": "wba94a6eca_row",
+	"rowName": "wba94a6eca_rowName"
 };
 
 //#endregion
@@ -1534,15 +1702,15 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"wordmarkInner": "wb1683cb0f_wordmarkInner",
-	"railHost": "wb1683cb0f_railHost",
-	"wordmarkDark": "wb1683cb0f_wordmarkDark",
-	"wordmarkLight": "wb1683cb0f_wordmarkLight",
-	"wordmarkHost": "wb1683cb0f_wordmarkHost",
-	"wordmark": "wb1683cb0f_wordmark",
 	"driver": "wb1683cb0f_driver",
+	"wordmark": "wb1683cb0f_wordmark",
 	"dsh": "wb1683cb0f_dsh",
-	"railMark": "wb1683cb0f_railMark"
+	"wordmarkInner": "wb1683cb0f_wordmarkInner",
+	"wordmarkLight": "wb1683cb0f_wordmarkLight",
+	"railMark": "wb1683cb0f_railMark",
+	"railHost": "wb1683cb0f_railHost",
+	"wordmarkHost": "wb1683cb0f_wordmarkHost",
+	"wordmarkDark": "wb1683cb0f_wordmarkDark"
 };
 
 //#endregion
@@ -1691,11 +1859,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"icon": "wb6cd975b4_icon",
-	"digest": "wb6cd975b4_digest",
 	"row": "wb6cd975b4_row",
-	"kind": "wb6cd975b4_kind",
-	"status": "wb6cd975b4_status"
+	"icon": "wb6cd975b4_icon",
+	"status": "wb6cd975b4_status",
+	"digest": "wb6cd975b4_digest",
+	"kind": "wb6cd975b4_kind"
 };
 
 //#endregion
@@ -1752,23 +1920,23 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"error": "wb13b81332_error",
-	"actions": "wb13b81332_actions",
-	"session": "wb13b81332_session",
-	"summary": "wb13b81332_summary",
-	"status": "wb13b81332_status",
-	"selectedReference": "wb13b81332_selectedReference",
-	"card": "wb13b81332_card",
-	"fieldset": "wb13b81332_fieldset",
-	"hint": "wb13b81332_hint",
-	"header": "wb13b81332_header",
-	"runMeta": "wb13b81332_runMeta",
-	"referenceActions": "wb13b81332_referenceActions",
-	"field": "wb13b81332_field",
-	"progress": "wb13b81332_progress",
-	"consent": "wb13b81332_consent",
-	"done": "wb13b81332_done",
 	"errorText": "wb13b81332_errorText",
+	"selectedReference": "wb13b81332_selectedReference",
+	"session": "wb13b81332_session",
+	"header": "wb13b81332_header",
+	"error": "wb13b81332_error",
+	"progress": "wb13b81332_progress",
+	"fieldset": "wb13b81332_fieldset",
+	"field": "wb13b81332_field",
+	"summary": "wb13b81332_summary",
+	"referenceActions": "wb13b81332_referenceActions",
+	"status": "wb13b81332_status",
+	"card": "wb13b81332_card",
+	"done": "wb13b81332_done",
+	"runMeta": "wb13b81332_runMeta",
+	"actions": "wb13b81332_actions",
+	"consent": "wb13b81332_consent",
+	"hint": "wb13b81332_hint",
 	"batchJobRow": "wb13b81332_batchJobRow"
 };
 

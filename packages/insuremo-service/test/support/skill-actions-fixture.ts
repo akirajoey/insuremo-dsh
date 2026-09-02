@@ -28,6 +28,12 @@ export interface ScriptedState {
   failNextList: boolean;
   invocations: string[][];
   errorLine: string;
+  /** Manual-runtime hook: leave the skills-tool preview (-l) spawn pending. */
+  hangPreview?: boolean;
+  /** Manual-runtime hook: leave the skills-tool execution (add/update -y) spawn pending. */
+  hangExecution?: boolean;
+  /** Manual-runtime hook: make npx unresolvable. */
+  npxMissing?: boolean;
 }
 
 export interface OpLog {
@@ -97,6 +103,21 @@ export function scripted(state: ScriptedState, root: string): SubprocessRuntime 
         for (const name of Object.keys(state.rows)) applyUpdate(state, root, name);
         stdout = "updated\n";
       }
+    } else if (args[0] === "-y" && args.includes("@insuremo/skills-tool")) {
+      if (args.includes("-l")) {
+        stdout = state.installPreview;
+      } else if (state.mutationError !== null) {
+        ({ exitCode, stderr } = state.mutationError);
+        state.mutationError = null;
+      } else if (args.includes("update")) {
+        for (const name of Object.keys(state.rows)) applyUpdate(state, root, name);
+        stdout = "updated\n";
+      } else if (args.includes("add")) {
+        for (const scenario of flagValues(args, "-s")) {
+          for (const name of SCENARIO_MEMBERS[scenario] ?? [`scenario-${scenario}`]) applyInstall(state, root, name);
+        }
+        stdout = "installed\n";
+      }
     } else if (args[0] === "skills" || args[0] === "auth" || args[0] === "icomposer") {
       stdout = `${args.join(" ")} help\n`;
     } else {
@@ -115,6 +136,11 @@ export function flagValues(args: string[], flag: string): string[] {
   }
   return values;
 }
+
+/** Real scenario membership observed from an isolated-HOME install (TASK-079). */
+export const SCENARIO_MEMBERS: Record<string, readonly string[]> = {
+  "ask-insuremo": ["insuremo-auth-cli", "insuremo-deep-search"],
+};
 
 export function applyInstall(state: ScriptedState, root: string, name: string): void {
   const dir = join(root, name);
@@ -183,7 +209,12 @@ export function miniOperationLog(): OpLog {
   };
 }
 
-export async function openFixture(root: string, storageRoot: string, initial: readonly string[]): Promise<Fixture> {
+export async function openFixture(
+  root: string,
+  storageRoot: string,
+  initial: readonly string[],
+  options: { runtime?: (state: ScriptedState, root: string) => SubprocessRuntime; actionsTimeoutMs?: number } = {},
+): Promise<Fixture> {
   const previousHome = process.env.HOME;
   process.env.HOME = root;
   const state: ScriptedState = {
@@ -196,7 +227,7 @@ export async function openFixture(root: string, storageRoot: string, initial: re
   };
   for (const name of initial) applyInstall(state, root, name);
   const ctx = new Context();
-  ctx.provide("subprocess", scripted(state, root) as never);
+  ctx.provide("subprocess", (options.runtime ? options.runtime(state, root) : scripted(state, root)) as never);
   const opLog = miniOperationLog();
   ctx.provide("operationLog", opLog.api as never);
   const storageFiber = ctx.plugin(Storage);
@@ -208,7 +239,7 @@ export async function openFixture(root: string, storageRoot: string, initial: re
   await skillsFiber.await();
   const activationFiber = ctx.plugin(ImoSkillActivationService);
   await activationFiber.await();
-  const actionsFiber = ctx.plugin(ImoSkillActionsService, { command: "imo", timeoutMs: 5_000, allowedGitHosts: ["github.com"] });
+  const actionsFiber = ctx.plugin(ImoSkillActionsService, { command: "imo", timeoutMs: options.actionsTimeoutMs ?? 5_000, allowedGitHosts: ["github.com"] });
   await actionsFiber.await();
   const actions = ctx.get<ImoSkillActions>("imoSkillActions");
   const activation = ctx.get<ImoSkillActivation>("imoSkillActivation");
@@ -231,7 +262,7 @@ export async function openFixture(root: string, storageRoot: string, initial: re
   };
   const mountActions = async (): Promise<Fixture> => {
     await currentActionsFiber.dispose();
-    const next = ctx.plugin(ImoSkillActionsService, { command: "imo", timeoutMs: 5_000, allowedGitHosts: ["github.com"] });
+    const next = ctx.plugin(ImoSkillActionsService, { command: "imo", timeoutMs: options.actionsTimeoutMs ?? 5_000, allowedGitHosts: ["github.com"] });
     await next.await();
     const remounted = ctx.get<ImoSkillActions>("imoSkillActions");
     if (remounted === undefined) throw new Error("remounted skill actions service was not provided");

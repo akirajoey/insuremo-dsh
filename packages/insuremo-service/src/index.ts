@@ -52,6 +52,7 @@ export {
   SKILL_UPDATE_KIND,
 } from "./skill-actions/types.ts";
 export { SKILL_ACTIVATION_CHANGED_EVENT, SKILL_ACTIVATION_DOMAIN_NAME } from "./skill-activation.ts";
+export { SKILLS_TOOL_COMMAND, SKILLS_TOOL_PACKAGE, SKILLS_TOOL_REGISTRY } from "./skill-actions/index.ts";
 export type { ImoOverview } from "./overview/service.ts";
 export { OVERVIEW_PATH } from "./overview/service.ts";
 export * from "./overview/types.ts";

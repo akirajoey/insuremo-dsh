@@ -334,6 +334,151 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     expect(view.view.queryByRole("button", { name: "remove imo-audit-helper" })).toBeNull();
   });
 
+  const SCENARIO_IDS = ["icomposer-full-stack", "icomposer-coding-lite", "icomposer-api-design", "uic-developer", "ask-insuremo"];
+
+  it("TASK-079: fixed scenario selector exposes exactly the five allowlisted scenarios", async () => {
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    const select = await view.view.findByRole("combobox", { name: zh.skillsScenarioLabel });
+    const options = [...select.querySelectorAll("option")].map(option => option.getAttribute("value"));
+    expect(options).toEqual(SCENARIO_IDS);
+    expect(await view.view.findByRole("button", { name: zh.skillsScenarioInstall })).toBeTruthy();
+    expect(await view.view.findByText(zh.skillsScopeHint)).toBeTruthy();
+  });
+
+  it("TASK-079: empty inventory still offers the scenario first-install path", async () => {
+    const emptyView = { ...fixtureView, skills: { ...fixtureView.skills, installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [] } };
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(emptyView));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    const select = await view.view.findByRole("combobox", { name: zh.skillsScenarioLabel });
+    expect(select.querySelectorAll("option")).toHaveLength(5);
+    expect(await view.view.findByText(new RegExp(zh.skillsInstallFirstHint))).toBeTruthy();
+  });
+
+  it("TASK-079: scenario sync posts the allowlisted scenario, shows the structured diff, and refreshes", async () => {
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-install")) {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({ scenario: "icomposer-full-stack" });
+        return jsonResponse({ ok: true, result: { status: "completed", beforeCount: 1, afterCount: 3, added: ["insuremo-auth-cli", "insuremo-deep-search"], removed: [], updated: [] } });
+      }
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    (await view.view.findByRole("button", { name: zh.skillsScenarioInstall })).click();
+    const done = await view.view.findByText(new RegExp(zh.skillsScenarioDone));
+    expect(done.textContent).toContain("2");
+    expect(done.textContent).toContain("insuremo-auth-cli");
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(call => String(call[0]).includes("fast=0"))).toBe(true);
+    });
+  });
+
+  it("TASK-079: failed and partial scenario receipts render alerts, never success", async () => {
+    let receipt: { status: string; added: readonly string[] } = { status: "failed", added: ["insuremo-auth-cli"] };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/actions/skill-install")) {
+        return jsonResponse({ ok: true, result: { status: receipt.status, beforeCount: 2, afterCount: 3, added: receipt.added, removed: [], updated: [] } });
+      }
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    const install = await view.view.findByRole("button", { name: zh.skillsScenarioInstall });
+    for (const status of ["failed", "partial-failure"]) {
+      receipt = { status, added: ["insuremo-auth-cli"] };
+      install.click();
+      // eslint-disable-next-line no-await-in-loop
+      const alert = await vi.waitFor(() => {
+        const element = view.container.querySelector('[data-scenario="failed"]');
+        if (element === null || !element.textContent?.includes(status)) throw new Error(`scenario ${status} alert not rendered`);
+        return element;
+      });
+      expect(alert.textContent).toContain(zh.skillsScenarioFailed);
+      expect(alert.textContent).toContain("insuremo-auth-cli"); // recovery evidence stays visible
+      expect(alert.getAttribute("role")).toBe("alert");
+      expect(view.container.querySelector('[data-scenario="done"]')).toBeNull();
+    }
+  });
+
+  it("TASK-079: update-all surfaces failure envelopes and structured failed receipts", async () => {
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-update")) {
+        return jsonResponse({ ok: false, error: { code: "tool-unavailable", message: "npx is unavailable" } });
+      }
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    (await view.view.findByRole("button", { name: zh.skillsUpdateAll })).click();
+    const alert = await vi.waitFor(() => {
+      const element = view.container.querySelector('[data-update="failed"]');
+      if (element === null) throw new Error("update failure alert not rendered");
+      return element;
+    });
+    expect(alert.textContent).toContain(zh.skillsUpdateFailed);
+    expect(alert.textContent).toContain("tool-unavailable");
+
+    const receiptMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/actions/skill-update")) {
+        return jsonResponse({ ok: true, result: { status: "failed", added: [], removed: [], updated: [] } });
+      }
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", receiptMock);
+    (await view.view.findByRole("button", { name: zh.skillsUpdateAll })).click();
+    await view.view.findByText(new RegExp(`${zh.skillsUpdateFailed}: failed`));
+    expect(view.container.querySelector('[data-update="done"]')).toBeNull();
+  });
+
+  it("TASK-079: conflicting skill actions are disabled while a scenario sync is in flight", async () => {
+    let resolveInstall: ((value: Response) => void) | undefined;
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/actions/skill-install")) {
+        return await new Promise<Response>(resolve => { resolveInstall = resolve; });
+      }
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    const install = await view.view.findByRole("button", { name: zh.skillsScenarioInstall });
+    install.click();
+    await vi.waitFor(() => {
+      expect((view.view.getByRole("button", { name: zh.skillsScenarioInstalling }) as HTMLButtonElement).disabled).toBe(true);
+      expect((view.view.getByRole("button", { name: zh.skillsUpdateAll }) as HTMLButtonElement).disabled).toBe(true);
+      const toggle = view.view.getAllByRole("switch").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper"))!;
+      expect((toggle as HTMLButtonElement).disabled).toBe(true);
+      expect((view.view.getByRole("combobox", { name: zh.skillsScenarioLabel }) as HTMLSelectElement).disabled).toBe(true);
+    });
+    resolveInstall?.(jsonResponse({ ok: true, result: { status: "completed", beforeCount: 2, afterCount: 3, added: ["insuremo-auth-cli"], removed: [], updated: [] } }));
+    await vi.waitFor(() => {
+      expect((view.view.getByRole("button", { name: zh.skillsUpdateAll }) as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
+  it("TASK-079: English copy renders for the scenario region", async () => {
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
+    vi.stubGlobal("fetch", fetchMock);
+    locale.setLocale("en");
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    const header = await view.view.findByRole("button", { name: new RegExp(`${en.expand}: ${en.title}`) });
+    header.click();
+    expect(await view.view.findByRole("button", { name: en.skillsScenarioInstall })).toBeTruthy();
+    expect(await view.view.findByRole("combobox", { name: en.skillsScenarioLabel })).toBeTruthy();
+    expect(await view.view.findByRole("button", { name: en.skillsUpdateAll })).toBeTruthy();
+    expect(await view.view.findByText(en.skillsScopeHint)).toBeTruthy();
+  });
+
   it("switches locale: English copy renders", async () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
