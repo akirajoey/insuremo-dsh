@@ -104,7 +104,8 @@ async function sanitizeStagedJs(dir) {
 		if (entry.isDirectory()) await sanitizeStagedJs(full);
 		else if (entry.name.endsWith(".js")) {
 			const text = await readFile(full, "utf8");
-			const sanitized = text
+			const sanitized = canonicalizeCssSourceRegions(Buffer.from(text, "utf8"))
+				.toString("utf8")
 				.replaceAll(`${repoRoot}/`, "<repo>/")
 				.replaceAll("/private/var", "private-var")
 				.replaceAll("/var/folders", "var-folders")
@@ -129,6 +130,16 @@ async function canonicalizeStagedCss(dir) {
  * source builds may retain their native names, while every shipped payload is
  * path-independent and keeps the map/CSS pair consistent.
  */
+/** Normalize lightningcss source-region labels from every checkout path. */
+export function canonicalizeCssSourceRegions(bytes) {
+	const text = bytes.toString("utf8");
+	const canonical = text.replace(
+		/\\0dsh-css:(?:[A-Za-z]:[\\\\/]|\\\\\\\\|\/)[^\r\n]*/gu,
+		"\\0dsh-css:asset",
+	);
+	return canonical === text ? bytes : Buffer.from(canonical, "utf8");
+}
+
 export function canonicalizeCssModuleClasses(bytes) {
 	const text = bytes.toString("utf8");
 	const mapPattern =

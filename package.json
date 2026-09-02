@@ -18,6 +18,11 @@
     "pack:dist": "node scripts/pack-dist.mjs",
     "pack:git-dist": "node scripts/pack-git-dist.mjs",
     "check:git-dist": "node scripts/check-git-dist.mjs",
+    "pack:bootstrap:stable": "node scripts/pack-bootstrap.mjs stable",
+    "pack:bootstrap:next": "node scripts/pack-bootstrap.mjs next",
+    "pack:bootstrap": "pnpm pack:bootstrap:stable && pnpm pack:bootstrap:next",
+    "check:bootstrap": "node scripts/check-bootstrap.mjs",
+    "test:bootstrap": "node --test test/bootstrap.test.mjs test/bootstrap-safety.test.mjs",
     "test:git-dist": "node --test --test-concurrency=1 test/git-dist.test.mjs test/pack-git-dist.test.mjs",
     "test:git-install": "node test/git-install.e2e.mjs"
   }

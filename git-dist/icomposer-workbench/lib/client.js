@@ -242,7 +242,7 @@ async function postAction$1(action, body, signal) {
 }
 
 //#endregion
-//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-settings\src\client\InsuremoCard.module.css.mjs
+//#region \0dsh-css:asset
 const css$5 = ".wb7fdb0fb4_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.wb7fdb0fb4_card:hover{border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.wb7fdb0fb4_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.wb7fdb0fb4_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.wb7fdb0fb4_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.wb7fdb0fb4_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.wb7fdb0fb4_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.wb7fdb0fb4_chevronOpen{transform:rotate(180deg)}.wb7fdb0fb4_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.wb7fdb0fb4_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.wb7fdb0fb4_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.wb7fdb0fb4_refresh{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.wb7fdb0fb4_refresh:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.wb7fdb0fb4_refresh:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wb7fdb0fb4_region{flex-direction:column;gap:6px;display:flex}.wb7fdb0fb4_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.wb7fdb0fb4_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.wb7fdb0fb4_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wb7fdb0fb4_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.wb7fdb0fb4_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.wb7fdb0fb4_toggle:disabled{cursor:not-allowed;opacity:.55}.wb7fdb0fb4_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.wb7fdb0fb4_toggle[aria-checked=true] .wb7fdb0fb4_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.wb7fdb0fb4_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.wb7fdb0fb4_toggle[aria-checked=true] .wb7fdb0fb4_controlThumb{transform:translate(12px)}.wb7fdb0fb4_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.wb7fdb0fb4_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.wb7fdb0fb4_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.wb7fdb0fb4_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.wb7fdb0fb4_small:hover{color:var(--dsw-alias-state-error-primary)}";
 const tagId$5 = "@icomposer/workbench/InsuremoCard.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$5) + "]") === null) {
@@ -253,27 +253,27 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"chevronOpen": "wb7fdb0fb4_chevronOpen",
-	"description": "wb7fdb0fb4_description",
+	"chevron": "wb7fdb0fb4_chevron",
+	"pending": "wb7fdb0fb4_pending",
+	"header": "wb7fdb0fb4_header",
+	"card": "wb7fdb0fb4_card",
+	"cardOpen": "wb7fdb0fb4_cardOpen",
+	"name": "wb7fdb0fb4_name",
+	"body": "wb7fdb0fb4_body",
+	"headText": "wb7fdb0fb4_headText",
 	"region": "wb7fdb0fb4_region",
 	"controlTrack": "wb7fdb0fb4_controlTrack",
-	"cardOpen": "wb7fdb0fb4_cardOpen",
-	"footer": "wb7fdb0fb4_footer",
-	"name": "wb7fdb0fb4_name",
-	"pending": "wb7fdb0fb4_pending",
-	"small": "wb7fdb0fb4_small",
-	"card": "wb7fdb0fb4_card",
-	"headText": "wb7fdb0fb4_headText",
-	"chevron": "wb7fdb0fb4_chevron",
+	"description": "wb7fdb0fb4_description",
 	"refresh": "wb7fdb0fb4_refresh",
+	"chevronOpen": "wb7fdb0fb4_chevronOpen",
+	"footer": "wb7fdb0fb4_footer",
+	"list": "wb7fdb0fb4_list",
 	"meta": "wb7fdb0fb4_meta",
 	"error": "wb7fdb0fb4_error",
-	"toggle": "wb7fdb0fb4_toggle",
-	"list": "wb7fdb0fb4_list",
-	"header": "wb7fdb0fb4_header",
 	"controlThumb": "wb7fdb0fb4_controlThumb",
 	"hint": "wb7fdb0fb4_hint",
-	"body": "wb7fdb0fb4_body"
+	"small": "wb7fdb0fb4_small",
+	"toggle": "wb7fdb0fb4_toggle"
 };
 
 //#endregion
@@ -973,7 +973,7 @@ function IntelligenceGlyph(props) {
 }
 
 //#endregion
-//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-status\src\client\WorkspaceHealth.module.css.mjs
+//#region \0dsh-css:asset
 const css$4 = ".wb8730382c_driver{display:none}.wb8730382c_rowIcons{flex:none;align-items:center;gap:4px;margin-left:auto;display:inline-flex}.wb8730382c_rowIcons .wb8730382c_icon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);border-radius:4px;flex:none;justify-content:center;align-items:center;display:inline-flex;position:relative}.wb8730382c_rowIcons .wb8730382c_icon svg{display:block}.wb8730382c_rowIcons .wb8730382c_icon:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:2px}.wb8730382c_rowIcons .wb8730382c_icon[data-state=detected]{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}.wb8730382c_rowIcons .wb8730382c_icon[data-state=on]{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent)}.wb8730382c_rowIcons .wb8730382c_icon[data-state=off]{color:var(--dsw-alias-label-tertiary);opacity:.32}";
 const tagId$4 = "@icomposer/workbench/WorkspaceHealth.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$4) + "]") === null) {
@@ -984,9 +984,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
-	"icon": "wb8730382c_icon",
+	"rowIcons": "wb8730382c_rowIcons",
 	"driver": "wb8730382c_driver",
-	"rowIcons": "wb8730382c_rowIcons"
+	"icon": "wb8730382c_icon"
 };
 
 //#endregion
@@ -1267,7 +1267,7 @@ async function postAction(action, body, signal) {
 }
 
 //#endregion
-//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-status\src\client\ProfilePicker.module.css.mjs
+//#region \0dsh-css:asset
 const css$3 = ".wba94a6eca_trigger{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_trigger:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.wba94a6eca_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_picker{flex-direction:column;gap:2px;padding:2px 0;display:flex}.wba94a6eca_pickerHeader{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_closeMark{color:var(--dsw-alias-label-tertiary);margin-left:auto}.wba94a6eca_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.wba94a6eca_row{box-sizing:border-box;width:100%;min-height:26px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:6px;padding:3px 9px 3px 22px;font-size:12px;line-height:17px;display:inline-flex;overflow:hidden}.wba94a6eca_row:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_row[data-default=\"1\"]{color:var(--dsw-alias-label-primary)}.wba94a6eca_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_rowMark{color:var(--dsw-alias-state-success-primary);flex:none}.wba94a6eca_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:2px 9px;font-size:11px}.wba94a6eca_error{color:var(--dsw-alias-state-error-primary);padding:2px 9px;font-size:11px}";
 const tagId$3 = "@icomposer/workbench/ProfilePicker.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$3) + "]") === null) {
@@ -1278,18 +1278,18 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"label": "wba94a6eca_label",
-	"list": "wba94a6eca_list",
-	"closeMark": "wba94a6eca_closeMark",
 	"rowName": "wba94a6eca_rowName",
-	"error": "wba94a6eca_error",
-	"trigger": "wba94a6eca_trigger",
-	"pickerHeader": "wba94a6eca_pickerHeader",
-	"row": "wba94a6eca_row",
-	"dot": "wba94a6eca_dot",
-	"picker": "wba94a6eca_picker",
+	"rowMark": "wba94a6eca_rowMark",
 	"hint": "wba94a6eca_hint",
-	"rowMark": "wba94a6eca_rowMark"
+	"trigger": "wba94a6eca_trigger",
+	"error": "wba94a6eca_error",
+	"pickerHeader": "wba94a6eca_pickerHeader",
+	"dot": "wba94a6eca_dot",
+	"list": "wba94a6eca_list",
+	"picker": "wba94a6eca_picker",
+	"closeMark": "wba94a6eca_closeMark",
+	"label": "wba94a6eca_label",
+	"row": "wba94a6eca_row"
 };
 
 //#endregion
@@ -1523,7 +1523,7 @@ var insuremo_wordmark_dark_default = undefined;
 var insuremo_wordmark_light_default = undefined;
 
 //#endregion
-//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-insuremo-status\src\client\BrandChrome.module.css.mjs
+//#region \0dsh-css:asset
 const css$2 = ".wb1683cb0f_driver{display:none}.wb1683cb0f_wordmarkHost,.wb1683cb0f_railHost{pointer-events:none;z-index:1;position:absolute;inset:0}.wb1683cb0f_wordmarkHost{justify-content:flex-start;align-items:center;display:flex;overflow:hidden}.wb1683cb0f_wordmarkInner{white-space:nowrap;align-items:center;gap:8px;height:24px;line-height:1;display:inline-flex}.wb1683cb0f_wordmark{flex:none;width:99px;height:24px;display:block}.wb1683cb0f_wordmark img{object-fit:contain;image-rendering:auto;width:99px;height:24px;display:block}.wb1683cb0f_wordmarkDark{display:none!important}body[data-ds-dark-theme] .wb1683cb0f_wordmarkLight{display:none!important}body[data-ds-dark-theme] .wb1683cb0f_wordmarkDark{display:block!important}.wb1683cb0f_dsh{color:currentColor;font-family:var(--ds-font-family,Inter, system-ui, sans-serif);letter-spacing:-.045em;font-size:22px;font-weight:650;line-height:24px;display:inline-block}.wb1683cb0f_railHost{justify-content:center;align-items:center;display:flex}.wb1683cb0f_railMark{width:24px;height:24px;color:var(--dsw-alias-label-primary);flex:none;display:block}.wb1683cb0f_railMark img{object-fit:contain;image-rendering:auto;width:24px;height:24px;display:block}button:hover .wb1683cb0f_railHost{visibility:hidden}";
 const tagId$2 = "@icomposer/workbench/BrandChrome.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
@@ -1535,13 +1535,13 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 }
 var BrandChrome_module_css_default = {
 	"wordmarkInner": "wb1683cb0f_wordmarkInner",
-	"dsh": "wb1683cb0f_dsh",
 	"railHost": "wb1683cb0f_railHost",
 	"wordmarkDark": "wb1683cb0f_wordmarkDark",
 	"wordmarkLight": "wb1683cb0f_wordmarkLight",
 	"wordmarkHost": "wb1683cb0f_wordmarkHost",
 	"wordmark": "wb1683cb0f_wordmark",
 	"driver": "wb1683cb0f_driver",
+	"dsh": "wb1683cb0f_dsh",
 	"railMark": "wb1683cb0f_railMark"
 };
 
@@ -1680,7 +1680,7 @@ function apply$2(ctx) {
 }
 
 //#endregion
-//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-workbench-jobs\src\client\JobNode.module.css.mjs
+//#region \0dsh-css:asset
 const css$1 = ".wb6cd975b4_row{box-sizing:border-box;width:100%;min-height:36px;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:8px;padding:7px 12px;font-size:13px;line-height:20px;display:flex}.wb6cd975b4_row:hover{background:var(--dsw-alias-interactive-bg-hover)}.wb6cd975b4_icon{color:var(--dsw-alias-label-secondary);flex:none}.wb6cd975b4_kind{min-width:0;color:var(--dsw-alias-label-primary);text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.wb6cd975b4_status{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:999px;flex:none;margin-left:auto;padding:1px 6px;font-size:11px;line-height:16px}.wb6cd975b4_digest{max-width:180px;color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;flex:none;overflow:hidden}";
 const tagId$1 = "@icomposer/workbench/JobNode.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
@@ -1691,11 +1691,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"status": "wb6cd975b4_status",
+	"icon": "wb6cd975b4_icon",
 	"digest": "wb6cd975b4_digest",
 	"row": "wb6cd975b4_row",
 	"kind": "wb6cd975b4_kind",
-	"icon": "wb6cd975b4_icon"
+	"status": "wb6cd975b4_status"
 };
 
 //#endregion
@@ -1741,7 +1741,7 @@ function JobNode({ node, t }) {
 }
 
 //#endregion
-//#region \0dsh-css:D:\dsh\workbench-src\packages\ui-workbench-jobs\src\client\IciExplainToolview.module.css.mjs
+//#region \0dsh-css:asset
 const css = ".wb13b81332_card{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);width:100%;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-radius:10px;padding:12px;font-size:13px}.wb13b81332_header{align-items:center;gap:8px;min-height:24px;display:flex}.wb13b81332_status{color:var(--dsw-alias-label-secondary);margin-left:auto;font-size:12px}.wb13b81332_summary,.wb13b81332_hint,.wb13b81332_consent,.wb13b81332_progress,.wb13b81332_done,.wb13b81332_error{margin:8px 0}.wb13b81332_hint{color:var(--dsw-alias-label-tertiary)}.wb13b81332_consent{color:var(--dsw-alias-label-secondary)}.wb13b81332_fieldset{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;gap:6px;margin:8px 0;padding:8px;display:grid}.wb13b81332_fieldset legend{color:var(--dsw-alias-label-secondary)}.wb13b81332_selectedReference{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;margin:0}.wb13b81332_referenceActions{flex-wrap:wrap;gap:8px;display:flex}.wb13b81332_field{align-items:center;gap:8px;margin:8px 0;display:flex}.wb13b81332_field span{min-width:76px;color:var(--dsw-alias-label-secondary)}.wb13b81332_field select{min-width:150px;max-width:100%}.wb13b81332_actions{gap:8px;margin-top:10px;display:flex}.wb13b81332_actions button,.wb13b81332_referenceActions button,.wb13b81332_card>button{border:1px solid var(--dsw-alias-border-l2);min-height:28px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);cursor:pointer;border-radius:6px;padding:4px 12px}.wb13b81332_actions button:first-child{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-active)}button:disabled,select:disabled,input:disabled{cursor:not-allowed;opacity:.55}.wb13b81332_error,.wb13b81332_errorText{color:var(--dsw-alias-state-error-primary)}.wb13b81332_done{color:var(--dsw-alias-state-success-primary);overflow-wrap:anywhere}.wb13b81332_runMeta{color:var(--dsw-alias-label-tertiary);margin:4px 0;font-size:12px}.wb13b81332_session{cursor:pointer;user-select:all}.wb13b81332_batchJobRow{overflow-wrap:anywhere;margin:4px 0}";
 const tagId = "@icomposer/workbench/IciExplainToolview.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -1752,24 +1752,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"status": "wb13b81332_status",
-	"consent": "wb13b81332_consent",
 	"error": "wb13b81332_error",
 	"actions": "wb13b81332_actions",
-	"done": "wb13b81332_done",
-	"selectedReference": "wb13b81332_selectedReference",
-	"runMeta": "wb13b81332_runMeta",
-	"batchJobRow": "wb13b81332_batchJobRow",
-	"card": "wb13b81332_card",
-	"referenceActions": "wb13b81332_referenceActions",
-	"fieldset": "wb13b81332_fieldset",
 	"session": "wb13b81332_session",
 	"summary": "wb13b81332_summary",
-	"field": "wb13b81332_field",
+	"status": "wb13b81332_status",
+	"selectedReference": "wb13b81332_selectedReference",
+	"card": "wb13b81332_card",
+	"fieldset": "wb13b81332_fieldset",
+	"hint": "wb13b81332_hint",
 	"header": "wb13b81332_header",
+	"runMeta": "wb13b81332_runMeta",
+	"referenceActions": "wb13b81332_referenceActions",
+	"field": "wb13b81332_field",
 	"progress": "wb13b81332_progress",
+	"consent": "wb13b81332_consent",
+	"done": "wb13b81332_done",
 	"errorText": "wb13b81332_errorText",
-	"hint": "wb13b81332_hint"
+	"batchJobRow": "wb13b81332_batchJobRow"
 };
 
 //#endregion

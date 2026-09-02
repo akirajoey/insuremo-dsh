@@ -1,0 +1,70 @@
+name: bootstrap
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "config/bootstrap-channels.json"
+      - "packages/insuremo-dsh-workbench-bootstrap/**"
+      - "git-dist/icomposer-workbench/**"
+      - "scripts/pack-bootstrap.mjs"
+      - "scripts/check-bootstrap.mjs"
+      - ".github/workflows/bootstrap.yml"
+  pull_request:
+    paths:
+      - "config/bootstrap-channels.json"
+      - "packages/insuremo-dsh-workbench-bootstrap/**"
+      - "git-dist/icomposer-workbench/**"
+      - "scripts/pack-bootstrap.mjs"
+      - "scripts/check-bootstrap.mjs"
+      - ".github/workflows/bootstrap.yml"
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Keep the repository layout expected by compatibility.json:
+      # <parent>/icomposer-workbench and <parent>/deepseek-harness.
+      - uses: actions/checkout@v4
+        with:
+          path: icomposer-workbench
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: dsh-v0.1.0-rc.7
+          path: deepseek-harness
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - name: Install Workbench dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: icomposer-workbench
+      - name: Bootstrap unit tests (graph assertions, receipts, locks, recovery)
+        run: pnpm test:bootstrap
+        working-directory: icomposer-workbench
+      - name: Refresh git-dist payload
+        run: |
+          pnpm pack:dist
+          pnpm pack:git-dist
+          pnpm check:git-dist
+        working-directory: icomposer-workbench
+      - name: Pack both bootstrap channels (provenance verified against the pinned commit)
+        run: pnpm pack:bootstrap
+        working-directory: icomposer-workbench
+      - name: "Release gate: exact DSH graph + provenance + both artifacts"
+        run: pnpm check:bootstrap
+        working-directory: icomposer-workbench
+      - name: Upload bootstrap artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: insuremo-dsh-workbench-bootstrap
+          path: |
+            icomposer-workbench/dist-release/insuremo-dsh-workbench-*.tgz
+            icomposer-workbench/dist-release/insuremo-dsh-workbench-*-manifest.json
+          if-no-files-found: error

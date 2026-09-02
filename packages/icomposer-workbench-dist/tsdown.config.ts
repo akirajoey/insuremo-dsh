@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { canonicalizeCssSourceRegions } from "../../scripts/dist-payload.mjs";
 import { clientBundle } from "../../../deepseek-harness/packages/client/tsdown.client.ts";
 
 /**
@@ -16,7 +17,7 @@ const sanitizeCssRegion = {
     await Promise.all(Object.entries(bundle).filter(([, item]) => item.type === "chunk").map(async ([fileName]) => {
       const file = resolve(options.dir ?? ".", fileName);
       const code = await readFile(file, "utf8");
-      const clean = code.replace(/\\0dsh-css:\/[^\r\n]*/g, "\\0dsh-css:asset");
+      const clean = canonicalizeCssSourceRegions(Buffer.from(code, "utf8")).toString("utf8");
       if (clean !== code) await writeFile(file, clean, "utf8");
     }));
   },

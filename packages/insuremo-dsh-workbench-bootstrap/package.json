@@ -1,0 +1,13 @@
+{
+  "name": "insuremo-dsh-workbench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-configuration npm launcher for the iComposer Workbench",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

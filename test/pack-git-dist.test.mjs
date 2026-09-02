@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { repoRoot } from "../scripts/dist-payload.mjs";
+import { canonicalizeCssSourceRegions, repoRoot } from "../scripts/dist-payload.mjs";
 
 const script = join(repoRoot, "scripts", "pack-git-dist.mjs");
 const runPack = (root, extra = {}) => spawnSync(process.execPath, [script], {
@@ -16,6 +16,20 @@ const temporaryNames = root => readdirSync(root).filter(name => name.startsWith(
 const payloadFiles = dir => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
   const full = join(dir, entry.name);
   return entry.isDirectory() ? payloadFiles(full) : [full];
+});
+
+test("CSS source regions canonicalize POSIX and Windows checkout paths", () => {
+  const input = Buffer.from([
+    String.raw`//#region \0dsh-css:/Users/worker/workbench/packages/ui/a.css.mjs`,
+    String.raw`//#region \0dsh-css:D:\\dsh\\workbench-src\\packages\\ui\\b.css.mjs`,
+    String.raw`//#region \0dsh-css:asset`,
+  ].join("\n"));
+  const output = canonicalizeCssSourceRegions(input).toString("utf8");
+  assert.equal(output, [
+    String.raw`//#region \0dsh-css:asset`,
+    String.raw`//#region \0dsh-css:asset`,
+    String.raw`//#region \0dsh-css:asset`,
+  ].join("\n"));
 });
 
 test("successful git-dist refreshes leave no backup or staging directories", () => {
