@@ -1,7 +1,8 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import type { OperationLogLike } from "./operation-log-face.ts";
-import { digest, resolveWithDeadline, runCapture } from "./run.ts";
+import { failureDiagnosis } from "./diagnosis.ts";
+import { digest, resolveWithDeadline, runCaptureDetailed } from "./run.ts";
 import type { ImoCli } from "./cli.ts";
 
 /** Fixed registry scope/package written by the one-shot installer (TASK-076). */
@@ -157,7 +158,7 @@ export class ImoInstallService extends Service implements ImoInstall {
     }
 
     // Step 1: user-level registry configuration (always the fixed constant).
-    const configSet = await runCapture(this.ctx.subprocess, {
+    const configSet = await runCaptureDetailed(this.ctx.subprocess, {
       command: packageManager,
       args: ["config", "set", IMO_REGISTRY_SCOPE, IMO_REGISTRY],
       timeoutMs: CONFIG_SET_TIMEOUT_MS,
@@ -166,19 +167,22 @@ export class ImoInstallService extends Service implements ImoInstall {
     steps.push(step(`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`, configSet));
     const registryConfigured = configSet.ok;
     if (!configSet.ok) {
+      this.recordFailure("imo-install", [`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`], exitOf(configSet), configSet.detail, packageManager);
       return this.finish(operationId, "failed", { packageManager, registryConfigured, before, after: null, steps, startedAt, exitCode: exitOf(configSet) });
     }
 
     // Step 2: the global install itself.
     const installArgs = packageManager === "npm" ? ["install", "-g", IMO_PACKAGE] : ["add", "-g", IMO_PACKAGE];
-    const installRun = await runCapture(this.ctx.subprocess, {
+    const installRun = await runCaptureDetailed(this.ctx.subprocess, {
       command: packageManager,
       args: installArgs,
       timeoutMs: this.config.installTimeoutMs,
       signal,
     });
-    steps.push(step(`${packageManager} ${installArgs.join(" ")}`, installRun));
+    const installCmd = `${packageManager} ${installArgs.join(" ")}`;
+    steps.push(step(installCmd, installRun));
     if (!installRun.ok) {
+      this.recordFailure("imo-install", [`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`, installCmd], exitOf(installRun), installRun.detail, packageManager);
       return this.finish(operationId, "failed", { packageManager, registryConfigured, before, after: null, steps, startedAt, exitCode: exitOf(installRun) });
     }
 
@@ -186,9 +190,37 @@ export class ImoInstallService extends Service implements ImoInstall {
     // actually resolvable afterwards.
     const after = await this.imoVersion(signal);
     if (after === null) {
+      this.recordFailure("imo-install", [`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`, installCmd], installRun.value.exitCode, installRun.detail, packageManager);
       return this.finish(operationId, "failed", { packageManager, registryConfigured, before, after: null, steps, startedAt, exitCode: installRun.value.exitCode });
     }
+    // Success clears the same kind's last failure: the diagnosis only ever
+    // describes the most recent failed install/update.
+    failureDiagnosis.clear("imo-cli");
     return this.finish(operationId, "completed", { packageManager, registryConfigured, before, after, steps, startedAt, exitCode: installRun.value.exitCode });
+  }
+
+  /** Record one failed install run's raw streams (memory-only diagnosis). */
+  private recordFailure(
+    operation: string,
+    commands: readonly string[],
+    exitCode: number | null,
+    detail: { stdout: string; stderr: string; stdoutLossy: boolean; stderrLossy: boolean } | undefined,
+    packageManager: "npm" | "pnpm",
+  ): void {
+    failureDiagnosis.record({
+      kind: "imo-cli",
+      operation,
+      commands,
+      exitCode,
+      streams: {
+        stdout: detail?.stdout ?? "",
+        stderr: detail?.stderr ?? "",
+        stdoutLossy: detail?.stdoutLossy ?? false,
+        stderrLossy: detail?.stderrLossy ?? false,
+      },
+      packageManager,
+      registry: IMO_REGISTRY,
+    });
   }
 
   private async imoVersion(signal?: AbortSignal): Promise<string | null> {
@@ -258,12 +290,12 @@ export class ImoInstallService extends Service implements ImoInstall {
   }
 }
 
-function step(cmd: string, run: Awaited<ReturnType<typeof runCapture>>): ImoInstallStep {
+function step(cmd: string, run: Awaited<ReturnType<typeof runCaptureDetailed>>): ImoInstallStep {
   return run.ok
     ? { cmd, ok: true, exitCode: run.value.exitCode, stdoutDigest: run.value.stdoutDigest, stderrDigest: run.value.stderrDigest }
     : { cmd, ok: false, exitCode: run.error.exitCode ?? null, stdoutDigest: run.error.stdoutDigest ?? digest(""), stderrDigest: run.error.stderrDigest ?? digest("") };
 }
 
-function exitOf(run: Awaited<ReturnType<typeof runCapture>>): number | null {
+function exitOf(run: Awaited<ReturnType<typeof runCaptureDetailed>>): number | null {
   return run.ok ? run.value.exitCode : run.error.exitCode ?? null;
 }

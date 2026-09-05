@@ -89,6 +89,12 @@ export const zh = {
   skillsRemoved: "移除",
   skillsRetryHint: "状态已变化，已刷新，请重试",
   errorNetwork: "无法连接",
+  diagButton: "诊断",
+  diagBusy: "正在生成诊断…",
+  diagNoData: "暂无诊断数据：请先复现一次失败，再点击诊断。",
+  diagOpening: "已创建诊断会话并预填内容，请检查后发送。",
+  diagCopied: "诊断内容已复制，请粘贴到新会话输入框",
+  diagActionFailed: "诊断生成失败",
 } as const;
 
 export type InsuremoLocaleKey = keyof typeof zh;
@@ -183,4 +189,10 @@ export const en = {
   skillsRemoved: "Removed",
   skillsRetryHint: "State changed; refreshed — please retry",
   errorNetwork: "Cannot connect",
+  diagButton: "Diagnose",
+  diagBusy: "Preparing diagnosis…",
+  diagNoData: "No diagnosis captured yet: reproduce a failure first, then click Diagnose.",
+  diagOpening: "A diagnosis session was created and prefilled — review and send.",
+  diagCopied: "Diagnosis text copied — paste it into a new session composer",
+  diagActionFailed: "Could not prepare the diagnosis",
 } as const satisfies Record<InsuremoLocaleKey, string>;

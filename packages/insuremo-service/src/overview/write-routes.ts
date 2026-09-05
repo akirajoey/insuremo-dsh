@@ -1,6 +1,8 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { mkdir } from "node:fs/promises";
 import { isSkillName } from "@deepseek-ai/dsh-skill";
+import { failureDiagnosis, scratchDirectory, type FailureKind } from "../diagnosis.ts";
 import { SKILL_SCENARIOS, type SkillScenario } from "../skill-actions/types.ts";
 import { OVERVIEW_PATH } from "./paths.ts";
 
@@ -211,6 +213,28 @@ export function mountWriteRoutes(ctx: Context): () => void {
     } catch {
       return faceError(undefined, "install-failed");
     }
+  }));
+
+  // imo-diagnosis: the LAST failed install/update run's full output (memory
+  // only; secrets redacted at capture time). When a failure exists, the
+  // response also carries the Host-computed scratch directory (created
+  // eagerly) so the UI can open a pre-filled diagnosis session without ever
+  // resolving a host path itself.
+  register(actionRoute(`${ACTIONS_PREFIX}/imo-diagnosis`, async (body) => {
+    const kind = body.kind === "imo-cli" || body.kind === "skill" ? body.kind : undefined;
+    if (kind === undefined) {
+      return faceError({ code: "invalid-input", message: "diagnosis kind must be 'imo-cli' or 'skill'" }, "invalid-input");
+    }
+    const diagnosis = failureDiagnosis.snapshot(kind as FailureKind);
+    if (diagnosis === undefined) return { ok: true, result: { available: false as const } };
+    const scratchCwd = scratchDirectory();
+    try {
+      await mkdir(scratchCwd, { recursive: true });
+    } catch {
+      // Non-fatal: the session-creation path on the harness side re-ensures
+      // the directory; the diagnosis payload is still complete.
+    }
+    return { ok: true, result: { available: true as const, diagnosis, scratchCwd } };
   }));
 
   // skill-activation: durable activation domain (unchanged semantics).

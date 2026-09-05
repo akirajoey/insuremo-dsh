@@ -27,6 +27,22 @@ This is a web-only, same-origin read bridge. A write transport (POST /
 approve / execute) is intentionally deferred; its CSRF and Origin design is a
 documented Phase 2 risk in the host handoff, not this package.
 
+## One-click install/update diagnosis (TASK-083)
+
+When an IMO CLI install/update or a Skills install/update fails, the failed
+region renders a 诊断 (Diagnose) button — only in the failed state; success or
+an empty failure store renders none. Clicking it fetches the last failure's
+full capture from the same-origin `imo-diagnosis` action (server-redacted,
+memory-only), assembles a Chinese diagnosis text (scene, executed commands,
+exit code, stdout/stderr code blocks, environment, and a closing
+"please analyze the failure and give fix steps" line), and hands it to a
+fresh ungrouped scratch session in the harness runtime's mandated order
+`create({ cwd }) → setDraft(id, text) → open(id)`. The settings modal then
+closes through the shell's own Escape channel. On runtimes without draft
+staging (Desktop rc.7) the text is copied to the clipboard with a paste hint
+instead, and the ungrouped session still opens when creation is available.
+Nothing is ever sent automatically.
+
 ```sh
 pnpm run typecheck
 pnpm --filter @icomposer/ui-insuremo-settings run test

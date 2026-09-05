@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Context } from "@deepseek-ai/cordis";
 import { mountWriteRoutes } from "../src/overview/write-routes.ts";
+import { failureDiagnosis } from "../src/diagnosis.ts";
 import { setActivationControllerOnContext } from "../src/overview/route-service.ts";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
@@ -387,6 +391,53 @@ test("TASK-047 active-profile route delegates only to Active Profile and maps fa
     assert.deepEqual(calls, ["active:good", "active:bad", "active:down"]);
   } finally { await h.dispose(); }
   assert.equal(h.server.routes.has(actionPath("active-profile")), false);
+});
+
+test("TASK-083 imo-diagnosis: empty store answers unavailable; a captured failure answers full payload plus a created scratch dir", async () => {
+  failureDiagnosis.reset();
+  const home = await mkdtemp(join(tmpdir(), "dsh-diag-route-"));
+  const originalHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  const h = await fixture();
+  try {
+    // No captured failure: an explicit, structured "none" answer.
+    const empty = await call(h.server, "imo-diagnosis", { body: JSON.stringify({ kind: "imo-cli" }) });
+    assert.deepEqual(JSON.parse(empty.body), { ok: true, result: { available: false } });
+    // Invalid kind: input gate.
+    const invalid = await call(h.server, "imo-diagnosis", { body: JSON.stringify({ kind: "everything" }) });
+    assert.equal(JSON.parse(invalid.body).error.code, "invalid-input");
+
+    // A recorded failure answers the full diagnosis payload, and the scratch
+    // directory is created eagerly under $DSH_HOME.
+    failureDiagnosis.record({
+      kind: "skill",
+      operation: "skill-update",
+      commands: ["npx @insuremo/skills-tool update --all"],
+      exitCode: 3,
+      streams: { stdout: "reached 40 of 80", stderr: "npm ERR! _authToken=leaked-value network", stdoutLossy: false, stderrLossy: true },
+    });
+    const payload = await call(h.server, "imo-diagnosis", { body: JSON.stringify({ kind: "skill" }) });
+    const parsed = JSON.parse(payload.body);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.result.available, true);
+    assert.equal(parsed.result.diagnosis.kind, "skill");
+    assert.equal(parsed.result.diagnosis.exitCode, 3);
+    assert.equal(parsed.result.diagnosis.stderrTruncated, true);
+    assert.match(parsed.result.diagnosis.stderr, /_auth=\*\*\*/);
+    assert.doesNotMatch(parsed.result.diagnosis.stderr, /leaked-value/);
+    assert.equal(parsed.result.scratchCwd, join(home, "scratch"));
+    await assert.doesNotReject(() => stat(join(home, "scratch")));
+
+    // Per-kind slots: the imo-cli read stays empty.
+    const imoEmpty = await call(h.server, "imo-diagnosis", { body: JSON.stringify({ kind: "imo-cli" }) });
+    assert.deepEqual(JSON.parse(imoEmpty.body), { ok: true, result: { available: false } });
+  } finally {
+    failureDiagnosis.reset();
+    if (originalHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = originalHome;
+    await h.dispose();
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("method gate: GET → 405; dispose unmounts all routes", async () => {

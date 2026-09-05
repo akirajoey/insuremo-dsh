@@ -278,6 +278,14 @@ restart. No action uses `--insecure`; tests and real smoke never run auth writes
 
 **UI 重做**：ui-insuremo-settings 旧 InsuremoSection/四面板已删；新 `InsuremoCard`（settings.plugin.item, key="insuremo"）四区：IMO（版本+一键升级）、Auth（profile 单选切换+CLI 提示）、Skills（开关+更新全部+单项移除）、Code Intelligence（embedding 端点展示）。侧栏 footer 徽标/ProfilePicker（ui-insuremo-status）不变。
 
+## TASK-083: 安装/更新失败一键诊断
+
+**失败全文捕获（仅内存、仅最后一次）**：`runCaptureDetailed` 在 digest-only `RunResult` 旁以 sibling `detail` 携带失败运行的原始 stdout/stderr（含 64KB collect lossy 标记）；`runCapture` 契约不变（digest-only，无该字段）。imo-install、imo-upgrade（直跑与审批双内核）与 skill-actions（install/update 两种 kind，直跑+审批两条内核）在失败时调用 `FailureDiagnosisStore.record`：按 kind 各存最近一次失败（后写覆盖），入 store 前做 `_auth*`/Bearer/URL userinfo/token 前缀脱敏与 ~256KB 截断标记；**成功即清空同 kind 槽位**；不落盘、不进 operationLog、receipt/事件保持 digest-only。remove/activation 失败与 upgrade smoke 步骤不捕获（smoke 失败不改 receipt status）。
+
+**诊断 action**：写桥新增 `POST .../actions/imo-diagnosis`（body `{kind:'imo-cli'|'skill'}`）。无失败返回 `{available:false}`；有失败返回 `{available:true, diagnosis:{kind,operation,commands,exitCode,stdout,stderr,*Truncated,packageManager?,registry?,nodeVersion,platform,arch,occurredAt}, scratchCwd}`，其中 `scratchCwd = $DSH_HOME(默认 ~/.dsh)/scratch`（Host 侧解析，响应前 `mkdir -p`，失败非致命）。
+
+**UI 消费（ui-insuremo-settings）**：安装/更新失败态动态渲染「诊断」按钮（成功/无失败不渲染）。点击后拉取诊断载荷，组装中文诊断文本（场景+逐条命令+exitCode+stdout/stderr 代码块+环境信息，结尾"请分析失败原因并给出修复步骤。"），并按 harness 客户端运行时硬序 **create → setDraft → open** 打开无分组 scratch 会话（create({cwd:scratchCwd})，TASK-082 API），随后经 settings 壳自身的 Escape 关闭通道关闭面板（卡片 owner props 无公开 close 回调）。setDraft 特性检测：rc.7 等旧运行时回退为剪贴板复制+提示条，仍创建并打开无分组会话；会话不可创建时仅复制。不自动发送。
+
 ## Skills 开关与 catalog 语义（TASK-042）
 
 - InsureMO provider 的条目受 activation 域门控：去勾选 → `SKILL_ACTIVATION_CHANGED` 事件（revision 递增）→ provider gate `control.invalidate()` → harness SkillRegistry 缓存失效 → 下一次 `ctx.skills.list()` 不再列出该 skill（re-enable 即恢复）。

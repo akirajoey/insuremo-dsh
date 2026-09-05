@@ -2,11 +2,14 @@ import type {} from "@deepseek-ai/dsh-client-locale/client";
 import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import type {} from "@deepseek-ai/dsh-client-ui-settings/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
-import { InsuremoCard } from "./InsuremoCard.tsx";
+import { createElement } from "react";
+import { InsuremoCard, type InsuremoCardProps } from "./InsuremoCard.tsx";
 import { en, zh, type InsuremoLocaleKey } from "./locales.ts";
+import type { DiagnosisSessions } from "./diagnosis.ts";
 
 export type { InsuremoCardProps } from "./InsuremoCard.tsx";
 export type { InsuremoLocaleKey } from "./locales.ts";
+export type { DiagnosisSessions } from "./diagnosis.ts";
 
 /** Locale namespace contributed by the InsureMO settings card. */
 export const NS = "settings.insuremo";
@@ -26,6 +29,9 @@ export function apply(ctx: ClientContext): void {
 
   // Plugins tab card (TASK-039): keyed by the Host-served "insuremo" settings
   // namespace so ConfigurablePluginsTab dispatches it without a custom tab.
+  // The registration closes over the client runtime so the card's diagnosis
+  // hand-off can reach ctx.sessions (slot owner props supply no runtime); a
+  // missing/unusable sessions face degrades to the clipboard fallback.
   ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
     name: "settings.plugin.item",
     // keyed dispatch by the Host-served "insuremo" namespace in production;
@@ -33,5 +39,11 @@ export function apply(ctx: ClientContext): void {
     key: "insuremo",
     id: "insuremo",
     locale: NS,
-  }, InsuremoCard));
+  }, function InsuremoCardWithRuntime(props: InsuremoCardProps) {
+    const sessions = (ctx as { sessions?: unknown }).sessions;
+    return createElement(
+      InsuremoCard,
+      { ...props, diagnosisSessions: sessions as DiagnosisSessions | undefined },
+    );
+  }));
 }

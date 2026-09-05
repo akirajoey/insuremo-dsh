@@ -1,7 +1,8 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import { Config, resolveConfig, type Config as ImoConfig } from "../config.ts";
-import { digest, runCapture } from "../run.ts";
+import { failureDiagnosis } from "../diagnosis.ts";
+import { digest, runCaptureDetailed } from "../run.ts";
 import type { ImoSkillActivation, ImoSkillActivationSnapshot, SkillActivationController } from "../skill-activation.ts";
 import { skillActivationControllerFor } from "../skill-activation.ts";
 import type { ImoSkills } from "../skills.ts";
@@ -193,17 +194,21 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
   }
 
   private async directCli(operationId: string, pending: PendingSkillAction, before: SkillInventorySnapshot, initialized: ImoSkillActivationSnapshot, expectedRevision: number | undefined, startedAt: string, signal?: AbortSignal): Promise<SkillActionExecution> {
-    const run = await runCapture(this.ctx.subprocess, { command: actionCommand(pending.input, this.#config.command), args: executionArgs(pending.input), timeoutMs: this.#config.timeoutMs, signal });
-    if (!run.ok && run.error.code === "not-found" && actionCommand(pending.input, this.#config.command) === SKILLS_TOOL_COMMAND) {
+    const command = actionCommand(pending.input, this.#config.command);
+    const args = executionArgs(pending.input);
+    const run = await runCaptureDetailed(this.ctx.subprocess, { command, args, timeoutMs: this.#config.timeoutMs, signal });
+    if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) {
       // npx never resolved: nothing ran, so surface the structured tool error
       // instead of a misleading failed receipt.
       return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId);
     }
+    this.captureRunDiagnosis(pending, command, args, run);
     const recovery: RecoveryReport = await recoverInventory({ ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation, kind: pending.input.kind, beforeNames: before.names, expectedRevision });
     const after = recovery.after;
     const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
     const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
     const status = run.ok ? "completed" : (changed ? "partial-failure" : "failed");
+    if (status === "completed") failureDiagnosis.clear("skill");
     const stdoutDigest = run.ok ? run.value.stdoutDigest : (run.error.stdoutDigest ?? EMPTY_DIGEST);
     const stderrDigest = run.ok ? run.value.stderrDigest : (run.error.stderrDigest ?? EMPTY_DIGEST);
     const exitCode = run.ok ? run.value.exitCode : (run.error.exitCode ?? null);
@@ -219,6 +224,28 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
       activationAfterRevision: recovery.activationRevision ?? expectedRevision ?? initialized.revision,
       catalogInvalidated: recovery.catalogInvalidated, startedAt,
       ...(hint === undefined ? {} : { hint }),
+    });
+  }
+
+  /**
+   * Record one failed skills-tool run's raw streams (memory-only diagnosis).
+   * Install/update only; remove/activation failures carry no command output
+   * worth diagnosing here, and the receipt stays digest-only regardless.
+   */
+  private captureRunDiagnosis(pending: PendingSkillAction, command: string, args: readonly string[], run: Awaited<ReturnType<typeof runCaptureDetailed>>): void {
+    if (run.ok) return;
+    if (pending.input.kind !== SKILL_INSTALL_KIND && pending.input.kind !== SKILL_UPDATE_KIND) return;
+    failureDiagnosis.record({
+      kind: "skill",
+      operation: diagnosisOperation(pending),
+      commands: [`${command} ${args.join(" ")}`],
+      exitCode: run.error.exitCode ?? null,
+      streams: {
+        stdout: run.detail?.stdout ?? "",
+        stderr: run.detail?.stderr ?? "",
+        stdoutLossy: run.detail?.stdoutLossy ?? false,
+        stderrLossy: run.detail?.stderrLossy ?? false,
+      },
     });
   }
 
@@ -369,10 +396,13 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     startedAt: string,
     signal: AbortSignal | undefined,
   ): Promise<SkillActionExecution> {
-    const run = await runCapture(this.ctx.subprocess, { command: actionCommand(pending.input, this.#config.command), args: executionArgs(pending.input), timeoutMs: this.#config.timeoutMs, signal });
-    if (!run.ok && run.error.code === "not-found" && actionCommand(pending.input, this.#config.command) === SKILLS_TOOL_COMMAND) {
+    const command = actionCommand(pending.input, this.#config.command);
+    const args = executionArgs(pending.input);
+    const run = await runCaptureDetailed(this.ctx.subprocess, { command, args, timeoutMs: this.#config.timeoutMs, signal });
+    if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) {
       return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId);
     }
+    this.captureRunDiagnosis(pending, command, args, run);
     // Once the external attempt has started, recovery is best-effort always.
     const recovery: RecoveryReport = await recoverInventory({
       ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation,
@@ -382,6 +412,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
     const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
     const status = run.ok ? "completed" : (changed ? "partial-failure" : "failed");
+    if (status === "completed") failureDiagnosis.clear("skill");
     const stdoutDigest = run.ok ? run.value.stdoutDigest : (run.error.stdoutDigest ?? EMPTY_DIGEST);
     const stderrDigest = run.ok ? run.value.stderrDigest : (run.error.stderrDigest ?? EMPTY_DIGEST);
     const exitCode = run.ok ? run.value.exitCode : (run.error.exitCode ?? null);
@@ -496,4 +527,11 @@ function resultFailure<T = never>(code: SkillActionError["code"], message: strin
 
 function executionFailure(code: SkillActionError["code"], message: string, operationId?: string): SkillActionExecution {
   return { ok: false, error: { code, message, ...(operationId === undefined ? {} : { operationId }) } };
+}
+
+/** Diagnosis label for one pending action: kind plus the install source when present. */
+function diagnosisOperation(pending: PendingSkillAction): string {
+  if (pending.input.kind !== SKILL_INSTALL_KIND) return pending.input.kind;
+  const source = (pending.input as Extract<NormalizedSkillAction, { kind: typeof SKILL_INSTALL_KIND }>).source;
+  return `skill-install:${source.type}/${source.value}`;
 }

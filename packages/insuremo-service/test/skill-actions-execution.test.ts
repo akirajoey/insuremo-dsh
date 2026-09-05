@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { SkillRegistry } from "@deepseek-ai/dsh-skill";
 import { InsuremoSkillProvider } from "../src/skill-provider.ts";
 import { digest } from "../src/run.ts";
+import { failureDiagnosis } from "../src/diagnosis.ts";
 import { SKILL_ACTION_COMPLETED_EVENT, SKILL_ACTION_FAILED_EVENT } from "../src/index.ts";
 test("approved install mutates the store but keeps the new skill disabled", async () => {
   await withFixture(["alpha"], async (fx) => {
@@ -143,6 +144,43 @@ test("forced install failure recovers inventory then is a one-shot failed receip
     const stateAfter = await fx.activation.snapshot(["alpha", "beta", "gamma"]);
     assert.deepEqual(stateAfter, stateBefore);
   });
+});
+
+test("TASK-083: a failed skills-tool run captures redacted raw output; success clears the slot", async () => {
+  failureDiagnosis.reset();
+  await withFixture(["alpha"], async (fx) => {
+    const requested = await fx.actions.request({ kind: "skill-update" });
+    if (!requested.ok) return;
+    await fx.approve(requested.value.operationId);
+    fx.state.mutationError = { exitCode: 1, stderr: "npm ERR! _authToken=leaky-token network timeout" };
+    const result = await fx.actions.execute(requested.value.operationId);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.receipt.status, "failed");
+    // Receipt stays digest-only.
+    assert.match(result.receipt.stderrDigest, /^sha256:/);
+    assert.equal(result.receipt.stderrDigest.includes("leaky-token"), false);
+
+    const diagnosis = failureDiagnosis.snapshot("skill");
+    assert.ok(diagnosis !== undefined);
+    assert.equal(diagnosis.operation, "skill-update");
+    assert.equal(diagnosis.exitCode, 1);
+    assert.match(diagnosis.commands[0] ?? "", /@insuremo\/skills-tool/);
+    assert.ok(diagnosis.stderr.includes("network timeout"));
+    assert.ok(diagnosis.stderr.includes("_auth=***"));
+    assert.ok(!diagnosis.stderr.includes("leaky-token"));
+
+    // A successful update clears the same slot.
+    const retry = await fx.actions.request({ kind: "skill-update" });
+    if (!retry.ok) return;
+    await fx.approve(retry.value.operationId);
+    const ok = await fx.actions.execute(retry.value.operationId);
+    assert.equal(ok.ok, true);
+    if (!ok.ok) return;
+    assert.equal(ok.receipt.status, "completed");
+    assert.equal(failureDiagnosis.snapshot("skill"), undefined);
+  });
+  failureDiagnosis.reset();
 });
 
 test("401 and 403 failures expose only fixed hints", async () => {

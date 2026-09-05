@@ -47,6 +47,22 @@ export type RunResult =
 /** Structured failures exposed by read-only CLI/domain seams. */
 export type ImoCliErrorCode = RunFailureCode | "parse-error";
 
+/**
+ * Raw streams of one failed run, captured beside (never inside) the
+ * digest-only {@link RunFailure}. Only {@link runCaptureDetailed} returns
+ * them; the default {@link runCapture} strips the field so every existing
+ * path keeps its digest-only contract.
+ */
+export interface CaptureDetail {
+	readonly stdout: string;
+	readonly stderr: string;
+	/** The 64KB collection cap dropped bytes from this stream. */
+	readonly stdoutLossy: boolean;
+	readonly stderrLossy: boolean;
+}
+
+export type DetailedRunResult = RunResult & { readonly detail?: CaptureDetail };
+
 export interface ImoCliError {
 	readonly code: ImoCliErrorCode;
 	readonly message: string;
@@ -200,6 +216,28 @@ export async function runCapture(
 	rt: SubprocessRuntime,
 	options: RunOptions,
 ): Promise<RunResult> {
+	const outcome = await captureCore(rt, options);
+	// Strip the sibling detail so the shared return shape stays digest-only.
+	return outcome.ok ? { ok: true, value: outcome.value } : { ok: false, error: outcome.error };
+}
+
+/**
+ * {@link runCapture} plus the failed run's raw streams (see
+ * {@link CaptureDetail}). Diagnosis-only: the install/update kernels use it
+ * to record the last failure's full output in memory; nothing else may
+ * consume it, and success runs carry no detail at all.
+ */
+export async function runCaptureDetailed(
+	rt: SubprocessRuntime,
+	options: RunOptions,
+): Promise<DetailedRunResult> {
+	return captureCore(rt, options);
+}
+
+async function captureCore(
+	rt: SubprocessRuntime,
+	options: RunOptions,
+): Promise<RunResult & { readonly detail?: CaptureDetail }> {
 	const {
 		signal: deadlineSignal,
 		cleanup,
@@ -270,7 +308,11 @@ export async function runCapture(
 				stderrDigest: digestOf(stderr),
 				...(httpStatus === undefined ? {} : { httpStatus }),
 			};
-			return { ok: false, error };
+			return {
+				ok: false,
+				error,
+				detail: { stdout: stdout.text, stderr: stderr.text, stdoutLossy: stdout.truncated, stderrLossy: stderr.truncated },
+			};
 		}
 		if (outcome.exitCode !== 0 || outcome.signal !== null) {
 			const httpStatus = classifyHttpStatus(stdout.text, stderr.text);
@@ -283,7 +325,11 @@ export async function runCapture(
 				stderrDigest: digestOf(stderr),
 				...(httpStatus === undefined ? {} : { httpStatus }),
 			};
-			return { ok: false, error };
+			return {
+				ok: false,
+				error,
+				detail: { stdout: stdout.text, stderr: stderr.text, stdoutLossy: stdout.truncated, stderrLossy: stderr.truncated },
+			};
 		}
 		return {
 			ok: true,

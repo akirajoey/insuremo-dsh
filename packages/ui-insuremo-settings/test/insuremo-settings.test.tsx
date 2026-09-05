@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { LocaleRuntime } from "@deepseek-ai/dsh-client-locale/client";
 import { SlotTestRuntime, usePinnedBrowserLanguages } from "@deepseek-ai/dsh-client-test-runtime";
 import { resolveSlotLabel } from "@deepseek-ai/dsh-client-ui-slots";
 import { apply, inject, NS } from "../src/client/index.ts";
 import { OVERVIEW_URL } from "../src/client/overview.ts";
 import { InsuremoCard } from "../src/client/InsuremoCard.tsx";
-import { en, zh } from "../src/client/locales.ts";
+import type { DiagnosisSessions } from "../src/client/diagnosis.ts";
+import { en, zh, type InsuremoLocaleKey } from "../src/client/locales.ts";
 
 
 usePinnedBrowserLanguages("zh-CN");
@@ -606,6 +609,173 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     expect(runtime.slots.entries("settings.plugin.item")).toHaveLength(1);
     await feature.dispose();
     expect(runtime.slots.entries("settings.plugin.item")).toHaveLength(0);
+  });
+});
+
+const DIAGNOSIS_PAYLOAD = {
+  available: true,
+  diagnosis: {
+    kind: "imo-cli",
+    operation: "imo-install",
+    commands: ["npm config set @insuremo:registry <registry>", "npm install -g @insuremo/imo"],
+    exitCode: 1,
+    stdout: "npm warn deprecated nothing",
+    stderr: "npm ERR! network _auth=*** install failed",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    packageManager: "npm",
+    registry: "https://public.insuremo.com/artifactory/api/npm/npm/",
+    nodeVersion: "v22.19.0",
+    platform: "darwin",
+    arch: "arm64",
+    occurredAt: "2026-09-05T08:00:00.000Z",
+  },
+  scratchCwd: "/tmp/dsh-home/scratch",
+} as const;
+
+/** Render the card directly with a localized t seat and an injected sessions double. */
+function renderCard(diagnosisSessions?: DiagnosisSessions) {
+  const props = {
+    t: (key: InsuremoLocaleKey) => zh[key],
+    diagnosisSessions,
+  } as unknown as ComponentProps<typeof InsuremoCard>;
+  return render(<InsuremoCard {...props} />);
+}
+
+/** A card whose install action already failed (fetch-stubbed end to end). */
+async function renderFailedInstall(overrides: Record<string, unknown> = {}) {
+  const unavailableView = { ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } };
+  const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/actions/imo-diagnosis")) return jsonResponse({ ok: true, result: overrides.diagnosis ?? DIAGNOSIS_PAYLOAD });
+    if (url.includes("/actions/imo-install")) return jsonResponse({ ok: false, error: { code: "install-failed", message: "install failed" } });
+    if (url.includes("fast=0")) return jsonResponse(unavailableView);
+    return jsonResponse(unavailableView);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const view = renderCard(overrides.sessions as DiagnosisSessions | undefined);
+  const toggle = await view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
+  toggle.click();
+  await view.findByRole("button", { name: zh.cliInstall });
+  view.getByRole("button", { name: zh.cliInstall }).click();
+  await view.findByText(new RegExp(zh.cliInstallFailed));
+  return { view, fetchMock };
+}
+
+describe("install/update one-click diagnosis (TASK-083)", () => {
+  afterEach(() => { cleanup(); });
+
+  it("the diagnosis button appears only in the failed state", async () => {
+    const failed = await renderFailedInstall();
+    expect(await failed.view.findByRole("button", { name: zh.diagButton })).toBeTruthy();
+    failed.view.unmount();
+
+    // A successful install renders no diagnosis affordance.
+    const availableView = { ...fixtureView };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/imo-install")) return jsonResponse({ ok: true, result: { status: "completed", packageManager: "npm", currentVersion: "0.2.14" } });
+      if (url.includes("fast=0")) return jsonResponse(availableView);
+      return jsonResponse({ ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const ok = renderCard();
+    const toggle = await ok.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
+    toggle.click();
+    await ok.findByRole("button", { name: zh.cliInstall });
+    ok.getByRole("button", { name: zh.cliInstall }).click();
+    await ok.findByText(new RegExp(zh.cliInstalled));
+    expect(ok.queryAllByRole("button", { name: zh.diagButton })).toHaveLength(0);
+    ok.unmount();
+  });
+
+  it("diagnosis opens a scratch session staged create → setDraft → open, then closes settings via Escape", async () => {
+    const calls: string[] = [];
+    const sessions: DiagnosisSessions = {
+      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
+      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-9"; }),
+      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}:${text.length}`); }),
+    };
+    const dispatchSpy = vi.spyOn(document, "dispatchEvent");
+    const failed = await renderFailedInstall({ sessions });
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    await failed.view.findByText(zh.diagOpening);
+    // The harness hard order: create → setDraft → open (staging before navigation).
+    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", expect.stringMatching(/^setDraft:session-9:/), "open:session-9"]);
+    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(draft).toContain("IMO CLI安装/更新失败诊断");
+    expect(draft).toContain("npm config set @insuremo:registry <registry>");
+    expect(draft).toContain("exitCode: 1");
+    expect(draft).toContain("npm ERR");
+    expect(draft).toContain("_auth=***");
+    expect(draft).toContain("请分析失败原因并给出修复步骤。");
+    expect(draft).not.toContain("leaky-value");
+    // The settings shell's own Escape channel is the close path.
+    const escape = dispatchSpy.mock.calls.map(call => call[0]).find(event => event instanceof KeyboardEvent && event.key === "Escape");
+    expect(escape).toBeTruthy();
+    dispatchSpy.mockRestore();
+  });
+
+  it("without draft staging the text is copied and the ungrouped session still opens", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const sessions: DiagnosisSessions = {
+      open: vi.fn(),
+      create: vi.fn(async () => "session-7"),
+    };
+    const failed = await renderFailedInstall({ sessions });
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    await failed.view.findByText(zh.diagCopied);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect((writeText.mock.calls[0]?.[0] as string)).toContain("请分析失败原因并给出修复步骤。");
+    expect(sessions.create).toHaveBeenCalledWith({ cwd: "/tmp/dsh-home/scratch" });
+    expect(sessions.open).toHaveBeenCalledWith("session-7");
+  });
+
+  it("an upgrade failure diagnoses under the imo-upgrade operation", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const calls: string[] = [];
+    const sessions: DiagnosisSessions = {
+      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
+      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-5"; }),
+      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}`); }),
+    };
+    const upgradeDiagnosis = {
+      ...DIAGNOSIS_PAYLOAD,
+      diagnosis: { ...DIAGNOSIS_PAYLOAD.diagnosis, operation: "imo-upgrade" },
+    };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/imo-upgrade")) return jsonResponse({ ok: false, error: { code: "upgrade-failed", message: "upgrade failed" } });
+      if (url.includes("/actions/imo-diagnosis")) return jsonResponse({ ok: true, result: upgradeDiagnosis });
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = renderCard(sessions);
+    const toggle = await view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
+    toggle.click();
+    (await view.findByRole("button", { name: zh.cliUpdate })).click();
+    await view.findByText(new RegExp(zh.cliUpdateFailed));
+    expect(view.queryAllByRole("button", { name: zh.diagButton })).toHaveLength(1);
+    view.getByRole("button", { name: zh.diagButton }).click();
+    await view.findByText(zh.diagOpening);
+    // The upgrade diagnosis flows through the same create → setDraft → open order.
+    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", "setDraft:session-5", "open:session-5"]);
+    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(draft).toContain("IMO CLI安装/更新失败诊断");
+    expect(draft).toContain("场景：IMO CLI 更新（imo-upgrade）");
+    view.unmount();
+  });
+
+  it("an empty diagnosis store answers no-data without touching sessions", async () => {
+    const sessions: DiagnosisSessions = { open: vi.fn(), create: vi.fn(async () => "x"), setDraft: vi.fn() };
+    const failed = await renderFailedInstall({ sessions, diagnosis: { available: false } });
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    await failed.view.findByText(zh.diagNoData);
+    expect(sessions.create).not.toHaveBeenCalled();
+    expect(sessions.open).not.toHaveBeenCalled();
+    expect(sessions.setDraft).not.toHaveBeenCalled();
   });
 });
 

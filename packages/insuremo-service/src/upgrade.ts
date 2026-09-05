@@ -3,7 +3,8 @@ import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import type { OperationLogLike } from "./operation-log-face.ts";
 import { Config, resolveConfig, type Config as ImoConfig } from "./config.ts";
-import { digest, runCapture } from "./run.ts";
+import { failureDiagnosis } from "./diagnosis.ts";
+import { digest, runCapture, runCaptureDetailed } from "./run.ts";
 import type { ImoCli } from "./cli.ts";
 
 /** Structured rejection vocabulary of the upgrade closed loop. */
@@ -149,7 +150,7 @@ export class ImoUpgradeService extends Service implements ImoUpgrade {
     const upgradeArgs = this.running!.targetVersion === null
       ? ["upgrade", "--yes"]
       : ["upgrade", "--version", this.running!.targetVersion, "--yes"];
-    const run = await runCapture(this.ctx.subprocess, {
+    const run = await runCaptureDetailed(this.ctx.subprocess, {
       command: this.config.command,
       args: upgradeArgs,
       timeoutMs: this.config.upgradeTimeoutMs,
@@ -161,6 +162,7 @@ export class ImoUpgradeService extends Service implements ImoUpgrade {
     const after = (await this.readVersion(signal)) ?? before;
 
     if (!run.ok) {
+      this.recordFailure([`${this.config.command} ${upgradeArgs.join(" ")}`], exitCode, run.detail);
       return this.finishDirect("failed", operationId, { before, after, exitCode, stdoutDigest, stderrDigest, smoke: [], startedAt });
     }
 
@@ -209,9 +211,30 @@ export class ImoUpgradeService extends Service implements ImoUpgrade {
       finishedAt: new Date().toISOString(),
       recovery: `imo upgrade --version ${input.before} restores the previous version if needed`,
     };
+    if (status === "completed") failureDiagnosis.clear("imo-cli");
     const event = status === "completed" ? IMO_UPGRADE_COMPLETED_EVENT : IMO_UPGRADE_FAILED_EVENT;
     (this.ctx as unknown as { emit(name: string, payload: unknown): void }).emit(event, { operationId, status, before: input.before, after: input.after });
     return { ok: true, receipt };
+  }
+
+  /** Record one failed upgrade run's raw streams (memory-only diagnosis). */
+  private recordFailure(
+    commands: readonly string[],
+    exitCode: number | null,
+    detail: { stdout: string; stderr: string; stdoutLossy: boolean; stderrLossy: boolean } | undefined,
+  ): void {
+    failureDiagnosis.record({
+      kind: "imo-cli",
+      operation: "imo-upgrade",
+      commands,
+      exitCode,
+      streams: {
+        stdout: detail?.stdout ?? "",
+        stderr: detail?.stderr ?? "",
+        stdoutLossy: detail?.stdoutLossy ?? false,
+        stderrLossy: detail?.stderrLossy ?? false,
+      },
+    });
   }
 
   async executeUpgrade(operationId: string, signal?: AbortSignal): Promise<ImoUpgradeResult> {
@@ -240,7 +263,7 @@ export class ImoUpgradeService extends Service implements ImoUpgrade {
       const upgradeArgs = this.running.targetVersion === null
         ? ["upgrade", "--yes"]
         : ["upgrade", "--version", this.running.targetVersion, "--yes"];
-      const run = await runCapture(this.ctx.subprocess, {
+      const run = await runCaptureDetailed(this.ctx.subprocess, {
         command: this.config.command,
         args: upgradeArgs,
         timeoutMs: this.config.upgradeTimeoutMs,
@@ -252,6 +275,7 @@ export class ImoUpgradeService extends Service implements ImoUpgrade {
       const after = (await this.readVersion(signal)) ?? before;
 
       if (!run.ok) {
+        this.recordFailure([`${this.config.command} ${upgradeArgs.join(" ")}`], exitCode, run.detail);
         return await this.finish("failed", operationId, {
           before, after, exitCode, stdoutDigest, stderrDigest,
           smoke: [], startedAt,
@@ -308,6 +332,8 @@ export class ImoUpgradeService extends Service implements ImoUpgrade {
       finishedAt: new Date().toISOString(),
       recovery: `恢复命令：imo upgrade --version ${input.before} --yes`,
     };
+    // Success clears the same kind's last failure, as the install kernel does.
+    if (status === "completed") failureDiagnosis.clear("imo-cli");
     const resultDigest = digest(JSON.stringify(receipt));
     try {
       await this.ctx.operationLog.recordResult(operationId, { resultDigest, artifactRefs: [] });
