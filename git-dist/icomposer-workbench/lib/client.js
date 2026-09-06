@@ -243,28 +243,23 @@ async function postAction$1(action, body, signal) {
 
 //#endregion
 //#region ../ui-insuremo-settings/src/client/diagnosis.ts
-const OPERATION_LABELS = {
-	"imo-install": "IMO CLI 一键安装",
-	"imo-upgrade": "IMO CLI 更新",
-	"skill-update": "Skills 全量更新",
-	"skill-install": "Skills 安装"
-};
 /** Human label for an operation; scenario/source installs carry a suffix. */
-function operationLabel(operation) {
-	const exact = OPERATION_LABELS[operation];
-	if (exact !== void 0) return exact;
-	if (operation.startsWith("skill-install:")) return "Skills 场景/来源安装";
+function operationLabel(operation, t) {
+	if (operation === "imo-install") return t("diagOpImoInstall");
+	if (operation === "imo-upgrade") return t("diagOpImoUpgrade");
+	if (operation === "skill-update") return t("diagOpSkillUpdate");
+	if (operation === "skill-install") return t("diagOpSkillInstall");
+	if (operation.startsWith("skill-install:")) return t("diagOpSkillInstallSource");
 	return operation;
 }
 /** One rendered command line with its step number. */
-function commandLines(commands) {
-	if (commands.length === 0) return "（无已执行命令记录）";
+function commandLines(commands, t) {
+	if (commands.length === 0) return t("diagNoCommands");
 	return commands.map((command, index) => `${index + 1}. ${command}`).join("\n");
 }
-/** Assemble the Chinese diagnosis text the user reviews and sends. */
-function buildDiagnosisText(diagnosis) {
-	const scene = operationLabel(diagnosis.operation);
-	const kindLabel = diagnosis.kind === "imo-cli" ? "IMO CLI" : "Skills";
+/** Assemble the localized diagnosis text the user reviews and sends. */
+function buildDiagnosisText(diagnosis, t) {
+	const scene = operationLabel(diagnosis.operation, t);
 	const environment = [
 		`node: ${diagnosis.nodeVersion}`,
 		`os: ${diagnosis.platform} ${diagnosis.arch}`,
@@ -272,32 +267,32 @@ function buildDiagnosisText(diagnosis) {
 		...diagnosis.registry === void 0 ? [] : [`registry: ${diagnosis.registry}`]
 	].join("\n");
 	return [
-		`${kindLabel}安装/更新失败诊断`,
-		`场景：${scene}（${diagnosis.operation}）`,
-		`发生时间：${diagnosis.occurredAt}`,
+		diagnosis.kind === "imo-cli" ? t("diagTitleImo") : t("diagTitleSkill"),
+		`${t("diagSceneLabel")}${scene}${t("diagParenOpen")}${diagnosis.operation}${t("diagParenClose")}`,
+		`${t("diagOccurredAtLabel")}${diagnosis.occurredAt}`,
 		"",
-		"执行的命令：",
-		commandLines(diagnosis.commands),
+		t("diagCommandsLabel"),
+		commandLines(diagnosis.commands, t),
 		"",
-		`exitCode: ${diagnosis.exitCode ?? "（未运行）"}`,
-		...diagnosis.error === void 0 ? [] : [`错误：${diagnosis.error.code}: ${diagnosis.error.message}`],
+		`exitCode: ${diagnosis.exitCode ?? t("diagNotRun")}`,
+		...diagnosis.error === void 0 ? [] : [`${t("diagErrorLabel")}${diagnosis.error.code}: ${diagnosis.error.message}`],
 		"",
 		"stdout：",
 		"```",
-		diagnosis.stdout === "" ? "（空）" : diagnosis.stdout,
+		diagnosis.stdout === "" ? t("diagEmpty") : diagnosis.stdout,
 		"```",
-		...diagnosis.stdoutTruncated ? ["（stdout 已截断）"] : [],
+		...diagnosis.stdoutTruncated ? [t("diagStdoutTruncated")] : [],
 		"",
 		"stderr：",
 		"```",
-		diagnosis.stderr === "" ? "（空）" : diagnosis.stderr,
+		diagnosis.stderr === "" ? t("diagEmpty") : diagnosis.stderr,
 		"```",
-		...diagnosis.stderrTruncated ? ["（stderr 已截断）"] : [],
+		...diagnosis.stderrTruncated ? [t("diagStderrTruncated")] : [],
 		"",
-		"环境信息：",
+		t("diagEnvironmentLabel"),
 		environment,
 		"",
-		"请分析失败原因并给出修复步骤。"
+		t("diagClosing")
 	].join("\n");
 }
 /** Whether the running client runtime exposes the draft-staging API (≥ TASK-082). */
@@ -339,29 +334,29 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 }
 var InsuremoCard_module_css_default = {
 	"description": "wbf3683280_description",
-	"header": "wbf3683280_header",
-	"region": "wbf3683280_region",
-	"chevronOpen": "wbf3683280_chevronOpen",
-	"meta": "wbf3683280_meta",
-	"headText": "wbf3683280_headText",
-	"action": "wbf3683280_action",
+	"hint": "wbf3683280_hint",
+	"pending": "wbf3683280_pending",
 	"refresh": "wbf3683280_refresh",
-	"card": "wbf3683280_card",
-	"chevron": "wbf3683280_chevron",
-	"body": "wbf3683280_body",
+	"controls": "wbf3683280_controls",
+	"header": "wbf3683280_header",
+	"chevronOpen": "wbf3683280_chevronOpen",
+	"headText": "wbf3683280_headText",
+	"controlThumb": "wbf3683280_controlThumb",
 	"footer": "wbf3683280_footer",
 	"list": "wbf3683280_list",
-	"error": "wbf3683280_error",
-	"controlThumb": "wbf3683280_controlThumb",
-	"pending": "wbf3683280_pending",
-	"small": "wbf3683280_small",
+	"card": "wbf3683280_card",
 	"cardOpen": "wbf3683280_cardOpen",
+	"chevron": "wbf3683280_chevron",
+	"action": "wbf3683280_action",
 	"select": "wbf3683280_select",
-	"controlTrack": "wbf3683280_controlTrack",
-	"hint": "wbf3683280_hint",
-	"name": "wbf3683280_name",
+	"region": "wbf3683280_region",
+	"body": "wbf3683280_body",
 	"toggle": "wbf3683280_toggle",
-	"controls": "wbf3683280_controls"
+	"name": "wbf3683280_name",
+	"controlTrack": "wbf3683280_controlTrack",
+	"meta": "wbf3683280_meta",
+	"small": "wbf3683280_small",
+	"error": "wbf3683280_error"
 };
 
 //#endregion
@@ -667,7 +662,7 @@ var DiagnoseButton = class extends react.Component {
 			return;
 		}
 		try {
-			const text = buildDiagnosisText(outcome.result.diagnosis);
+			const text = buildDiagnosisText(outcome.result.diagnosis, this.props.t);
 			const handoff = await handOffDiagnosis(text, outcome.result.scratchCwd, this.props.sessions);
 			this.setState({ phase: handoff.kind });
 			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -1183,7 +1178,27 @@ const zh$2 = {
 	diagNoData: "暂无诊断数据：请先复现一次失败，再点击诊断。",
 	diagOpening: "已创建诊断会话并预填内容，请检查后发送。",
 	diagCopied: "诊断内容已复制，请粘贴到新会话输入框",
-	diagActionFailed: "诊断生成失败"
+	diagActionFailed: "诊断生成失败",
+	diagTitleImo: "IMO CLI安装/更新失败诊断",
+	diagTitleSkill: "Skills安装/更新失败诊断",
+	diagSceneLabel: "场景：",
+	diagParenOpen: "（",
+	diagParenClose: "）",
+	diagOccurredAtLabel: "发生时间：",
+	diagCommandsLabel: "执行的命令：",
+	diagNoCommands: "（无已执行命令记录）",
+	diagNotRun: "（未运行）",
+	diagEmpty: "（空）",
+	diagStdoutTruncated: "（stdout 已截断）",
+	diagStderrTruncated: "（stderr 已截断）",
+	diagErrorLabel: "错误：",
+	diagEnvironmentLabel: "环境信息：",
+	diagClosing: "请分析失败原因并给出修复步骤。",
+	diagOpImoInstall: "IMO CLI 一键安装",
+	diagOpImoUpgrade: "IMO CLI 更新",
+	diagOpSkillUpdate: "Skills 全量更新",
+	diagOpSkillInstall: "Skills 安装",
+	diagOpSkillInstallSource: "Skills 场景/来源安装"
 };
 const en$2 = {
 	nav: "InsureMO",
@@ -1280,7 +1295,27 @@ const en$2 = {
 	diagNoData: "No diagnosis captured yet: reproduce a failure first, then click Diagnose.",
 	diagOpening: "A diagnosis session was created and prefilled — review and send.",
 	diagCopied: "Diagnosis text copied — paste it into a new session composer",
-	diagActionFailed: "Could not prepare the diagnosis"
+	diagActionFailed: "Could not prepare the diagnosis",
+	diagTitleImo: "IMO CLI install/update failure diagnosis",
+	diagTitleSkill: "Skills install/update failure diagnosis",
+	diagSceneLabel: "Scenario: ",
+	diagParenOpen: " (",
+	diagParenClose: ")",
+	diagOccurredAtLabel: "Occurred at: ",
+	diagCommandsLabel: "Executed commands:",
+	diagNoCommands: "(no executed commands recorded)",
+	diagNotRun: "(not run)",
+	diagEmpty: "(empty)",
+	diagStdoutTruncated: "(stdout truncated)",
+	diagStderrTruncated: "(stderr truncated)",
+	diagErrorLabel: "Error: ",
+	diagEnvironmentLabel: "Environment:",
+	diagClosing: "Please analyze the cause of the failure and provide fix steps.",
+	diagOpImoInstall: "IMO CLI one-click install",
+	diagOpImoUpgrade: "IMO CLI update",
+	diagOpSkillUpdate: "Skills full update",
+	diagOpSkillInstall: "Skills install",
+	diagOpSkillInstallSource: "Skills scenario/source install"
 };
 
 //#endregion
@@ -1331,17 +1366,17 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"wordmarkDark": "wb06155adc_wordmarkDark",
-	"railMark": "wb06155adc_railMark",
-	"heroHost": "wb06155adc_heroHost",
-	"driver": "wb06155adc_driver",
-	"heroMark": "wb06155adc_heroMark",
 	"wordmarkLight": "wb06155adc_wordmarkLight",
-	"wordmark": "wb06155adc_wordmark",
-	"wordmarkHost": "wb06155adc_wordmarkHost",
-	"wordmarkInner": "wb06155adc_wordmarkInner",
 	"dsh": "wb06155adc_dsh",
-	"railHost": "wb06155adc_railHost"
+	"railMark": "wb06155adc_railMark",
+	"driver": "wb06155adc_driver",
+	"wordmarkInner": "wb06155adc_wordmarkInner",
+	"wordmarkHost": "wb06155adc_wordmarkHost",
+	"railHost": "wb06155adc_railHost",
+	"heroHost": "wb06155adc_heroHost",
+	"heroMark": "wb06155adc_heroMark",
+	"wordmark": "wb06155adc_wordmark",
+	"wordmarkDark": "wb06155adc_wordmarkDark"
 };
 
 //#endregion
@@ -1619,9 +1654,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
-	"driver": "wb8730382c_driver",
+	"rowIcons": "wb8730382c_rowIcons",
 	"icon": "wb8730382c_icon",
-	"rowIcons": "wb8730382c_rowIcons"
+	"driver": "wb8730382c_driver"
 };
 
 //#endregion
@@ -1913,18 +1948,18 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"error": "wba94a6eca_error",
-	"trigger": "wba94a6eca_trigger",
-	"label": "wba94a6eca_label",
-	"dot": "wba94a6eca_dot",
-	"rowName": "wba94a6eca_rowName",
-	"list": "wba94a6eca_list",
-	"closeMark": "wba94a6eca_closeMark",
 	"hint": "wba94a6eca_hint",
 	"pickerHeader": "wba94a6eca_pickerHeader",
-	"rowMark": "wba94a6eca_rowMark",
+	"error": "wba94a6eca_error",
+	"rowName": "wba94a6eca_rowName",
+	"closeMark": "wba94a6eca_closeMark",
+	"picker": "wba94a6eca_picker",
 	"row": "wba94a6eca_row",
-	"picker": "wba94a6eca_picker"
+	"trigger": "wba94a6eca_trigger",
+	"dot": "wba94a6eca_dot",
+	"label": "wba94a6eca_label",
+	"rowMark": "wba94a6eca_rowMark",
+	"list": "wba94a6eca_list"
 };
 
 //#endregion
@@ -2291,11 +2326,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"kind": "wb6cd975b4_kind",
-	"icon": "wb6cd975b4_icon",
-	"status": "wb6cd975b4_status",
+	"row": "wb6cd975b4_row",
 	"digest": "wb6cd975b4_digest",
-	"row": "wb6cd975b4_row"
+	"kind": "wb6cd975b4_kind",
+	"status": "wb6cd975b4_status",
+	"icon": "wb6cd975b4_icon"
 };
 
 //#endregion
@@ -2352,23 +2387,23 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"hint": "wb13b81332_hint",
-	"consent": "wb13b81332_consent",
-	"header": "wb13b81332_header",
-	"card": "wb13b81332_card",
-	"status": "wb13b81332_status",
-	"actions": "wb13b81332_actions",
-	"referenceActions": "wb13b81332_referenceActions",
-	"runMeta": "wb13b81332_runMeta",
-	"session": "wb13b81332_session",
-	"batchJobRow": "wb13b81332_batchJobRow",
-	"error": "wb13b81332_error",
-	"field": "wb13b81332_field",
 	"selectedReference": "wb13b81332_selectedReference",
 	"errorText": "wb13b81332_errorText",
+	"runMeta": "wb13b81332_runMeta",
+	"status": "wb13b81332_status",
+	"field": "wb13b81332_field",
+	"actions": "wb13b81332_actions",
 	"summary": "wb13b81332_summary",
 	"progress": "wb13b81332_progress",
+	"header": "wb13b81332_header",
+	"session": "wb13b81332_session",
+	"hint": "wb13b81332_hint",
 	"done": "wb13b81332_done",
+	"batchJobRow": "wb13b81332_batchJobRow",
+	"referenceActions": "wb13b81332_referenceActions",
+	"consent": "wb13b81332_consent",
+	"card": "wb13b81332_card",
+	"error": "wb13b81332_error",
 	"fieldset": "wb13b81332_fieldset"
 };
 

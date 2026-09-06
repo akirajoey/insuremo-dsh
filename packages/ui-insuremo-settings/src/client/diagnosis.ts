@@ -1,10 +1,18 @@
-/** Diagnosis-session choreography (TASK-083): assemble the Chinese diagnosis
- * text from the host `imo-diagnosis` payload, then stage it into a fresh
- * ungrouped scratch session. Ordering is a hard constraint from the harness
- * client runtime (TASK-082): create → setDraft → open. The staging API is
- * feature-detected so the card degrades on runtimes without it (Desktop
- * rc.7): the text goes to the clipboard with a paste hint instead, and the
- * ungrouped session still opens when creation is available. */
+/** Diagnosis-session choreography (TASK-083): assemble the localized
+ * diagnosis text from the host `imo-diagnosis` payload, then stage it into a
+ * fresh ungrouped scratch session. Ordering is a hard constraint from the
+ * harness client runtime (TASK-082): create → setDraft → open. The staging
+ * API is feature-detected so the card degrades on runtimes without it
+ * (Desktop rc.7): the text goes to the clipboard with a paste hint instead,
+ * and the ungrouped session still opens when creation is available.
+ * TASK-086: every label follows the Settings locale through the card's own
+ * translator seat; raw material (commands, operation ids, stdout/stderr,
+ * error code/message, environment values) is never translated or altered. */
+
+import type { InsuremoLocaleKey } from "./locales.ts";
+
+/** The translator seat the card already receives (PropsLocale). */
+export type DiagnosisTranslate = (key: InsuremoLocaleKey) => string;
 
 export interface DiagnosisActionPayload {
   readonly available: boolean;
@@ -36,31 +44,25 @@ export interface DiagnosisSessions {
   setDraft?(id: string, text: string): void
 }
 
-const OPERATION_LABELS: Record<string, string> = {
-  "imo-install": "IMO CLI 一键安装",
-  "imo-upgrade": "IMO CLI 更新",
-  "skill-update": "Skills 全量更新",
-  "skill-install": "Skills 安装",
-};
-
 /** Human label for an operation; scenario/source installs carry a suffix. */
-function operationLabel(operation: string): string {
-  const exact = OPERATION_LABELS[operation];
-  if (exact !== undefined) return exact;
-  if (operation.startsWith("skill-install:")) return "Skills 场景/来源安装";
+function operationLabel(operation: string, t: DiagnosisTranslate): string {
+  if (operation === "imo-install") return t("diagOpImoInstall");
+  if (operation === "imo-upgrade") return t("diagOpImoUpgrade");
+  if (operation === "skill-update") return t("diagOpSkillUpdate");
+  if (operation === "skill-install") return t("diagOpSkillInstall");
+  if (operation.startsWith("skill-install:")) return t("diagOpSkillInstallSource");
   return operation;
 }
 
 /** One rendered command line with its step number. */
-function commandLines(commands: readonly string[]): string {
-  if (commands.length === 0) return "（无已执行命令记录）";
+function commandLines(commands: readonly string[], t: DiagnosisTranslate): string {
+  if (commands.length === 0) return t("diagNoCommands");
   return commands.map((command, index) => `${index + 1}. ${command}`).join("\n");
 }
 
-/** Assemble the Chinese diagnosis text the user reviews and sends. */
-export function buildDiagnosisText(diagnosis: NonNullable<DiagnosisActionPayload["diagnosis"]>): string {
-  const scene = operationLabel(diagnosis.operation);
-  const kindLabel = diagnosis.kind === "imo-cli" ? "IMO CLI" : "Skills";
+/** Assemble the localized diagnosis text the user reviews and sends. */
+export function buildDiagnosisText(diagnosis: NonNullable<DiagnosisActionPayload["diagnosis"]>, t: DiagnosisTranslate): string {
+  const scene = operationLabel(diagnosis.operation, t);
   const environment = [
     `node: ${diagnosis.nodeVersion}`,
     `os: ${diagnosis.platform} ${diagnosis.arch}`,
@@ -68,32 +70,32 @@ export function buildDiagnosisText(diagnosis: NonNullable<DiagnosisActionPayload
     ...(diagnosis.registry === undefined ? [] : [`registry: ${diagnosis.registry}`]),
   ].join("\n");
   return [
-    `${kindLabel}安装/更新失败诊断`,
-    `场景：${scene}（${diagnosis.operation}）`,
-    `发生时间：${diagnosis.occurredAt}`,
+    diagnosis.kind === "imo-cli" ? t("diagTitleImo") : t("diagTitleSkill"),
+    `${t("diagSceneLabel")}${scene}${t("diagParenOpen")}${diagnosis.operation}${t("diagParenClose")}`,
+    `${t("diagOccurredAtLabel")}${diagnosis.occurredAt}`,
     "",
-    "执行的命令：",
-    commandLines(diagnosis.commands),
+    t("diagCommandsLabel"),
+    commandLines(diagnosis.commands, t),
     "",
-    `exitCode: ${diagnosis.exitCode ?? "（未运行）"}`,
-    ...(diagnosis.error === undefined ? [] : [`错误：${diagnosis.error.code}: ${diagnosis.error.message}`]),
+    `exitCode: ${diagnosis.exitCode ?? t("diagNotRun")}`,
+    ...(diagnosis.error === undefined ? [] : [`${t("diagErrorLabel")}${diagnosis.error.code}: ${diagnosis.error.message}`]),
     "",
     "stdout：",
     "```",
-    diagnosis.stdout === "" ? "（空）" : diagnosis.stdout,
+    diagnosis.stdout === "" ? t("diagEmpty") : diagnosis.stdout,
     "```",
-    ...(diagnosis.stdoutTruncated ? ["（stdout 已截断）"] : []),
+    ...(diagnosis.stdoutTruncated ? [t("diagStdoutTruncated")] : []),
     "",
     "stderr：",
     "```",
-    diagnosis.stderr === "" ? "（空）" : diagnosis.stderr,
+    diagnosis.stderr === "" ? t("diagEmpty") : diagnosis.stderr,
     "```",
-    ...(diagnosis.stderrTruncated ? ["（stderr 已截断）"] : []),
+    ...(diagnosis.stderrTruncated ? [t("diagStderrTruncated")] : []),
     "",
-    "环境信息：",
+    t("diagEnvironmentLabel"),
     environment,
     "",
-    "请分析失败原因并给出修复步骤。",
+    t("diagClosing"),
   ].join("\n");
 }
 

@@ -33,11 +33,16 @@ When an IMO CLI install/update or a Skills install/update fails, the failed
 region renders a 诊断 (Diagnose) button — only in the failed state; success or
 an empty failure store renders none. Clicking it fetches the last failure's
 full capture from the same-origin `imo-diagnosis` action (server-redacted,
-memory-only), assembles a Chinese diagnosis text (scene, executed commands,
+memory-only), assembles a localized diagnosis text (scene, executed commands,
 exit code, stdout/stderr code blocks, environment, and a closing
 "please analyze the failure and give fix steps" line), and hands it to a
 fresh ungrouped scratch session in the harness runtime's mandated order
-`create({ cwd }) → setDraft(id, text) → open(id)`. The settings modal then
+`create({ cwd }) → setDraft(id, text) → open(id)`. TASK-086: every label and
+operation name follows the Settings locale through the card's own translator
+seat — switching the UI language re-renders the card and the next click uses
+the new language, no restart — while raw material (commands, operation ids,
+stdout/stderr, error code/message, environment values) is never translated.
+The settings modal then
 closes through the shell's own Escape channel. On runtimes without draft
 staging (Desktop rc.7) the text is copied to the clipboard with a paste hint
 instead, and the ungrouped session still opens when creation is available.

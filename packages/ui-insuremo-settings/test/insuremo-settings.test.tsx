@@ -7,7 +7,7 @@ import { resolveSlotLabel } from "@deepseek-ai/dsh-client-ui-slots";
 import { apply, inject, NS } from "../src/client/index.ts";
 import { OVERVIEW_URL } from "../src/client/overview.ts";
 import { InsuremoCard } from "../src/client/InsuremoCard.tsx";
-import type { DiagnosisSessions } from "../src/client/diagnosis.ts";
+import { buildDiagnosisText, type DiagnosisSessions } from "../src/client/diagnosis.ts";
 import { en, zh, type InsuremoLocaleKey } from "../src/client/locales.ts";
 
 
@@ -634,9 +634,9 @@ const DIAGNOSIS_PAYLOAD = {
 } as const;
 
 /** Render the card directly with a localized t seat and an injected sessions double. */
-function renderCard(diagnosisSessions?: DiagnosisSessions) {
+function renderCard(diagnosisSessions?: DiagnosisSessions, translate: (key: InsuremoLocaleKey) => string = key => zh[key]) {
   const props = {
-    t: (key: InsuremoLocaleKey) => zh[key],
+    t: translate,
     diagnosisSessions,
   } as unknown as ComponentProps<typeof InsuremoCard>;
   return render(<InsuremoCard {...props} />);
@@ -664,6 +664,55 @@ async function renderFailedInstall(overrides: Record<string, unknown> = {}) {
 
 describe("install/update one-click diagnosis (TASK-083)", () => {
   afterEach(() => { cleanup(); });
+
+  it("TASK-086: buildDiagnosisText localizes every label per Settings locale and keeps raw material verbatim", () => {
+    const payload = {
+      kind: "skill",
+      operation: "skill-install:scenario/ask-insuremo",
+      commands: ["npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool add insuremo-skills -g -a universal -s ask-insuremo -l --skip-update-check"],
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      stdoutTruncated: true,
+      stderrTruncated: false,
+      nodeVersion: "v22.19.0",
+      platform: "darwin",
+      arch: "arm64",
+      occurredAt: "2026-09-06T09:00:00.000Z",
+      error: { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" },
+    };
+    const zhText = buildDiagnosisText(payload, key => zh[key]);
+    // zh: every structural label localized; raw material verbatim.
+    expect(zhText).toContain("Skills安装/更新失败诊断");
+    expect(zhText).toContain("场景：Skills 场景/来源安装（skill-install:scenario/ask-insuremo）");
+    expect(zhText).toContain("发生时间：2026-09-06T09:00:00.000Z");
+    expect(zhText).toContain("执行的命令：");
+    expect(zhText).toContain("exitCode: （未运行）");
+    expect(zhText).toContain("错误：tool-unavailable: npx is unavailable; install Node.js/npm to sync Skills");
+    expect(zhText).toContain("（空）");
+    expect(zhText).toContain("（stdout 已截断）");
+    expect(zhText).not.toContain("（stderr 已截断）");
+    expect(zhText).toContain("环境信息：");
+    expect(zhText).toContain("请分析失败原因并给出修复步骤。");
+    expect(zhText).toContain("-l --skip-update-check");
+    expect(zhText).toContain("os: darwin arm64");
+
+    const enText = buildDiagnosisText(payload, key => en[key]);
+    expect(enText).toContain("Skills install/update failure diagnosis");
+    expect(enText).toContain("Scenario: Skills scenario/source install (skill-install:scenario/ask-insuremo)");
+    expect(enText).toContain("Occurred at: 2026-09-06T09:00:00.000Z");
+    expect(enText).toContain("Executed commands:");
+    expect(enText).toContain("exitCode: (not run)");
+    expect(enText).toContain("Error: tool-unavailable: npx is unavailable; install Node.js/npm to sync Skills");
+    expect(enText).toContain("(empty)");
+    expect(enText).toContain("(stdout truncated)");
+    expect(enText).not.toContain("(stderr truncated)");
+    expect(enText).toContain("Environment:");
+    expect(enText).toContain("Please analyze the cause of the failure and provide fix steps.");
+    // Raw material identical across locales except labels.
+    const strip = (text: string): string[] => text.split("\n").filter(line => /^\d+\. /.test(line) || line.startsWith("node:") || line.startsWith("os:") || line.startsWith("stdout") || line.startsWith("stderr") || line === "```");
+    expect(strip(enText)).toEqual(strip(zhText));
+  });
 
   it("the diagnosis button appears only in the failed state", async () => {
     const failed = await renderFailedInstall();
@@ -821,6 +870,183 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     expect(draft).toContain("错误：non-zero-exit: IMO CLI exited with code 1");
     expect(draft).toContain("请分析失败原因并给出修复步骤。");
     view.unmount();
+  });
+
+  it("TASK-086: en translator direct-render coverage (no locale switch)", async () => {
+    const calls: string[] = [];
+    const sessions: DiagnosisSessions = {
+      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
+      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-6"; }),
+      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}`); }),
+    };
+    const scenarioDiagnosis = {
+      available: true,
+      diagnosis: {
+        kind: "skill",
+        operation: "skill-install:scenario/ask-insuremo",
+        commands: ["npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool add insuremo-skills -g -a universal -s ask-insuremo -l --skip-update-check"],
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        error: { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" },
+        nodeVersion: "v22.19.0",
+        platform: "darwin",
+        arch: "arm64",
+        occurredAt: "2026-09-06T09:30:00.000Z",
+      },
+      scratchCwd: "/tmp/dsh-home/scratch",
+    };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-install")) return jsonResponse({ ok: false, error: { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" } });
+      if (url.includes("/actions/imo-diagnosis")) return jsonResponse({ ok: true, result: scenarioDiagnosis });
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    // English Settings locale: this case mounts the card directly with an
+    // English translator seat injected — it proves the click path consumes the
+    // current seat, with NO runtime locale switching (that lives in the
+    // same-instance switch case below).
+    const view = renderCard(sessions, key => en[key]);
+    const toggle = await view.findByRole("button", { name: new RegExp(`${en.expand}: ${en.title}`) });
+    toggle.click();
+    (await view.findByRole("button", { name: new RegExp(`^${en.skillsScenarioInstall}`) })).click();
+    await view.findByText(new RegExp(en.skillsScenarioFailed));
+    view.getByRole("button", { name: en.diagButton }).click();
+    await view.findByText(en.diagOpening);
+    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", "setDraft:session-6", "open:session-6"]);
+    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(draft).toContain("Skills install/update failure diagnosis");
+    expect(draft).toContain("Scenario: Skills scenario/source install (skill-install:scenario/ask-insuremo)");
+    expect(draft).toContain("Executed commands:");
+    expect(draft).toContain("exitCode: (not run)");
+    expect(draft).toContain("Error: tool-unavailable: npx is unavailable; install Node.js/npm to sync Skills");
+    expect(draft).toContain("(empty)");
+    expect(draft).toContain("Environment:");
+    expect(draft).toContain("Please analyze the cause of the failure and provide fix steps.");
+    // Raw material stays verbatim in the English draft.
+    expect(draft).toContain("-l --skip-update-check");
+    expect(draft).toContain("node: v22.19.0");
+    expect(draft).not.toContain("场景：");
+    expect(draft).not.toContain("请分析失败原因");
+    view.unmount();
+  });
+
+  it("TASK-086: one mounted card switches the draft language with the live Settings locale (zh → en → zh)", async () => {
+    const scenarioDiagnosis = {
+      available: true,
+      diagnosis: {
+        kind: "skill",
+        operation: "skill-install:scenario/ask-insuremo",
+        commands: ["npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool add insuremo-skills -g -a universal -s ask-insuremo -l --skip-update-check"],
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        error: { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" },
+        nodeVersion: "v22.19.0",
+        platform: "darwin",
+        arch: "arm64",
+        occurredAt: "2026-09-06T09:45:00.000Z",
+      },
+      scratchCwd: "/tmp/dsh-home/scratch",
+    };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-install")) return jsonResponse({ ok: false, error: { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" } });
+      if (url.includes("/actions/imo-diagnosis")) return jsonResponse({ ok: true, result: scenarioDiagnosis });
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // A self-contained runtime: ONE mounted renderSlot instance for the whole
+    // case. Cordis forbids re-providing 'sessions', so the runtime's own
+    // TestSessions double is used, with the draft-staging members grafted/
+    // wrapped for observation (open/setDraft natively exist; create does not).
+    // A local localStorage stub covers SlotTestRuntime's dispose (this describe
+    // sits outside the outer beforeEach's stub scope).
+    const storageValues = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storageValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { storageValues.set(key, value); },
+      removeItem: (key: string) => { storageValues.delete(key); },
+      clear: () => { storageValues.clear(); },
+      key: (index: number) => [...storageValues.keys()][index] ?? null,
+      get length() { return storageValues.size; },
+    });
+    const switchRuntime = await SlotTestRuntime.create();
+    await switchRuntime.declare({ "settings.plugin.item": { kind: "list", scope: "root" } });
+    const switchLocale = new LocaleRuntime(switchRuntime.ctx);
+    switchRuntime.ctx.provide("locale", switchLocale);
+    switchRuntime.slots.installLocale(switchLocale);
+    const setDraft = vi.fn((id: string, text: string) => { void id; void text; });
+    const open = vi.fn((id: string) => { void id; });
+    const create = vi.fn(async (opts: { cwd: string }) => { void opts; return "session-8"; });
+    (switchRuntime.sessions as unknown as Record<string, unknown>).create = create;
+    (switchRuntime.sessions as unknown as Record<string, unknown>).setDraft = setDraft;
+    (switchRuntime.sessions as unknown as Record<string, unknown>).open = open;
+    const switchFeature = await switchRuntime.mount({ inject, apply });
+    try {
+      const view = switchRuntime.renderSlot("settings.plugin.item", {});
+      // zh (pinned zh-CN): enter the failed state and diagnose in Chinese.
+      const toggle = await view.view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
+      toggle.click();
+      (await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) })).click();
+      await view.view.findByText(new RegExp(zh.skillsScenarioFailed));
+      view.view.getByRole("button", { name: zh.diagButton }).click();
+      await view.view.findByText(zh.diagOpening);
+      let draft = setDraft.mock.calls[0]?.[1] as string;
+      expect(draft).toContain("Skills安装/更新失败诊断");
+      expect(draft).toContain("场景：");
+      expect(draft).toContain("错误：tool-unavailable");
+      expect(draft).toContain("请分析失败原因并给出修复步骤。");
+
+      // SAME mounted instance: the Settings locale flips to English and the
+      // next click stages an English draft (no remount involved).
+      switchLocale.setLocale("en");
+      // The outlet re-renders through its locale-revision subscription; wait
+      // for the English chrome before driving the (now English) button.
+      await vi.waitFor(() => {
+        expect(view.view.getByRole("button", { name: new RegExp(`${en.collapse}: ${en.title}`) })).toBeTruthy();
+      });
+      view.view.getByRole("button", { name: en.diagButton }).click();
+      await view.view.findByText(en.diagOpening);
+      draft = setDraft.mock.calls[1]?.[1] as string;
+      expect(draft).toContain("Skills install/update failure diagnosis");
+      expect(draft).toContain("Scenario: Skills scenario/source install (skill-install:scenario/ask-insuremo)");
+      expect(draft).toContain("Error: tool-unavailable: npx is unavailable; install Node.js/npm to sync Skills");
+      expect(draft).toContain("Please analyze the cause of the failure and provide fix steps.");
+      // Raw material identical, Chinese labels gone.
+      expect(draft).toContain("-l --skip-update-check");
+      expect(draft).toContain("node: v22.19.0");
+      expect(draft).not.toContain("场景：");
+      expect(draft).not.toContain("请分析失败原因");
+
+      // And back to Chinese on the same instance.
+      switchLocale.setLocale("zh");
+      await vi.waitFor(() => {
+        expect(view.view.getByRole("button", { name: new RegExp(`${zh.collapse}: ${zh.title}`) })).toBeTruthy();
+      });
+      view.view.getByRole("button", { name: zh.diagButton }).click();
+      await view.view.findByText(zh.diagOpening);
+      draft = setDraft.mock.calls[2]?.[1] as string;
+      expect(draft).toContain("场景：");
+      expect(draft).toContain("请分析失败原因并给出修复步骤。");
+
+      // Every round kept the mandated hand-off order.
+      expect(create).toHaveBeenCalledTimes(3);
+      expect(open).toHaveBeenCalledTimes(3);
+      expect(setDraft).toHaveBeenCalledTimes(3);
+      for (const call of setDraft.mock.calls) expect(call[0]).toBe("session-8");
+      for (const call of create.mock.calls) expect(call[0]).toEqual({ cwd: "/tmp/dsh-home/scratch" });
+    } finally {
+      await switchFeature.dispose();
+      await switchRuntime.dispose();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("an empty diagnosis store answers no-data without touching sessions", async () => {

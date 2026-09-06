@@ -236,7 +236,7 @@ class DiagnoseButton extends Component<
       return;
     }
     try {
-      const text = buildDiagnosisText(outcome.result.diagnosis);
+      const text = buildDiagnosisText(outcome.result.diagnosis, this.props.t);
       const handoff = await handOffDiagnosis(text, outcome.result.scratchCwd, this.props.sessions);
       this.setState({ phase: handoff.kind });
       // Close the settings modal through the shell's own close path: the
