@@ -1,5 +1,5 @@
 {
-  "harnessCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
+  "harnessCommit": "85d8062c8aecaf3c24bc84d45ba20c9223d40789",
   "harnessPath": "../deepseek-harness",
   "node": "^22.19.0 || >=24.0.0",
   "pnpm": "11.7.0"

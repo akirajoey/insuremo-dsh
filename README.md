@@ -10,7 +10,14 @@ modified by the Workbench packages.
 - Node.js `^22.19.0 || >=24.0.0`
 - pnpm `11.7.0`
 - the Harness checkout at `../deepseek-harness`, fixed to commit
-  `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`
+  `85d8062c8aecaf3c24bc84d45ba20c9223d40789`. This pin points at the local
+  Harness master and carries three not-yet-upstream commits: TASK-080
+  `8e53387839efd4f04c9dba068e69f434dee3aa06`, TASK-081
+  `c6f268060c13a628bd38ff3ae212f688da95e847`, and TASK-082
+  `85d8062c8aecaf3c24bc84d45ba20c9223d40789`. If a fresh clone cannot resolve
+  the pin, sync those three commits first (fetch from the project clone or
+  cherry-pick) — otherwise client capabilities such as the diagnosis draft
+  prefill (`setDraft`) are missing.
 
 ### Prepare the Harness baseline on a new machine
 
@@ -20,11 +27,14 @@ URL provided by the project:
 
 ```sh
 git clone <harness-repository-url> ../deepseek-harness
-git -C ../deepseek-harness checkout 99f6f02fecdb7dff40c3fbc9470f5907c29f74ca
+git -C ../deepseek-harness checkout 85d8062c8aecaf3c24bc84d45ba20c9223d40789
 ```
 
-If the checkout already exists, verify that it is at the same commit before
-continuing. The compatibility check performs this read-only verification.
+If the checkout cannot resolve the commit, fetch the three local-patch commits
+listed above into that clone (from the project's Harness clone) and recreate
+the pin — a plain upstream tag checkout lacks them. If the checkout already
+exists, verify that it is at the same commit before continuing. The
+compatibility check performs this read-only verification.
 
 ## Install and verify
 
@@ -102,13 +112,16 @@ boot smoke (port line + no loader/module errors), not just a dump. The
 tsdown rewrites the shared source `lib/` during each build, while the Git
 destination uses an atomic-ish staging/backup swap. In a clean checkout,
 the Harness preset must be checked out beside Workbench at `../deepseek-harness`
-at the exact `compatibility.json` commit (tag `dsh-v0.1.0-rc.7`, currently
-`99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`) and installed separately before
+at the exact `compatibility.json` commit — now the local master pin
+`85d8062c8aecaf3c24bc84d45ba20c9223d40789` (no npm tag carries it yet; it
+includes the not-yet-upstream TASK-080/081/082 commits listed at the top of
+this file) — and installed separately before
 running these commands; CI performs this pinned sibling checkout and hard
 commit check. For example:
 
 ```sh
-git clone --branch dsh-v0.1.0-rc.7 https://github.com/deepseek-ai/deepseek-harness ../deepseek-harness
+git clone https://github.com/deepseek-ai/deepseek-harness ../deepseek-harness
+git -C ../deepseek-harness checkout 85d8062c8aecaf3c24bc84d45ba20c9223d40789
 (cd ../deepseek-harness && pnpm install --frozen-lockfile --ignore-scripts)
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm check:git-dist

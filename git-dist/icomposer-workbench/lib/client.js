@@ -242,6 +242,82 @@ async function postAction$1(action, body, signal) {
 }
 
 //#endregion
+//#region ../ui-insuremo-settings/src/client/diagnosis.ts
+const OPERATION_LABELS = {
+	"imo-install": "IMO CLI 一键安装",
+	"imo-upgrade": "IMO CLI 更新",
+	"skill-update": "Skills 全量更新"
+};
+/** One rendered command line with its step number. */
+function commandLines(commands) {
+	if (commands.length === 0) return "（无已执行命令记录）";
+	return commands.map((command, index) => `${index + 1}. ${command}`).join("\n");
+}
+/** Assemble the Chinese diagnosis text the user reviews and sends. */
+function buildDiagnosisText(diagnosis) {
+	const scene = OPERATION_LABELS[diagnosis.operation] ?? diagnosis.operation;
+	const kindLabel = diagnosis.kind === "imo-cli" ? "IMO CLI" : "Skills";
+	const environment = [
+		`node: ${diagnosis.nodeVersion}`,
+		`os: ${diagnosis.platform} ${diagnosis.arch}`,
+		...diagnosis.packageManager === void 0 ? [] : [`packageManager: ${diagnosis.packageManager}`],
+		...diagnosis.registry === void 0 ? [] : [`registry: ${diagnosis.registry}`]
+	].join("\n");
+	return [
+		`${kindLabel}安装/更新失败诊断`,
+		`场景：${scene}（${diagnosis.operation}）`,
+		`发生时间：${diagnosis.occurredAt}`,
+		"",
+		"执行的命令：",
+		commandLines(diagnosis.commands),
+		"",
+		`exitCode: ${diagnosis.exitCode ?? "（未运行）"}`,
+		"",
+		"stdout：",
+		"```",
+		diagnosis.stdout === "" ? "（空）" : diagnosis.stdout,
+		"```",
+		...diagnosis.stdoutTruncated ? ["（stdout 已截断）"] : [],
+		"",
+		"stderr：",
+		"```",
+		diagnosis.stderr === "" ? "（空）" : diagnosis.stderr,
+		"```",
+		...diagnosis.stderrTruncated ? ["（stderr 已截断）"] : [],
+		"",
+		"环境信息：",
+		environment,
+		"",
+		"请分析失败原因并给出修复步骤。"
+	].join("\n");
+}
+/** Whether the running client runtime exposes the draft-staging API (≥ TASK-082). */
+function supportsDraftStaging(sessions) {
+	return sessions !== void 0 && typeof sessions.setDraft === "function" && typeof sessions.create === "function";
+}
+/**
+* Open the diagnosis session in the mandated order, or fall back to the
+* clipboard when the runtime predates draft staging. Never sends anything:
+* the user reviews the prefilled text and presses Enter.
+*/
+async function handOffDiagnosis(text, scratchCwd, sessions) {
+	if (supportsDraftStaging(sessions)) {
+		const sessionId = await sessions.create({ cwd: scratchCwd });
+		sessions.setDraft(sessionId, text);
+		sessions.open(sessionId);
+		return { kind: "staged" };
+	}
+	if (sessions !== void 0 && typeof sessions.create === "function") {
+		await navigator.clipboard.writeText(text);
+		const sessionId = await sessions.create({ cwd: scratchCwd });
+		sessions.open(sessionId);
+		return { kind: "copied" };
+	}
+	await navigator.clipboard.writeText(text);
+	return { kind: "clipboard-only" };
+}
+
+//#endregion
 //#region \0dsh-css:asset
 const css$5 = ".wbf3683280_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.wbf3683280_card:hover{border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.wbf3683280_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.wbf3683280_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.wbf3683280_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.wbf3683280_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.wbf3683280_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.wbf3683280_chevronOpen{transform:rotate(180deg)}.wbf3683280_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.wbf3683280_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.wbf3683280_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.wbf3683280_refresh,.wbf3683280_action{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.wbf3683280_refresh:hover,.wbf3683280_action:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_refresh:focus-visible,.wbf3683280_action:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wbf3683280_action:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_controls{flex-wrap:wrap;align-items:center;gap:8px;margin:0;display:flex}.wbf3683280_select{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:220px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 10px;font-size:13px}.wbf3683280_select:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.wbf3683280_select:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_region{flex-direction:column;gap:6px;display:flex}.wbf3683280_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.wbf3683280_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.wbf3683280_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wbf3683280_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.wbf3683280_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.wbf3683280_toggle:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.wbf3683280_toggle[aria-checked=true] .wbf3683280_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.wbf3683280_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.wbf3683280_toggle[aria-checked=true] .wbf3683280_controlThumb{transform:translate(12px)}.wbf3683280_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.wbf3683280_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.wbf3683280_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.wbf3683280_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.wbf3683280_small:hover{color:var(--dsw-alias-state-error-primary)}";
 const tagId$5 = "@icomposer/workbench/InsuremoCard.module.css";
@@ -253,30 +329,30 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"footer": "wbf3683280_footer",
 	"header": "wbf3683280_header",
-	"refresh": "wbf3683280_refresh",
-	"description": "wbf3683280_description",
 	"headText": "wbf3683280_headText",
-	"region": "wbf3683280_region",
-	"meta": "wbf3683280_meta",
-	"error": "wbf3683280_error",
-	"small": "wbf3683280_small",
-	"controls": "wbf3683280_controls",
-	"toggle": "wbf3683280_toggle",
-	"controlThumb": "wbf3683280_controlThumb",
-	"hint": "wbf3683280_hint",
-	"chevron": "wbf3683280_chevron",
-	"select": "wbf3683280_select",
-	"card": "wbf3683280_card",
-	"cardOpen": "wbf3683280_cardOpen",
-	"list": "wbf3683280_list",
-	"chevronOpen": "wbf3683280_chevronOpen",
-	"pending": "wbf3683280_pending",
-	"controlTrack": "wbf3683280_controlTrack",
-	"action": "wbf3683280_action",
+	"name": "wbf3683280_name",
 	"body": "wbf3683280_body",
-	"name": "wbf3683280_name"
+	"card": "wbf3683280_card",
+	"description": "wbf3683280_description",
+	"refresh": "wbf3683280_refresh",
+	"toggle": "wbf3683280_toggle",
+	"list": "wbf3683280_list",
+	"small": "wbf3683280_small",
+	"action": "wbf3683280_action",
+	"footer": "wbf3683280_footer",
+	"meta": "wbf3683280_meta",
+	"select": "wbf3683280_select",
+	"chevronOpen": "wbf3683280_chevronOpen",
+	"region": "wbf3683280_region",
+	"controls": "wbf3683280_controls",
+	"hint": "wbf3683280_hint",
+	"controlThumb": "wbf3683280_controlThumb",
+	"pending": "wbf3683280_pending",
+	"chevron": "wbf3683280_chevron",
+	"cardOpen": "wbf3683280_cardOpen",
+	"controlTrack": "wbf3683280_controlTrack",
+	"error": "wbf3683280_error"
 };
 
 //#endregion
@@ -402,12 +478,14 @@ var InsuremoCard = class extends react.Component {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ImoRegion, {
 							t,
 							imo: state.view.imo,
-							onChanged: () => void this.silentReload()
+							onChanged: () => void this.silentReload(),
+							sessions: this.props.diagnosisSessions
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillsRegion, {
 							t,
 							skills: state.view.skills,
-							onChanged: () => void this.silentReload()
+							onChanged: () => void this.silentReload(),
+							sessions: this.props.diagnosisSessions
 						}),
 						state.view.ici !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IciRegion, {
 							t,
@@ -468,11 +546,13 @@ function ImoRegion(props) {
 			imo.available ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(UpgradeButton, {
 				t,
 				imo,
-				onChanged: props.onChanged
+				onChanged: props.onChanged,
+				sessions: props.sessions
 			}) : null,
 			missing ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InstallButton, {
 				t,
-				onChanged: props.onChanged
+				onChanged: props.onChanged,
+				sessions: props.sessions
 			}) : null
 		]
 	});
@@ -537,14 +617,97 @@ var InstallButton = class extends react.Component {
 					this.state.install.message
 				]
 			}) : null
-		] }), this.state.install.phase === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+		] }), this.state.install.phase === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
 			className: InsuremoCard_module_css_default.hint,
 			"data-install-retry": "1",
-			children: t("cliInstallRetryHint")
+			children: [
+				t("cliInstallRetryHint"),
+				" ",
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
+					t,
+					kind: "imo-cli",
+					sessions: this.props.sessions
+				})
+			]
 		}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 			className: InsuremoCard_module_css_default.hint,
 			children: t("cliInstallHint")
 		})] });
+	}
+};
+/**
+* One failure state's 诊断 affordance (TASK-083): rendered only while that
+* install/update operation is failed. Clicking fetches the last failure's
+* full capture from the `imo-diagnosis` action, opens an ungrouped scratch
+* session, and stages the assembled Chinese diagnosis text (create →
+* setDraft → open). Runtimes without draft staging fall back to the
+* clipboard with a paste hint. Never rendered on success or without a
+* captured failure.
+*/
+var DiagnoseButton = class extends react.Component {
+	state = { phase: "idle" };
+	async run() {
+		this.setState({ phase: "busy" });
+		const outcome = await postAction$1("imo-diagnosis", { kind: this.props.kind });
+		if (!outcome.ok) {
+			this.setState({ phase: "failed" });
+			return;
+		}
+		if (!outcome.result.available || outcome.result.diagnosis === void 0 || outcome.result.scratchCwd === void 0) {
+			this.setState({ phase: "no-data" });
+			return;
+		}
+		try {
+			const text = buildDiagnosisText(outcome.result.diagnosis);
+			const handoff = await handOffDiagnosis(text, outcome.result.scratchCwd, this.props.sessions);
+			this.setState({ phase: handoff.kind });
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+		} catch {
+			this.setState({ phase: "failed" });
+		}
+	}
+	render() {
+		const { t } = this.props;
+		const busy = this.state.phase === "busy";
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+			"data-diagnosis": "1",
+			children: [
+				" ",
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: InsuremoCard_module_css_default.action,
+					disabled: busy,
+					"aria-busy": busy || void 0,
+					onClick: () => void this.run(),
+					"aria-label": busy ? t("diagBusy") : t("diagButton"),
+					children: busy ? t("diagBusy") : t("diagButton")
+				}),
+				this.state.phase === "staged" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					role: "status",
+					"data-diagnosis-state": "staged",
+					className: InsuremoCard_module_css_default.hint,
+					children: t("diagOpening")
+				}) : null,
+				this.state.phase === "copied" || this.state.phase === "clipboard-only" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					role: "status",
+					"data-diagnosis-state": "copied",
+					className: InsuremoCard_module_css_default.hint,
+					children: t("diagCopied")
+				}) : null,
+				this.state.phase === "no-data" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					role: "alert",
+					"data-diagnosis-state": "no-data",
+					className: InsuremoCard_module_css_default.error,
+					children: t("diagNoData")
+				}) : null,
+				this.state.phase === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					role: "alert",
+					"data-diagnosis-state": "failed",
+					className: InsuremoCard_module_css_default.error,
+					children: t("diagActionFailed")
+				}) : null
+			]
+		});
 	}
 };
 var UpgradeButton = class extends react.Component {
@@ -594,7 +757,13 @@ var UpgradeButton = class extends react.Component {
 				children: [
 					t("cliUpdateFailed"),
 					": ",
-					this.state.upgrade.message
+					this.state.upgrade.message,
+					" ",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
+						t,
+						kind: "imo-cli",
+						sessions: this.props.sessions
+					})
 				]
 			}) : null
 		] });
@@ -808,7 +977,12 @@ var SkillsRegion = class extends react.Component {
 						run.message,
 						run.diff === void 0 ? "" : ` · ${diffText(run.diff, t)}`,
 						" · ",
-						t("skillsRetryHint")
+						t("skillsRetryHint"),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
+							t,
+							kind: "skill",
+							sessions: this.props.sessions
+						})
 					]
 				}) : null,
 				this.state.updateResult !== void 0 && this.state.updateResult.status === "completed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
@@ -830,7 +1004,12 @@ var SkillsRegion = class extends react.Component {
 						this.state.updateError,
 						this.state.updateResult !== void 0 && this.state.updateResult.status !== "completed" ? ` · ${diffText(diffOf(this.state.updateResult), t)}` : "",
 						" · ",
-						t("skillsRetryHint")
+						t("skillsRetryHint"),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
+							t,
+							kind: "skill",
+							sessions: this.props.sessions
+						})
 					]
 				}) : null,
 				cold ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
@@ -989,7 +1168,13 @@ const zh$2 = {
 	skillsUpdated: "更新",
 	skillsRemoved: "移除",
 	skillsRetryHint: "状态已变化，已刷新，请重试",
-	errorNetwork: "无法连接"
+	errorNetwork: "无法连接",
+	diagButton: "诊断",
+	diagBusy: "正在生成诊断…",
+	diagNoData: "暂无诊断数据：请先复现一次失败，再点击诊断。",
+	diagOpening: "已创建诊断会话并预填内容，请检查后发送。",
+	diagCopied: "诊断内容已复制，请粘贴到新会话输入框",
+	diagActionFailed: "诊断生成失败"
 };
 const en$2 = {
 	nav: "InsureMO",
@@ -1080,7 +1265,13 @@ const en$2 = {
 	skillsUpdated: "Updated",
 	skillsRemoved: "Removed",
 	skillsRetryHint: "State changed; refreshed — please retry",
-	errorNetwork: "Cannot connect"
+	errorNetwork: "Cannot connect",
+	diagButton: "Diagnose",
+	diagBusy: "Preparing diagnosis…",
+	diagNoData: "No diagnosis captured yet: reproduce a failure first, then click Diagnose.",
+	diagOpening: "A diagnosis session was created and prefilled — review and send.",
+	diagCopied: "Diagnosis text copied — paste it into a new session composer",
+	diagActionFailed: "Could not prepare the diagnosis"
 };
 
 //#endregion
@@ -1098,7 +1289,13 @@ function apply$1(ctx) {
 		key: "insuremo",
 		id: "insuremo",
 		locale: NS$2
-	}, InsuremoCard));
+	}, function InsuremoCardWithRuntime(props) {
+		const sessions = ctx.sessions;
+		return (0, react.createElement)(InsuremoCard, {
+			...props,
+			diagnosisSessions: sessions
+		});
+	}));
 }
 
 //#endregion
@@ -1125,17 +1322,17 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"heroHost": "wb06155adc_heroHost",
-	"wordmarkDark": "wb06155adc_wordmarkDark",
-	"heroMark": "wb06155adc_heroMark",
-	"dsh": "wb06155adc_dsh",
-	"wordmarkLight": "wb06155adc_wordmarkLight",
-	"railHost": "wb06155adc_railHost",
-	"wordmark": "wb06155adc_wordmark",
 	"driver": "wb06155adc_driver",
-	"wordmarkInner": "wb06155adc_wordmarkInner",
 	"railMark": "wb06155adc_railMark",
-	"wordmarkHost": "wb06155adc_wordmarkHost"
+	"dsh": "wb06155adc_dsh",
+	"railHost": "wb06155adc_railHost",
+	"wordmarkHost": "wb06155adc_wordmarkHost",
+	"wordmarkInner": "wb06155adc_wordmarkInner",
+	"wordmark": "wb06155adc_wordmark",
+	"wordmarkLight": "wb06155adc_wordmarkLight",
+	"heroHost": "wb06155adc_heroHost",
+	"heroMark": "wb06155adc_heroMark",
+	"wordmarkDark": "wb06155adc_wordmarkDark"
 };
 
 //#endregion
@@ -1413,9 +1610,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
-	"icon": "wb8730382c_icon",
+	"driver": "wb8730382c_driver",
 	"rowIcons": "wb8730382c_rowIcons",
-	"driver": "wb8730382c_driver"
+	"icon": "wb8730382c_icon"
 };
 
 //#endregion
@@ -1707,18 +1904,18 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"picker": "wba94a6eca_picker",
-	"rowName": "wba94a6eca_rowName",
 	"row": "wba94a6eca_row",
-	"rowMark": "wba94a6eca_rowMark",
-	"pickerHeader": "wba94a6eca_pickerHeader",
-	"list": "wba94a6eca_list",
-	"label": "wba94a6eca_label",
-	"error": "wba94a6eca_error",
-	"dot": "wba94a6eca_dot",
 	"closeMark": "wba94a6eca_closeMark",
+	"rowName": "wba94a6eca_rowName",
+	"hint": "wba94a6eca_hint",
+	"dot": "wba94a6eca_dot",
 	"trigger": "wba94a6eca_trigger",
-	"hint": "wba94a6eca_hint"
+	"label": "wba94a6eca_label",
+	"rowMark": "wba94a6eca_rowMark",
+	"list": "wba94a6eca_list",
+	"picker": "wba94a6eca_picker",
+	"error": "wba94a6eca_error",
+	"pickerHeader": "wba94a6eca_pickerHeader"
 };
 
 //#endregion
@@ -2085,9 +2282,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
+	"status": "wb6cd975b4_status",
 	"row": "wb6cd975b4_row",
 	"icon": "wb6cd975b4_icon",
-	"status": "wb6cd975b4_status",
 	"kind": "wb6cd975b4_kind",
 	"digest": "wb6cd975b4_digest"
 };
@@ -2146,24 +2343,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"actions": "wb13b81332_actions",
-	"hint": "wb13b81332_hint",
-	"header": "wb13b81332_header",
-	"session": "wb13b81332_session",
-	"consent": "wb13b81332_consent",
-	"fieldset": "wb13b81332_fieldset",
-	"selectedReference": "wb13b81332_selectedReference",
-	"referenceActions": "wb13b81332_referenceActions",
-	"summary": "wb13b81332_summary",
-	"error": "wb13b81332_error",
-	"card": "wb13b81332_card",
-	"status": "wb13b81332_status",
-	"runMeta": "wb13b81332_runMeta",
-	"errorText": "wb13b81332_errorText",
 	"batchJobRow": "wb13b81332_batchJobRow",
-	"field": "wb13b81332_field",
+	"error": "wb13b81332_error",
+	"referenceActions": "wb13b81332_referenceActions",
+	"errorText": "wb13b81332_errorText",
+	"actions": "wb13b81332_actions",
+	"fieldset": "wb13b81332_fieldset",
+	"done": "wb13b81332_done",
+	"summary": "wb13b81332_summary",
 	"progress": "wb13b81332_progress",
-	"done": "wb13b81332_done"
+	"selectedReference": "wb13b81332_selectedReference",
+	"status": "wb13b81332_status",
+	"header": "wb13b81332_header",
+	"field": "wb13b81332_field",
+	"hint": "wb13b81332_hint",
+	"session": "wb13b81332_session",
+	"card": "wb13b81332_card",
+	"consent": "wb13b81332_consent",
+	"runMeta": "wb13b81332_runMeta"
 };
 
 //#endregion

@@ -17043,6 +17043,25 @@ function toSpawnArgv(executablePath, args, platform, comspec) {
 * and an internal timeout AbortSignal are all supplied by this seam.
 */
 async function runCapture(rt, options) {
+	const outcome = await captureCore(rt, options);
+	return outcome.ok ? {
+		ok: true,
+		value: outcome.value
+	} : {
+		ok: false,
+		error: outcome.error
+	};
+}
+/**
+* {@link runCapture} plus the failed run's raw streams (see
+* {@link CaptureDetail}). Diagnosis-only: the install/update kernels use it
+* to record the last failure's full output in memory; nothing else may
+* consume it, and success runs carry no detail at all.
+*/
+async function runCaptureDetailed(rt, options) {
+	return captureCore(rt, options);
+}
+async function captureCore(rt, options) {
 	const { signal: deadlineSignal, cleanup, timedOut, cancelled: cancelled$1 } = deadline(options.timeoutMs, options.signal);
 	let executablePath;
 	try {
@@ -17097,7 +17116,13 @@ async function runCapture(rt, options) {
 			};
 			return {
 				ok: false,
-				error: error$2
+				error: error$2,
+				detail: {
+					stdout: stdout.text,
+					stderr: stderr.text,
+					stdoutLossy: stdout.truncated,
+					stderrLossy: stderr.truncated
+				}
 			};
 		}
 		if (outcome.exitCode !== 0 || outcome.signal !== null) {
@@ -17113,7 +17138,13 @@ async function runCapture(rt, options) {
 			};
 			return {
 				ok: false,
-				error: error$2
+				error: error$2,
+				detail: {
+					stdout: stdout.text,
+					stderr: stderr.text,
+					stdoutLossy: stdout.truncated,
+					stderrLossy: stderr.truncated
+				}
 			};
 		}
 		return {
@@ -17292,6 +17323,89 @@ function parseUpgradeOutput(output) {
 }
 
 //#endregion
+//#region ../insuremo-service/src/diagnosis.ts
+/** Per-stream cap for stored diagnosis text (~256KB) with an explicit marker. */
+const DIAGNOSIS_STREAM_LIMIT_BYTES = 256 * 1024;
+const TRUNCATION_MARKER = "\n[...output truncated]\n";
+/**
+* Cap one captured stream at the diagnosis budget. `String.length` counts
+* UTF-16 code units, an over-approximation of UTF-8 bytes, so the clipped
+* text never exceeds the byte budget; the marker records the loss.
+*/
+function clipDiagnosisStream(text$1) {
+	if (text$1.length <= DIAGNOSIS_STREAM_LIMIT_BYTES) return {
+		text: text$1,
+		truncated: false
+	};
+	return {
+		text: text$1.slice(0, DIAGNOSIS_STREAM_LIMIT_BYTES) + TRUNCATION_MARKER,
+		truncated: true
+	};
+}
+/**
+* Replace credential-shaped substrings with `***` sentinels so secrets never
+* leave the process inside a diagnosis payload: npm/yarn auth config values,
+* Authorization headers, URL userinfo, and common personal-token prefixes.
+* Surrounding context stays readable.
+*/
+function redactSecrets(text$1) {
+	return text$1.replace(/_auth(?:Token)?\s*[=:]\s*(?:"[^"\s]*"|'[^'\s]*'|[^\s&"'`]+)/gi, "_auth=***").replace(/\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 ***").replace(/(https?:\/\/)([^\s/@:"]+)?:([^\s/@"]+)@/g, "$1***:***@").replace(/\b(?:npm_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})\b/g, "***");
+}
+/**
+* In-memory last-failure store, one slot per kind. `record` overwrites,
+* `clear` implements success-clears, `snapshot` is the diagnosis read face.
+* Nothing here touches the operation log or any durable surface.
+*/
+var FailureDiagnosisStore = class {
+	#last = /* @__PURE__ */ new Map();
+	record(capture$3) {
+		const stdout = clipDiagnosisStream(redactSecrets(capture$3.streams.stdout));
+		const stderr = clipDiagnosisStream(redactSecrets(capture$3.streams.stderr));
+		const entry = {
+			kind: capture$3.kind,
+			operation: capture$3.operation,
+			commands: capture$3.commands,
+			exitCode: capture$3.exitCode,
+			stdout: stdout.text,
+			stderr: stderr.text,
+			stdoutTruncated: stdout.truncated || capture$3.streams.stdoutLossy,
+			stderrTruncated: stderr.truncated || capture$3.streams.stderrLossy,
+			...capture$3.packageManager === void 0 ? {} : { packageManager: capture$3.packageManager },
+			...capture$3.registry === void 0 ? {} : { registry: capture$3.registry },
+			nodeVersion: process.version,
+			platform: process.platform,
+			arch: process.arch,
+			occurredAt: (/* @__PURE__ */ new Date()).toISOString()
+		};
+		this.#last.set(capture$3.kind, entry);
+		return entry;
+	}
+	/** Success of one kind clears only that kind's last failure. */
+	clear(kind) {
+		this.#last.delete(kind);
+	}
+	snapshot(kind) {
+		return this.#last.get(kind);
+	}
+	/** Test-only full reset. */
+	reset() {
+		this.#last.clear();
+	}
+};
+/** Process-wide store shared by the install/skill kernels and the action route. */
+const failureDiagnosis = new FailureDiagnosisStore();
+/**
+* The harness home's scratch directory — the same `$DSH_HOME` (default
+* `~/.dsh`) the bootstrap resolves, plus the `scratch` segment the harness
+* uses for Workspace-less sessions. Computed on the Host because browser
+* clients cannot resolve host paths.
+*/
+function scratchDirectory(env = process.env) {
+	const configured = typeof env.DSH_HOME === "string" ? env.DSH_HOME.trim() : "";
+	return resolve(configured === "" ? join(homedir(), ".dsh") : configured, "scratch");
+}
+
+//#endregion
 //#region ../insuremo-service/src/upgrade.ts
 /** Emitted after an approved upgrade completes (smoke included). */
 const IMO_UPGRADE_COMPLETED_EVENT = "imo/upgrade-completed";
@@ -17379,7 +17493,7 @@ var ImoUpgradeService = class extends Service {
 			this.running.targetVersion,
 			"--yes"
 		];
-		const run = await runCapture(this.ctx.subprocess, {
+		const run = await runCaptureDetailed(this.ctx.subprocess, {
 			command: this.config.command,
 			args: upgradeArgs,
 			timeoutMs: this.config.upgradeTimeoutMs,
@@ -17389,15 +17503,18 @@ var ImoUpgradeService = class extends Service {
 		const stderrDigest = run.ok ? run.value.stderrDigest : run.error.stderrDigest ?? digest$1("");
 		const exitCode = run.ok ? run.value.exitCode : run.error.exitCode ?? null;
 		const after = await this.readVersion(signal) ?? before;
-		if (!run.ok) return this.finishDirect("failed", operationId$1, {
-			before,
-			after,
-			exitCode,
-			stdoutDigest,
-			stderrDigest,
-			smoke: [],
-			startedAt
-		});
+		if (!run.ok) {
+			this.recordFailure([`${this.config.command} ${upgradeArgs.join(" ")}`], exitCode, run.detail);
+			return this.finishDirect("failed", operationId$1, {
+				before,
+				after,
+				exitCode,
+				stdoutDigest,
+				stderrDigest,
+				smoke: [],
+				startedAt
+			});
+		}
 		const smoke = [];
 		for (const args of this.config.smokeCommands) {
 			const smokeRun = await runCapture(this.ctx.subprocess, {
@@ -17438,6 +17555,7 @@ var ImoUpgradeService = class extends Service {
 			finishedAt: (/* @__PURE__ */ new Date()).toISOString(),
 			recovery: `imo upgrade --version ${input.before} restores the previous version if needed`
 		};
+		if (status === "completed") failureDiagnosis.clear("imo-cli");
 		const event = status === "completed" ? IMO_UPGRADE_COMPLETED_EVENT : IMO_UPGRADE_FAILED_EVENT;
 		this.ctx.emit(event, {
 			operationId: operationId$1,
@@ -17449,6 +17567,21 @@ var ImoUpgradeService = class extends Service {
 			ok: true,
 			receipt
 		};
+	}
+	/** Record one failed upgrade run's raw streams (memory-only diagnosis). */
+	recordFailure(commands, exitCode, detail) {
+		failureDiagnosis.record({
+			kind: "imo-cli",
+			operation: "imo-upgrade",
+			commands,
+			exitCode,
+			streams: {
+				stdout: detail?.stdout ?? "",
+				stderr: detail?.stderr ?? "",
+				stdoutLossy: detail?.stdoutLossy ?? false,
+				stderrLossy: detail?.stderrLossy ?? false
+			}
+		});
 	}
 	async executeUpgrade(operationId$1, signal) {
 		const record = this.ctx.operationLog.list().find((candidate) => candidate.id === operationId$1);
@@ -17505,7 +17638,7 @@ var ImoUpgradeService = class extends Service {
 				this.running.targetVersion,
 				"--yes"
 			];
-			const run = await runCapture(this.ctx.subprocess, {
+			const run = await runCaptureDetailed(this.ctx.subprocess, {
 				command: this.config.command,
 				args: upgradeArgs,
 				timeoutMs: this.config.upgradeTimeoutMs,
@@ -17515,15 +17648,18 @@ var ImoUpgradeService = class extends Service {
 			const stderrDigest = run.ok ? run.value.stderrDigest : run.error.stderrDigest ?? digest$1("");
 			const exitCode = run.ok ? run.value.exitCode : run.error.exitCode ?? null;
 			const after = await this.readVersion(signal) ?? before;
-			if (!run.ok) return await this.finish("failed", operationId$1, {
-				before,
-				after,
-				exitCode,
-				stdoutDigest,
-				stderrDigest,
-				smoke: [],
-				startedAt
-			}, signal);
+			if (!run.ok) {
+				this.recordFailure([`${this.config.command} ${upgradeArgs.join(" ")}`], exitCode, run.detail);
+				return await this.finish("failed", operationId$1, {
+					before,
+					after,
+					exitCode,
+					stdoutDigest,
+					stderrDigest,
+					smoke: [],
+					startedAt
+				}, signal);
+			}
 			const smoke = [];
 			for (const args of this.config.smokeCommands) {
 				const smokeRun = await runCapture(this.ctx.subprocess, {
@@ -17566,6 +17702,7 @@ var ImoUpgradeService = class extends Service {
 			finishedAt: (/* @__PURE__ */ new Date()).toISOString(),
 			recovery: `恢复命令：imo upgrade --version ${input.before} --yes`
 		};
+		if (status === "completed") failureDiagnosis.clear("imo-cli");
 		const resultDigest = digest$1(JSON.stringify(receipt));
 		try {
 			await this.ctx.operationLog.recordResult(operationId$1, {
@@ -17698,7 +17835,7 @@ var ImoInstallService = class extends Service {
 			};
 			packageManager = "pnpm";
 		}
-		const configSet = await runCapture(this.ctx.subprocess, {
+		const configSet = await runCaptureDetailed(this.ctx.subprocess, {
 			command: packageManager,
 			args: [
 				"config",
@@ -17711,15 +17848,18 @@ var ImoInstallService = class extends Service {
 		});
 		steps.push(step(`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`, configSet));
 		const registryConfigured = configSet.ok;
-		if (!configSet.ok) return this.finish(operationId$1, "failed", {
-			packageManager,
-			registryConfigured,
-			before,
-			after: null,
-			steps,
-			startedAt,
-			exitCode: exitOf(configSet)
-		});
+		if (!configSet.ok) {
+			this.recordFailure("imo-install", [`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`], exitOf(configSet), configSet.detail, packageManager);
+			return this.finish(operationId$1, "failed", {
+				packageManager,
+				registryConfigured,
+				before,
+				after: null,
+				steps,
+				startedAt,
+				exitCode: exitOf(configSet)
+			});
+		}
 		const installArgs$1 = packageManager === "npm" ? [
 			"install",
 			"-g",
@@ -17729,32 +17869,40 @@ var ImoInstallService = class extends Service {
 			"-g",
 			IMO_PACKAGE
 		];
-		const installRun = await runCapture(this.ctx.subprocess, {
+		const installRun = await runCaptureDetailed(this.ctx.subprocess, {
 			command: packageManager,
 			args: installArgs$1,
 			timeoutMs: this.config.installTimeoutMs,
 			signal
 		});
-		steps.push(step(`${packageManager} ${installArgs$1.join(" ")}`, installRun));
-		if (!installRun.ok) return this.finish(operationId$1, "failed", {
-			packageManager,
-			registryConfigured,
-			before,
-			after: null,
-			steps,
-			startedAt,
-			exitCode: exitOf(installRun)
-		});
+		const installCmd = `${packageManager} ${installArgs$1.join(" ")}`;
+		steps.push(step(installCmd, installRun));
+		if (!installRun.ok) {
+			this.recordFailure("imo-install", [`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`, installCmd], exitOf(installRun), installRun.detail, packageManager);
+			return this.finish(operationId$1, "failed", {
+				packageManager,
+				registryConfigured,
+				before,
+				after: null,
+				steps,
+				startedAt,
+				exitCode: exitOf(installRun)
+			});
+		}
 		const after = await this.imoVersion(signal);
-		if (after === null) return this.finish(operationId$1, "failed", {
-			packageManager,
-			registryConfigured,
-			before,
-			after: null,
-			steps,
-			startedAt,
-			exitCode: installRun.value.exitCode
-		});
+		if (after === null) {
+			this.recordFailure("imo-install", [`${packageManager} config set ${IMO_REGISTRY_SCOPE} <registry>`, installCmd], installRun.value.exitCode, installRun.detail, packageManager);
+			return this.finish(operationId$1, "failed", {
+				packageManager,
+				registryConfigured,
+				before,
+				after: null,
+				steps,
+				startedAt,
+				exitCode: installRun.value.exitCode
+			});
+		}
+		failureDiagnosis.clear("imo-cli");
 		return this.finish(operationId$1, "completed", {
 			packageManager,
 			registryConfigured,
@@ -17763,6 +17911,23 @@ var ImoInstallService = class extends Service {
 			steps,
 			startedAt,
 			exitCode: installRun.value.exitCode
+		});
+	}
+	/** Record one failed install run's raw streams (memory-only diagnosis). */
+	recordFailure(operation, commands, exitCode, detail, packageManager) {
+		failureDiagnosis.record({
+			kind: "imo-cli",
+			operation,
+			commands,
+			exitCode,
+			streams: {
+				stdout: detail?.stdout ?? "",
+				stderr: detail?.stderr ?? "",
+				stdoutLossy: detail?.stdoutLossy ?? false,
+				stderrLossy: detail?.stderrLossy ?? false
+			},
+			packageManager,
+			registry: IMO_REGISTRY
 		});
 	}
 	async imoVersion(signal) {
@@ -19825,6 +19990,30 @@ function mountWriteRoutes(ctx) {
 		} catch {
 			return faceError(void 0, "install-failed");
 		}
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/imo-diagnosis`, async (body) => {
+		const kind = body.kind === "imo-cli" || body.kind === "skill" ? body.kind : void 0;
+		if (kind === void 0) return faceError({
+			code: "invalid-input",
+			message: "diagnosis kind must be 'imo-cli' or 'skill'"
+		}, "invalid-input");
+		const diagnosis = failureDiagnosis.snapshot(kind);
+		if (diagnosis === void 0) return {
+			ok: true,
+			result: { available: false }
+		};
+		const scratchCwd = scratchDirectory();
+		try {
+			await mkdir(scratchCwd, { recursive: true });
+		} catch {}
+		return {
+			ok: true,
+			result: {
+				available: true,
+				diagnosis,
+				scratchCwd
+			}
+		};
 	}));
 	register(actionRoute(`${ACTIONS_PREFIX}/skill-activation`, async (body, signal) => {
 		const activation = ctx.get("imoSkillActivation");
@@ -29946,13 +30135,16 @@ var ImoSkillActionsService = class extends Service {
 		});
 	}
 	async directCli(operationId$1, pending, before, initialized, expectedRevision, startedAt, signal) {
-		const run = await runCapture(this.ctx.subprocess, {
-			command: actionCommand(pending.input, this.#config.command),
-			args: executionArgs(pending.input),
+		const command = actionCommand(pending.input, this.#config.command);
+		const args = executionArgs(pending.input);
+		const run = await runCaptureDetailed(this.ctx.subprocess, {
+			command,
+			args,
 			timeoutMs: this.#config.timeoutMs,
 			signal
 		});
-		if (!run.ok && run.error.code === "not-found" && actionCommand(pending.input, this.#config.command) === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
+		if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
+		this.captureRunDiagnosis(pending, command, args, run);
 		const recovery = await recoverInventory({
 			ctx: this.ctx,
 			skills: this.#skills,
@@ -29966,6 +30158,7 @@ var ImoSkillActionsService = class extends Service {
 		const diff = after === void 0 ? EMPTY_DIFF : diffInventory(before, after);
 		const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
 		const status = run.ok ? "completed" : changed ? "partial-failure" : "failed";
+		if (status === "completed") failureDiagnosis.clear("skill");
 		const stdoutDigest = run.ok ? run.value.stdoutDigest : run.error.stdoutDigest ?? EMPTY_DIGEST;
 		const stderrDigest = run.ok ? run.value.stderrDigest : run.error.stderrDigest ?? EMPTY_DIGEST;
 		const exitCode = run.ok ? run.value.exitCode : run.error.exitCode ?? null;
@@ -29985,6 +30178,27 @@ var ImoSkillActionsService = class extends Service {
 			catalogInvalidated: recovery.catalogInvalidated,
 			startedAt,
 			...hint === void 0 ? {} : { hint }
+		});
+	}
+	/**
+	* Record one failed skills-tool run's raw streams (memory-only diagnosis).
+	* Install/update only; remove/activation failures carry no command output
+	* worth diagnosing here, and the receipt stays digest-only regardless.
+	*/
+	captureRunDiagnosis(pending, command, args, run) {
+		if (run.ok) return;
+		if (pending.input.kind !== SKILL_INSTALL_KIND && pending.input.kind !== SKILL_UPDATE_KIND) return;
+		failureDiagnosis.record({
+			kind: "skill",
+			operation: diagnosisOperation(pending),
+			commands: [`${command} ${args.join(" ")}`],
+			exitCode: run.error.exitCode ?? null,
+			streams: {
+				stdout: run.detail?.stdout ?? "",
+				stderr: run.detail?.stderr ?? "",
+				stdoutLossy: run.detail?.stdoutLossy ?? false,
+				stderrLossy: run.detail?.stderrLossy ?? false
+			}
 		});
 	}
 	/** Direct receipt: built like the approval receipt, never journaled. */
@@ -30185,13 +30399,16 @@ var ImoSkillActionsService = class extends Service {
 		});
 	}
 	async runCli(operationId$1, pending, before, initialized, expectedRevision, startedAt, signal) {
-		const run = await runCapture(this.ctx.subprocess, {
-			command: actionCommand(pending.input, this.#config.command),
-			args: executionArgs(pending.input),
+		const command = actionCommand(pending.input, this.#config.command);
+		const args = executionArgs(pending.input);
+		const run = await runCaptureDetailed(this.ctx.subprocess, {
+			command,
+			args,
 			timeoutMs: this.#config.timeoutMs,
 			signal
 		});
-		if (!run.ok && run.error.code === "not-found" && actionCommand(pending.input, this.#config.command) === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
+		if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
+		this.captureRunDiagnosis(pending, command, args, run);
 		const recovery = await recoverInventory({
 			ctx: this.ctx,
 			skills: this.#skills,
@@ -30205,6 +30422,7 @@ var ImoSkillActionsService = class extends Service {
 		const diff = after === void 0 ? EMPTY_DIFF : diffInventory(before, after);
 		const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
 		const status = run.ok ? "completed" : changed ? "partial-failure" : "failed";
+		if (status === "completed") failureDiagnosis.clear("skill");
 		const stdoutDigest = run.ok ? run.value.stdoutDigest : run.error.stdoutDigest ?? EMPTY_DIGEST;
 		const stderrDigest = run.ok ? run.value.stderrDigest : run.error.stderrDigest ?? EMPTY_DIGEST;
 		const exitCode = run.ok ? run.value.exitCode : run.error.exitCode ?? null;
@@ -30349,6 +30567,12 @@ function executionFailure(code, message, operationId$1) {
 			...operationId$1 === void 0 ? {} : { operationId: operationId$1 }
 		}
 	};
+}
+/** Diagnosis label for one pending action: kind plus the install source when present. */
+function diagnosisOperation(pending) {
+	if (pending.input.kind !== SKILL_INSTALL_KIND) return pending.input.kind;
+	const source = pending.input.source;
+	return `skill-install:${source.type}/${source.value}`;
 }
 
 //#endregion

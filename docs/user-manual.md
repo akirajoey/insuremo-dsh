@@ -1,6 +1,6 @@
 # iComposer Workbench 用户手册
 
-> 版本：POC（Phase 1–7 完成） · 分支 `muse` · Harness 基线 `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`
+> 版本：POC（Phase 1–7 完成） · 分支 `muse` · Harness 基线 `85d8062c8aecaf3c24bc84d45ba20c9223d40789`（本地 master，含未上游提交 TASK-080/081/082，见 3.1.1 基线说明）
 > 更新日期：2026-08-22
 
 ---
@@ -50,7 +50,7 @@ iComposer Workbench 是运行在 **DeepSeek Harness** 之上的插件化工作�
 
 ```text
 ┌────────────────────────────────────────────────────────────┐
-│                     Harness（固定 99f6f02）                  │
+│                     Harness（固定 85d8062c8a）               │
 │   subprocess · storageDomain · workspaceRegistry · jobs ·   │
 │   skills · webServer · tools · sessionPersistence           │
 └───────────────▲────────────────────────────────────────────┘
@@ -109,7 +109,13 @@ dsh --help   # 开箱即有全局命令
 ```sh
 # 1. 克隆 Harness 并固定到验证过的基线
 git clone <harness-url> ~/deepseek-harness
-git -C ~/deepseek-harness checkout 99f6f02fecdb7dff40c3fbc9470f5907c29f74ca
+git -C ~/deepseek-harness checkout 85d8062c8aecaf3c24bc84d45ba20c9223d40789
+
+# 基线说明（TASK-084）：该 pin 指向本地 harness master，含三个未上游提交——
+# TASK-080 8e53387839efd4f04c9dba068e69f434dee3aa06、TASK-081
+# c6f268060c13a628bd38ff3ae212f688da95e847、TASK-082 85d8062c8aecaf3c24bc84d45ba20c9223d40789。
+# 克隆无法直接检出该 commit 时，先从项目提供的 harness 克隆 fetch 这三个提交
+# （或 cherry-pick 同名改动），否则 Workbench 的诊断预填（setDraft）等客户端能力缺失。
 
 # 2. 构建全部包（含 apps/cli 的 lib/bin.js——源码检出默认没有这个产物）
 cd ~/deepseek-harness
@@ -132,9 +138,9 @@ npm link          # macOS/Linux 产出 /usr/local/bin/dsh 或 /opt/homebrew/bin/
 面向从源码开发/调试 Workbench 的用户（最终用户直接看 3.3）：
 
 ```sh
-# 1. 克隆并固定 Harness（同 3.1.1 途径 B）
+# 1. 克隆并固定 Harness（同 3.1.1 途径 B，含本地补丁说明）
 git clone <harness-url> ../deepseek-harness
-git -C ../deepseek-harness checkout 99f6f02fecdb7dff40c3fbc9470f5907c29f74ca
+git -C ../deepseek-harness checkout 85d8062c8aecaf3c24bc84d45ba20c9223d40789
 
 # 2. 安装 Workbench 依赖
 cd icomposer-workbench
@@ -452,7 +458,7 @@ node scripts/audit-secrets.mjs   # 全仓脱敏扫描（token 形状/canary/路�
 2. 真实 push 冲突样本——冲突解析基于 CLI 二进制词表 + 防御性多形状 parser；
 3. 多进程 multi-writer——JSON 存储单写者约束，不支持多 Host 并发写同一 root；
 4. GPUI 客户端——Phase 8 另行立项；
-5. 真实 Harness 升级演练——以只读审计 + 回滚预案替代（checkout 99f6f02 即恢复）；
+5. 真实 Harness 升级演练——以只读审计 + 回滚预案替代（checkout 85d8062c8a 即恢复；升级前基线含本地补丁 TASK-080/081/082，回滚后需重新同步）；
 6. 浏览器写 transport——CSRF/Origin 设计 deferred，Web 侧仅只读 GET 桥；
 7. `verify utils` CLI 会在 workspace `.metadata/icomposer/` 写缓存（CLI 正常行为，已按用户裁定接受）；
 8. ICI Explain 在单进程内串行 prepare/final/cancel 并在 submit 前重哈希资料；同一 OS 用户的其他进程仍可并发修改 workspace（TOCTOU 不在 MVP 的 `openat` 威胁模型内）；

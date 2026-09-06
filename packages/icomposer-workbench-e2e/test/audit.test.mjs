@@ -66,7 +66,7 @@ test("audit-compat: passes on the real repository and writes the snapshot", asyn
   const { readFileSync } = await import("node:fs");
   const snapshot = readFileSync(join(repoRoot, "docs", "compat-audit.json"), "utf8");
   const parsed = JSON.parse(snapshot);
-  assert.equal(parsed.harnessCommit, "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca");
+  assert.equal(parsed.harnessCommit, "85d8062c8aecaf3c24bc84d45ba20c9223d40789");
   assert.equal(parsed.harnessClean, true);
   assert.equal(parsed.pluginCount, 13);
   assert.equal(parsed.checks.every(check => check.ok), true);

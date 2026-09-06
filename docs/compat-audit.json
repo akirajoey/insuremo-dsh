@@ -1,14 +1,14 @@
 {
-  "auditedAt": "2026-08-28T02:10:22.454Z",
-  "harnessCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
-  "pinnedCommit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
+  "auditedAt": "2026-09-06T04:13:12.713Z",
+  "harnessCommit": "85d8062c8aecaf3c24bc84d45ba20c9223d40789",
+  "pinnedCommit": "85d8062c8aecaf3c24bc84d45ba20c9223d40789",
   "harnessClean": true,
   "pluginCount": 13,
   "lockfilePresent": true,
   "checks": [
     {
       "ok": true,
-      "check": "harness HEAD pinned at 99f6f02fec"
+      "check": "harness HEAD pinned at 85d8062c8a"
     },
     {
       "ok": true,
@@ -28,7 +28,7 @@
     },
     {
       "ok": true,
-      "check": "@deepseek-ai/dsh-client-ui-primitives -> ../deepseek-harness/packages/client/ui-primitives/src/index.ts (3 referrers)"
+      "check": "@deepseek-ai/dsh-client-ui-primitives -> ../deepseek-harness/packages/client/ui-primitives/src/index.ts (5 referrers)"
     },
     {
       "ok": true,
@@ -96,7 +96,7 @@
     },
     {
       "ok": true,
-      "check": "pnpm-lock.yaml present (sha256:9fc888b7d9c676b8)"
+      "check": "pnpm-lock.yaml present (sha256:4abeb070d13b37d3)"
     }
   ]
 }
