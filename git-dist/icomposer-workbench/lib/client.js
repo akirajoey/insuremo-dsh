@@ -246,8 +246,16 @@ async function postAction$1(action, body, signal) {
 const OPERATION_LABELS = {
 	"imo-install": "IMO CLI 一键安装",
 	"imo-upgrade": "IMO CLI 更新",
-	"skill-update": "Skills 全量更新"
+	"skill-update": "Skills 全量更新",
+	"skill-install": "Skills 安装"
 };
+/** Human label for an operation; scenario/source installs carry a suffix. */
+function operationLabel(operation) {
+	const exact = OPERATION_LABELS[operation];
+	if (exact !== void 0) return exact;
+	if (operation.startsWith("skill-install:")) return "Skills 场景/来源安装";
+	return operation;
+}
 /** One rendered command line with its step number. */
 function commandLines(commands) {
 	if (commands.length === 0) return "（无已执行命令记录）";
@@ -255,7 +263,7 @@ function commandLines(commands) {
 }
 /** Assemble the Chinese diagnosis text the user reviews and sends. */
 function buildDiagnosisText(diagnosis) {
-	const scene = OPERATION_LABELS[diagnosis.operation] ?? diagnosis.operation;
+	const scene = operationLabel(diagnosis.operation);
 	const kindLabel = diagnosis.kind === "imo-cli" ? "IMO CLI" : "Skills";
 	const environment = [
 		`node: ${diagnosis.nodeVersion}`,
@@ -272,6 +280,7 @@ function buildDiagnosisText(diagnosis) {
 		commandLines(diagnosis.commands),
 		"",
 		`exitCode: ${diagnosis.exitCode ?? "（未运行）"}`,
+		...diagnosis.error === void 0 ? [] : [`错误：${diagnosis.error.code}: ${diagnosis.error.message}`],
 		"",
 		"stdout：",
 		"```",
@@ -329,30 +338,30 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"header": "wbf3683280_header",
-	"headText": "wbf3683280_headText",
-	"name": "wbf3683280_name",
-	"body": "wbf3683280_body",
-	"card": "wbf3683280_card",
 	"description": "wbf3683280_description",
-	"refresh": "wbf3683280_refresh",
-	"toggle": "wbf3683280_toggle",
-	"list": "wbf3683280_list",
-	"small": "wbf3683280_small",
-	"action": "wbf3683280_action",
-	"footer": "wbf3683280_footer",
-	"meta": "wbf3683280_meta",
-	"select": "wbf3683280_select",
-	"chevronOpen": "wbf3683280_chevronOpen",
+	"header": "wbf3683280_header",
 	"region": "wbf3683280_region",
-	"controls": "wbf3683280_controls",
-	"hint": "wbf3683280_hint",
+	"chevronOpen": "wbf3683280_chevronOpen",
+	"meta": "wbf3683280_meta",
+	"headText": "wbf3683280_headText",
+	"action": "wbf3683280_action",
+	"refresh": "wbf3683280_refresh",
+	"card": "wbf3683280_card",
+	"chevron": "wbf3683280_chevron",
+	"body": "wbf3683280_body",
+	"footer": "wbf3683280_footer",
+	"list": "wbf3683280_list",
+	"error": "wbf3683280_error",
 	"controlThumb": "wbf3683280_controlThumb",
 	"pending": "wbf3683280_pending",
-	"chevron": "wbf3683280_chevron",
+	"small": "wbf3683280_small",
 	"cardOpen": "wbf3683280_cardOpen",
+	"select": "wbf3683280_select",
 	"controlTrack": "wbf3683280_controlTrack",
-	"error": "wbf3683280_error"
+	"hint": "wbf3683280_hint",
+	"name": "wbf3683280_name",
+	"toggle": "wbf3683280_toggle",
+	"controls": "wbf3683280_controls"
 };
 
 //#endregion
@@ -1322,17 +1331,17 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"driver": "wb06155adc_driver",
+	"wordmarkDark": "wb06155adc_wordmarkDark",
 	"railMark": "wb06155adc_railMark",
-	"dsh": "wb06155adc_dsh",
-	"railHost": "wb06155adc_railHost",
+	"heroHost": "wb06155adc_heroHost",
+	"driver": "wb06155adc_driver",
+	"heroMark": "wb06155adc_heroMark",
+	"wordmarkLight": "wb06155adc_wordmarkLight",
+	"wordmark": "wb06155adc_wordmark",
 	"wordmarkHost": "wb06155adc_wordmarkHost",
 	"wordmarkInner": "wb06155adc_wordmarkInner",
-	"wordmark": "wb06155adc_wordmark",
-	"wordmarkLight": "wb06155adc_wordmarkLight",
-	"heroHost": "wb06155adc_heroHost",
-	"heroMark": "wb06155adc_heroMark",
-	"wordmarkDark": "wb06155adc_wordmarkDark"
+	"dsh": "wb06155adc_dsh",
+	"railHost": "wb06155adc_railHost"
 };
 
 //#endregion
@@ -1611,8 +1620,8 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 }
 var WorkspaceHealth_module_css_default = {
 	"driver": "wb8730382c_driver",
-	"rowIcons": "wb8730382c_rowIcons",
-	"icon": "wb8730382c_icon"
+	"icon": "wb8730382c_icon",
+	"rowIcons": "wb8730382c_rowIcons"
 };
 
 //#endregion
@@ -1904,18 +1913,18 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"row": "wba94a6eca_row",
-	"closeMark": "wba94a6eca_closeMark",
-	"rowName": "wba94a6eca_rowName",
-	"hint": "wba94a6eca_hint",
-	"dot": "wba94a6eca_dot",
+	"error": "wba94a6eca_error",
 	"trigger": "wba94a6eca_trigger",
 	"label": "wba94a6eca_label",
-	"rowMark": "wba94a6eca_rowMark",
+	"dot": "wba94a6eca_dot",
+	"rowName": "wba94a6eca_rowName",
 	"list": "wba94a6eca_list",
-	"picker": "wba94a6eca_picker",
-	"error": "wba94a6eca_error",
-	"pickerHeader": "wba94a6eca_pickerHeader"
+	"closeMark": "wba94a6eca_closeMark",
+	"hint": "wba94a6eca_hint",
+	"pickerHeader": "wba94a6eca_pickerHeader",
+	"rowMark": "wba94a6eca_rowMark",
+	"row": "wba94a6eca_row",
+	"picker": "wba94a6eca_picker"
 };
 
 //#endregion
@@ -2282,11 +2291,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"status": "wb6cd975b4_status",
-	"row": "wb6cd975b4_row",
-	"icon": "wb6cd975b4_icon",
 	"kind": "wb6cd975b4_kind",
-	"digest": "wb6cd975b4_digest"
+	"icon": "wb6cd975b4_icon",
+	"status": "wb6cd975b4_status",
+	"digest": "wb6cd975b4_digest",
+	"row": "wb6cd975b4_row"
 };
 
 //#endregion
@@ -2343,24 +2352,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
+	"hint": "wb13b81332_hint",
+	"consent": "wb13b81332_consent",
+	"header": "wb13b81332_header",
+	"card": "wb13b81332_card",
+	"status": "wb13b81332_status",
+	"actions": "wb13b81332_actions",
+	"referenceActions": "wb13b81332_referenceActions",
+	"runMeta": "wb13b81332_runMeta",
+	"session": "wb13b81332_session",
 	"batchJobRow": "wb13b81332_batchJobRow",
 	"error": "wb13b81332_error",
-	"referenceActions": "wb13b81332_referenceActions",
+	"field": "wb13b81332_field",
+	"selectedReference": "wb13b81332_selectedReference",
 	"errorText": "wb13b81332_errorText",
-	"actions": "wb13b81332_actions",
-	"fieldset": "wb13b81332_fieldset",
-	"done": "wb13b81332_done",
 	"summary": "wb13b81332_summary",
 	"progress": "wb13b81332_progress",
-	"selectedReference": "wb13b81332_selectedReference",
-	"status": "wb13b81332_status",
-	"header": "wb13b81332_header",
-	"field": "wb13b81332_field",
-	"hint": "wb13b81332_hint",
-	"session": "wb13b81332_session",
-	"card": "wb13b81332_card",
-	"consent": "wb13b81332_consent",
-	"runMeta": "wb13b81332_runMeta"
+	"done": "wb13b81332_done",
+	"fieldset": "wb13b81332_fieldset"
 };
 
 //#endregion

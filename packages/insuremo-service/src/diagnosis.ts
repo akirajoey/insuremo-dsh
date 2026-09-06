@@ -27,6 +27,13 @@ export interface FailureDiagnosis {
   readonly platform: string;
   readonly arch: string;
   readonly occurredAt: string;
+  /**
+   * Structured failure reason (TASK-085): rides the imo-diagnosis payload to
+   * the browser (a wire field, never a persisted event) so a run with no
+   * streams at all — an unresolvable preview tool — is still diagnosable.
+   * The message is redacted at capture time like the streams.
+   */
+  readonly error?: { readonly code: string; readonly message: string };
 }
 
 /** Raw streams as captured for one failed run (pre-redaction, pre-clip). */
@@ -79,6 +86,8 @@ export interface DiagnosisCapture {
   readonly streams: FailureStreams;
   readonly packageManager?: "npm" | "pnpm";
   readonly registry?: string;
+  /** Structured failure reason; message is redacted before storage. */
+  readonly error?: { readonly code: string; readonly message: string };
 }
 
 /**
@@ -103,6 +112,9 @@ export class FailureDiagnosisStore {
       stderrTruncated: stderr.truncated || capture.streams.stderrLossy,
       ...(capture.packageManager === undefined ? {} : { packageManager: capture.packageManager }),
       ...(capture.registry === undefined ? {} : { registry: capture.registry }),
+      ...(capture.error === undefined
+        ? {}
+        : { error: { code: capture.error.code, message: redactSecrets(capture.error.message) } }),
       nodeVersion: process.version,
       platform: process.platform,
       arch: process.arch,

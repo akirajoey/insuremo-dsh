@@ -23,6 +23,8 @@ export interface DiagnosisActionPayload {
     readonly platform: string;
     readonly arch: string;
     readonly occurredAt: string;
+    /** Structured failure reason (no-stream runs like an unresolvable tool). */
+    readonly error?: { readonly code: string; readonly message: string };
   };
   readonly scratchCwd?: string;
 }
@@ -38,7 +40,16 @@ const OPERATION_LABELS: Record<string, string> = {
   "imo-install": "IMO CLI 一键安装",
   "imo-upgrade": "IMO CLI 更新",
   "skill-update": "Skills 全量更新",
+  "skill-install": "Skills 安装",
 };
+
+/** Human label for an operation; scenario/source installs carry a suffix. */
+function operationLabel(operation: string): string {
+  const exact = OPERATION_LABELS[operation];
+  if (exact !== undefined) return exact;
+  if (operation.startsWith("skill-install:")) return "Skills 场景/来源安装";
+  return operation;
+}
 
 /** One rendered command line with its step number. */
 function commandLines(commands: readonly string[]): string {
@@ -48,7 +59,7 @@ function commandLines(commands: readonly string[]): string {
 
 /** Assemble the Chinese diagnosis text the user reviews and sends. */
 export function buildDiagnosisText(diagnosis: NonNullable<DiagnosisActionPayload["diagnosis"]>): string {
-  const scene = OPERATION_LABELS[diagnosis.operation] ?? diagnosis.operation;
+  const scene = operationLabel(diagnosis.operation);
   const kindLabel = diagnosis.kind === "imo-cli" ? "IMO CLI" : "Skills";
   const environment = [
     `node: ${diagnosis.nodeVersion}`,
@@ -65,6 +76,7 @@ export function buildDiagnosisText(diagnosis: NonNullable<DiagnosisActionPayload
     commandLines(diagnosis.commands),
     "",
     `exitCode: ${diagnosis.exitCode ?? "（未运行）"}`,
+    ...(diagnosis.error === undefined ? [] : [`错误：${diagnosis.error.code}: ${diagnosis.error.message}`]),
     "",
     "stdout：",
     "```",

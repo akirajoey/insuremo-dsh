@@ -12,7 +12,7 @@ import { diffInventory } from "./diff.ts";
 import { buildSkillReceipt, type SkillReceiptInput } from "./finalize.ts";
 import { ExecutionJournal, type ExecutionJournalEntry } from "./execution-journal.ts";
 import { recoverInventory, type RecoveryReport } from "./recovery.ts";
-import { actionCommand, executionArgs, previewSkillAction, SKILLS_TOOL_COMMAND } from "./preview.ts";
+import { actionCommand, executionArgs, previewSkillAction, skillDiagnosisOperation, SKILLS_TOOL_COMMAND } from "./preview.ts";
 import { installSourceProvenance, normalizeSkillAction, skillActionParamsDigest } from "./validation.ts";
 import {
   SKILL_ACTION_COMPLETED_EVENT,
@@ -197,12 +197,13 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     const command = actionCommand(pending.input, this.#config.command);
     const args = executionArgs(pending.input);
     const run = await runCaptureDetailed(this.ctx.subprocess, { command, args, timeoutMs: this.#config.timeoutMs, signal });
+    this.captureRunDiagnosis(pending, command, args, run);
     if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) {
       // npx never resolved: nothing ran, so surface the structured tool error
-      // instead of a misleading failed receipt.
+      // instead of a misleading failed receipt. The diagnosis was already
+      // recorded above (structured reason, empty streams).
       return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId);
     }
-    this.captureRunDiagnosis(pending, command, args, run);
     const recovery: RecoveryReport = await recoverInventory({ ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation, kind: pending.input.kind, beforeNames: before.names, expectedRevision });
     const after = recovery.after;
     const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
@@ -235,9 +236,10 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
   private captureRunDiagnosis(pending: PendingSkillAction, command: string, args: readonly string[], run: Awaited<ReturnType<typeof runCaptureDetailed>>): void {
     if (run.ok) return;
     if (pending.input.kind !== SKILL_INSTALL_KIND && pending.input.kind !== SKILL_UPDATE_KIND) return;
+    const unavailable = run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND;
     failureDiagnosis.record({
       kind: "skill",
-      operation: diagnosisOperation(pending),
+      operation: skillDiagnosisOperation(pending.input),
       commands: [`${command} ${args.join(" ")}`],
       exitCode: run.error.exitCode ?? null,
       streams: {
@@ -246,6 +248,11 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
         stdoutLossy: run.detail?.stdoutLossy ?? false,
         stderrLossy: run.detail?.stderrLossy ?? false,
       },
+      // A not-found run executed nothing (empty streams); the structured
+      // reason is what makes the entry diagnosable in the UI.
+      error: unavailable
+        ? { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" }
+        : { code: run.error.code, message: run.error.message },
     });
   }
 
@@ -399,10 +406,10 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     const command = actionCommand(pending.input, this.#config.command);
     const args = executionArgs(pending.input);
     const run = await runCaptureDetailed(this.ctx.subprocess, { command, args, timeoutMs: this.#config.timeoutMs, signal });
+    this.captureRunDiagnosis(pending, command, args, run);
     if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) {
       return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId);
     }
-    this.captureRunDiagnosis(pending, command, args, run);
     // Once the external attempt has started, recovery is best-effort always.
     const recovery: RecoveryReport = await recoverInventory({
       ctx: this.ctx, skills: this.#skills, controller: this.#controller, face: this.#activation,
@@ -527,11 +534,4 @@ function resultFailure<T = never>(code: SkillActionError["code"], message: strin
 
 function executionFailure(code: SkillActionError["code"], message: string, operationId?: string): SkillActionExecution {
   return { ok: false, error: { code, message, ...(operationId === undefined ? {} : { operationId }) } };
-}
-
-/** Diagnosis label for one pending action: kind plus the install source when present. */
-function diagnosisOperation(pending: PendingSkillAction): string {
-  if (pending.input.kind !== SKILL_INSTALL_KIND) return pending.input.kind;
-  const source = (pending.input as Extract<NormalizedSkillAction, { kind: typeof SKILL_INSTALL_KIND }>).source;
-  return `skill-install:${source.type}/${source.value}`;
 }

@@ -2,11 +2,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { withFixture, findInvocation, installInput, checkInvalid, openFixture } from "./support/skill-actions-fixture.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import http from "node:http";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SkillRegistry } from "@deepseek-ai/dsh-skill";
 import { InsuremoSkillProvider } from "../src/skill-provider.ts";
+import { mountWriteRoutes } from "../src/overview/write-routes.ts";
 import { digest } from "../src/run.ts";
 import { failureDiagnosis } from "../src/diagnosis.ts";
 import { SKILL_ACTION_COMPLETED_EVENT, SKILL_ACTION_FAILED_EVENT } from "../src/index.ts";
@@ -144,6 +146,203 @@ test("forced install failure recovers inventory then is a one-shot failed receip
     const stateAfter = await fx.activation.snapshot(["alpha", "beta", "gamma"]);
     assert.deepEqual(stateAfter, stateBefore);
   });
+});
+
+test("TASK-085: a failed install dry-run preview captures the diagnosis (direct + approval), without executing", async () => {
+  failureDiagnosis.reset();
+  await withFixture(["alpha"], async (fx) => {
+    // Offline-style dry-run failure: the preview spawn itself exits non-zero.
+    fx.state.previewError = { exitCode: 1, stderr: "npm ERR! network _authToken=leaky-preview fetch failed" };
+    const rowsBefore = Object.keys(fx.state.rows).sort();
+
+    // Direct kernel (the Settings scenario button): the preview failure must
+    // capture the real dry-run argv and redacted output for the UI hand-off.
+    const direct = await fx.actions.runDirect(installInput({ source: { type: "scenario", scenario: "ask-insuremo" }, agent: "universal" }));
+    assert.equal(direct.ok, false);
+    if (!direct.ok) assert.equal(direct.error.code, "non-zero-exit");
+    const diagnosis = failureDiagnosis.snapshot("skill");
+    assert.ok(diagnosis !== undefined, "preview failure must capture a diagnosis");
+    assert.equal(diagnosis.operation, "skill-install:scenario/ask-insuremo");
+    assert.equal(diagnosis.exitCode, 1);
+    // commands carry the REAL dry-run argv (the -l preview form; the execute
+    // form swaps -l for a trailing -y).
+    assert.equal(diagnosis.commands.length, 1);
+    assert.match(diagnosis.commands[0] ?? "", /-l\b/);
+    assert.ok(diagnosis.stderr.includes("fetch failed"));
+    assert.ok(diagnosis.stderr.includes("_auth=***"));
+    assert.ok(!diagnosis.stderr.includes("leaky-preview"));
+    // No formal execution happened: rows untouched, no non-preview install argv.
+    assert.deepEqual(Object.keys(fx.state.rows).sort(), rowsBefore);
+    const executeForms = fx.state.invocations.filter(args => args.includes("@insuremo/skills-tool") && !args.includes("-l"));
+    assert.deepEqual(executeForms, []);
+
+    // The error envelope the action route maps stays digest-only.
+    assert.match(String(direct.error.stdoutDigest ?? ""), /^sha256:/);
+    assert.equal(JSON.stringify(direct).includes("fetch failed"), false);
+  });
+
+  // Approval entry: the same preview failure surfaces at request() time and
+  // is captured under the same operation label.
+  await withFixture(["alpha"], async (fx) => {
+    fx.state.previewError = { exitCode: 1, stderr: "preview network down" };
+    const requested = await fx.actions.request(installInput({ source: { type: "scenario", scenario: "ask-insuremo" }, agent: "universal" }));
+    assert.equal(requested.ok, false);
+    if (!requested.ok) assert.equal(requested.error.code, "non-zero-exit");
+    const diagnosis = failureDiagnosis.snapshot("skill");
+    assert.ok(diagnosis !== undefined, "approval-path preview failure must capture too");
+    assert.equal(diagnosis.operation, "skill-install:scenario/ask-insuremo");
+    assert.ok(diagnosis.stderr.includes("preview network down"));
+    // No operation record was appended for the failed request.
+    assert.equal(fx.opLog.records.size, 0);
+  });
+  failureDiagnosis.reset();
+});
+
+test("TASK-085: remove/activation never record a diagnosis", async () => {
+  failureDiagnosis.reset();
+  await withFixture(["alpha"], async (fx) => {
+    // A failing remove execution mutates nothing and records nothing.
+    fx.state.mutationError = { exitCode: 1, stderr: "remove failed" };
+    const remove = await fx.actions.runDirect({ kind: "skill-remove", agent: "codex", names: ["alpha"] });
+    assert.equal(remove.ok, true);
+    if (!remove.ok) return;
+    assert.equal(remove.receipt.status, "failed");
+    assert.equal(failureDiagnosis.snapshot("skill"), undefined);
+    // Activation failures are not diagnosis-worthy either.
+    const activation = await fx.actions.runDirect({ kind: "skill-activation", name: "missing", enabled: true });
+    assert.equal(activation.ok, false);
+    assert.equal(failureDiagnosis.snapshot("skill"), undefined);
+  });
+  failureDiagnosis.reset();
+});
+
+test("TASK-085: an unresolvable preview tool is diagnosable (structured reason, empty streams, no execution)", async () => {
+  failureDiagnosis.reset();
+  await withFixture(["alpha"], async (fx) => {
+    fx.state.npxMissing = true;
+    const rowsBefore = Object.keys(fx.state.rows).sort();
+    const direct = await fx.actions.runDirect(installInput({ source: { type: "scenario", scenario: "ask-insuremo" }, agent: "universal" }));
+    assert.equal(direct.ok, false);
+    if (!direct.ok) assert.equal(direct.error.code, "tool-unavailable");
+    const diagnosis = failureDiagnosis.snapshot("skill");
+    assert.ok(diagnosis !== undefined, "the failed button must have a diagnosis to show");
+    assert.equal(diagnosis.operation, "skill-install:scenario/ask-insuremo");
+    assert.deepEqual(diagnosis.commands, [
+      "npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool add insuremo-skills -g -a universal -s ask-insuremo -l --skip-update-check",
+    ]);
+    // Nothing executed: null exit code, empty streams, structured reason.
+    assert.equal(diagnosis.exitCode, null);
+    assert.equal(diagnosis.stdout, "");
+    assert.equal(diagnosis.stderr, "");
+    assert.deepEqual(diagnosis.error, { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" });
+    assert.deepEqual(Object.keys(fx.state.rows).sort(), rowsBefore);
+  });
+  failureDiagnosis.reset();
+});
+
+test("TASK-085: update-tool-missing is diagnosable on both kernels (execution-stage early return)", async () => {
+  failureDiagnosis.reset();
+  // Direct kernel: update's preview is local (no spawn), so the missing tool
+  // only surfaces at the execution step — the early return must have recorded.
+  await withFixture(["alpha"], async (fx) => {
+    fx.state.npxMissing = true;
+    const result = await fx.actions.runDirect({ kind: "skill-update" });
+    assert.equal(result.ok, false, "the structured tool error is an execution failure envelope");
+    if (!result.ok) assert.equal(result.error.code, "tool-unavailable");
+    const diagnosis = failureDiagnosis.snapshot("skill");
+    assert.ok(diagnosis !== undefined, "update execution-stage tool-missing must capture");
+    assert.equal(diagnosis.operation, "skill-update");
+    assert.equal(diagnosis.exitCode, null);
+    assert.equal(diagnosis.stdout, "");
+    assert.equal(diagnosis.stderr, "");
+    assert.deepEqual(diagnosis.error, { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" });
+  });
+
+  // Approval kernel: the preview-less request succeeds, the approved execution
+  // hits the missing tool, and the diagnosis is still recorded.
+  await withFixture(["alpha"], async (fx) => {
+    const requested = await fx.actions.request({ kind: "skill-update" });
+    assert.equal(requested.ok, true);
+    if (!requested.ok) return;
+    await fx.approve(requested.value.operationId);
+    fx.state.npxMissing = true; // the tool disappears after the request
+    const result = await fx.actions.execute(requested.value.operationId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "tool-unavailable");
+    const diagnosis = failureDiagnosis.snapshot("skill");
+    assert.ok(diagnosis !== undefined, "approval execution-stage tool-missing must capture");
+    assert.equal(diagnosis.operation, "skill-update");
+    assert.deepEqual(diagnosis.error, { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" });
+  });
+  failureDiagnosis.reset();
+});
+
+test("TASK-085 E2E (same process): real runDirect preview failure → real imo-diagnosis route over real HTTP", async () => {
+  failureDiagnosis.reset();
+  const home = await mkdtemp(join(tmpdir(), "dsh-diag-chain-"));
+  const originalHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  // The route handlers mount into the fixture's own context: the service and
+  // the write bridge share the ONE failureDiagnosis singleton and the ONE
+  // subprocess/scripted world — no test double on the store or the route.
+  await withFixture(["alpha"], async (fx) => {
+    const routes = new Map();
+    const httpServer = http.createServer((req, res) => {
+      const path = (req.url ?? "").split("?")[0];
+      const route = routes.get(path);
+      if (route === undefined) { res.statusCode = 404; res.end(); return; }
+      route.handler(req, res);
+    });
+    await new Promise(resolve => httpServer.listen(0, "127.0.0.1", resolve));
+    const port = httpServer.address().port;
+    fx.ctx.provide("webServer", {
+      register: route => { routes.set(route.path, route); return () => routes.delete(route.path); },
+    } as never);
+    mountWriteRoutes(fx.ctx as never);
+    const url = `http://127.0.0.1:${port}/api/icomposer-workbench/insuremo/overview/actions/imo-diagnosis`;
+    const post = () => fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Workbench-Action": "1",
+        Origin: `http://127.0.0.1:${port}`,
+      },
+      body: JSON.stringify({ kind: "skill" }),
+ });
+    try {
+      // No failure yet: the real wire answers an explicit no.
+      const empty = await post();
+      assert.equal(empty.status, 200);
+      assert.deepEqual(await empty.json(), { ok: true, result: { available: false } });
+
+      // The offline preview failure through the REAL service kernel...
+      fx.state.previewError = { exitCode: 1, stderr: "npm ERR! network _authToken=wire-leak fetch failed" };
+      const direct = await fx.actions.runDirect(installInput({ source: { type: "scenario", scenario: "ask-insuremo" }, agent: "universal" }));
+      assert.equal(direct.ok, false);
+
+      // ...and the REAL HTTP route reads the same store: available with the
+      // captured dry-run argv, redacted output, and a created scratch dir.
+      const response = await post();
+      assert.equal(response.status, 200);
+      const payload = await response.json();
+      assert.equal(payload.ok, true);
+      assert.equal(payload.result.available, true);
+      assert.equal(payload.result.diagnosis.operation, "skill-install:scenario/ask-insuremo");
+      assert.match(payload.result.diagnosis.commands[0], /-l --skip-update-check/);
+      assert.ok(payload.result.diagnosis.stderr.includes("fetch failed"));
+      assert.ok(payload.result.diagnosis.stderr.includes("_auth=***"));
+      assert.ok(!payload.result.diagnosis.stderr.includes("wire-leak"));
+      assert.equal(payload.result.diagnosis.error.code, "non-zero-exit");
+      assert.equal(payload.result.scratchCwd, join(home, "scratch"));
+      await assert.doesNotReject(() => stat(join(home, "scratch")));
+    } finally {
+      await new Promise(resolve => httpServer.close(resolve));
+    }
+  });
+  if (originalHome === undefined) delete process.env.DSH_HOME;
+  else process.env.DSH_HOME = originalHome;
+  failureDiagnosis.reset();
+  await rm(home, { recursive: true, force: true });
 });
 
 test("TASK-083: a failed skills-tool run captures redacted raw output; success clears the slot", async () => {

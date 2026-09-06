@@ -3,7 +3,8 @@ import type { Context } from "@deepseek-ai/cordis";
 import { IMO_REGISTRY } from "../imo-install.ts";
 import type { ImoSkillActivation, ImoSkillActivationSnapshot } from "../skill-activation.ts";
 import type { ImoSkills } from "../skills.ts";
-import { digest, runCapture, type RunResult } from "../run.ts";
+import { digest, runCapture, runCaptureDetailed, type RunResult } from "../run.ts";
+import { failureDiagnosis } from "../diagnosis.ts";
 import { snapshotInventory } from "./diff.ts";
 import {
   SKILL_ACTIVATION_KIND,
@@ -40,13 +41,38 @@ export async function previewSkillAction(
   if (activationSnapshot === undefined) return failure("pre-check-failed", "skill activation state is unavailable");
   if (action.kind === SKILL_INSTALL_KIND) {
     const command = actionCommand(action, config.command);
-    const run = await runCapture(ctx.subprocess, {
+    const previewArgs = installArgs(action, true);
+    const run = await runCaptureDetailed(ctx.subprocess, {
       command,
-      args: installArgs(action, true),
+      args: previewArgs,
       timeoutMs: config.timeoutMs,
       signal,
     });
-    if (!run.ok) return runFailure(run, command === SKILLS_TOOL_COMMAND);
+    if (!run.ok) {
+      // TASK-085: the dry-run failure IS the user-visible install failure —
+      // the formal run is never reached, so the execution-path capture would
+      // never fire. Record the real argv and redacted output at this source;
+      // a later successful install clears the slot. An unresolvable preview
+      // tool captures the structured reason with empty streams instead —
+      // the failed button must always have a diagnosis to show.
+      const unavailable = command === SKILLS_TOOL_COMMAND && run.error.code === "not-found";
+      failureDiagnosis.record({
+        kind: "skill",
+        operation: skillDiagnosisOperation(action),
+        commands: [`${command} ${previewArgs.join(" ")}`],
+        exitCode: run.error.exitCode ?? null,
+        streams: {
+          stdout: run.detail?.stdout ?? "",
+          stderr: run.detail?.stderr ?? "",
+          stdoutLossy: run.detail?.stdoutLossy ?? false,
+          stderrLossy: run.detail?.stderrLossy ?? false,
+        },
+        error: unavailable
+          ? { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" }
+          : { code: run.error.code, message: run.error.message },
+      });
+      return runFailure(run, command === SKILLS_TOOL_COMMAND);
+    }
     const candidateNames = parsePreviewNames(run.value.stdout.text);
     return { ok: true, value: { kind: action.kind, scope: action.scope, before: before.value, activation: activationSnapshot, candidateNames, stdoutDigest: run.value.stdoutDigest } };
   }
@@ -136,6 +162,12 @@ function collectNames(value: unknown, names: Set<string>): void {
   const name = record.name;
   if (typeof name === "string" && isSkillName(name)) names.add(name);
   for (const key of ["skills", "candidates", "items", "available"]) collectNames(record[key], names);
+}
+
+/** Diagnosis label for one action: kind plus the install source when present. */
+export function skillDiagnosisOperation(action: NormalizedSkillAction): string {
+  if (action.kind !== SKILL_INSTALL_KIND) return action.kind;
+  return `skill-install:${action.source.type}/${action.source.value}`;
 }
 
 function runFailure(run: Exclude<RunResult, { ok: true }>, skillsTool: boolean): SkillActionResult<never> {

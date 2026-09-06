@@ -24,6 +24,8 @@ export interface ScriptedState {
   rows: Record<string, Row>;
   installPreview: string;
   mutationError: { exitCode: number; stderr: string } | null;
+  /** Fail the install dry-run preview (`-l` / `--list`); the formal run is never reached (TASK-085). */
+  previewError: { exitCode: number; stderr: string } | null;
   /** Fail the next `skills list --json` read (used to simulate a downstream recovery failure). */
   failNextList: boolean;
   invocations: string[][];
@@ -62,7 +64,10 @@ export function reader(text: string): SubprocessSpawnSpec extends never ? never 
 }
 
 export function scripted(state: ScriptedState, root: string): SubprocessRuntime {
-  async function resolveExecutable() { return "/opt/homebrew/bin/imo"; }
+  async function resolveExecutable(command?: string) {
+    if (state.npxMissing === true && command === "npx") throw new Error(`executable "npx" was not found`);
+    return "/opt/homebrew/bin/imo";
+  }
   function spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
     const args = [...spec.argv.slice(1)];
     state.invocations.push([...args]);
@@ -79,7 +84,11 @@ export function scripted(state: ScriptedState, root: string): SubprocessRuntime 
       }
     } else if (args[0] === "skills" && args[1] === "install") {
       if (args.includes("--list")) {
-        stdout = state.installPreview;
+        if (state.previewError !== null) {
+          ({ exitCode, stderr } = state.previewError);
+        } else {
+          stdout = state.installPreview;
+        }
       } else if (state.mutationError !== null) {
         ({ exitCode, stderr } = state.mutationError);
         state.mutationError = null;
@@ -105,7 +114,11 @@ export function scripted(state: ScriptedState, root: string): SubprocessRuntime 
       }
     } else if (args[0] === "-y" && args.includes("@insuremo/skills-tool")) {
       if (args.includes("-l")) {
-        stdout = state.installPreview;
+        if (state.previewError !== null) {
+          ({ exitCode, stderr } = state.previewError);
+        } else {
+          stdout = state.installPreview;
+        }
       } else if (state.mutationError !== null) {
         ({ exitCode, stderr } = state.mutationError);
         state.mutationError = null;
@@ -221,6 +234,7 @@ export async function openFixture(
     rows: {},
     installPreview: "",
     mutationError: null,
+    previewError: null,
     failNextList: false,
     invocations: [],
     errorLine: "fail",

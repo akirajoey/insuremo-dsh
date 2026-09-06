@@ -768,6 +768,61 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     view.unmount();
   });
 
+  it("TASK-085: a failed scenario install diagnoses with the scenario identity and hands off the draft", async () => {
+    const calls: string[] = [];
+    const sessions: DiagnosisSessions = {
+      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
+      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-3"; }),
+      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}`); }),
+    };
+    const scenarioDiagnosis = {
+      available: true,
+      diagnosis: {
+        kind: "skill",
+        operation: "skill-install:scenario/ask-insuremo",
+        commands: ["npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool add insuremo-skills -g -a universal -s ask-insuremo -l --skip-update-check"],
+        exitCode: 1,
+        stdout: "",
+        stderr: "npm ERR! network _auth=*** fetch failed",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        error: { code: "non-zero-exit", message: "IMO CLI exited with code 1" },
+        nodeVersion: "v22.19.0",
+        platform: "darwin",
+        arch: "arm64",
+        occurredAt: "2026-09-06T09:00:00.000Z",
+      },
+      scratchCwd: "/tmp/dsh-home/scratch",
+    };
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/skill-install")) {
+        expect((init?.body as string)).toContain("ask-insuremo");
+        return jsonResponse({ ok: false, error: { code: "non-zero-exit", message: "npm ERR! network fetch failed" } });
+      }
+      if (url.includes("/actions/imo-diagnosis")) return jsonResponse({ ok: true, result: scenarioDiagnosis });
+      return jsonResponse(fixtureView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = renderCard(sessions);
+    const toggle = await view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
+    toggle.click();
+    // The scenario install fails at the PREVIEW (dry-run) stage offline.
+    (await view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) })).click();
+    await view.findByText(new RegExp(zh.skillsScenarioFailed));
+    // The failure carries a diagnosis affordance; clicking it stages the draft.
+    view.getByRole("button", { name: zh.diagButton }).click();
+    await view.findByText(zh.diagOpening);
+    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", "setDraft:session-3", "open:session-3"]);
+    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(draft).toContain("Skills 场景/来源安装");
+    expect(draft).toContain("skill-install:scenario/ask-insuremo");
+    expect(draft).toContain("-l --skip-update-check");
+    expect(draft).toContain("错误：non-zero-exit: IMO CLI exited with code 1");
+    expect(draft).toContain("请分析失败原因并给出修复步骤。");
+    view.unmount();
+  });
+
   it("an empty diagnosis store answers no-data without touching sessions", async () => {
     const sessions: DiagnosisSessions = { open: vi.fn(), create: vi.fn(async () => "x"), setDraft: vi.fn() };
     const failed = await renderFailedInstall({ sessions, diagnosis: { available: false } });

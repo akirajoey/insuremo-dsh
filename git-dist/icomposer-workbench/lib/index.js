@@ -17372,6 +17372,10 @@ var FailureDiagnosisStore = class {
 			stderrTruncated: stderr.truncated || capture$3.streams.stderrLossy,
 			...capture$3.packageManager === void 0 ? {} : { packageManager: capture$3.packageManager },
 			...capture$3.registry === void 0 ? {} : { registry: capture$3.registry },
+			...capture$3.error === void 0 ? {} : { error: {
+				code: capture$3.error.code,
+				message: redactSecrets(capture$3.error.message)
+			} },
 			nodeVersion: process.version,
 			platform: process.platform,
 			arch: process.arch,
@@ -29464,13 +29468,36 @@ async function previewSkillAction(ctx, skills, activation, action, config$1, sig
 	if (activationSnapshot === void 0) return failure$1("pre-check-failed", "skill activation state is unavailable");
 	if (action.kind === SKILL_INSTALL_KIND) {
 		const command = actionCommand(action, config$1.command);
-		const run = await runCapture(ctx.subprocess, {
+		const previewArgs = installArgs(action, true);
+		const run = await runCaptureDetailed(ctx.subprocess, {
 			command,
-			args: installArgs(action, true),
+			args: previewArgs,
 			timeoutMs: config$1.timeoutMs,
 			signal
 		});
-		if (!run.ok) return runFailure(run, command === SKILLS_TOOL_COMMAND);
+		if (!run.ok) {
+			const unavailable = command === SKILLS_TOOL_COMMAND && run.error.code === "not-found";
+			failureDiagnosis.record({
+				kind: "skill",
+				operation: skillDiagnosisOperation(action),
+				commands: [`${command} ${previewArgs.join(" ")}`],
+				exitCode: run.error.exitCode ?? null,
+				streams: {
+					stdout: run.detail?.stdout ?? "",
+					stderr: run.detail?.stderr ?? "",
+					stdoutLossy: run.detail?.stdoutLossy ?? false,
+					stderrLossy: run.detail?.stderrLossy ?? false
+				},
+				error: unavailable ? {
+					code: "tool-unavailable",
+					message: "npx is unavailable; install Node.js/npm to sync Skills"
+				} : {
+					code: run.error.code,
+					message: run.error.message
+				}
+			});
+			return runFailure(run, command === SKILLS_TOOL_COMMAND);
+		}
 		const candidateNames = parsePreviewNames(run.value.stdout.text);
 		return {
 			ok: true,
@@ -29609,6 +29636,11 @@ function collectNames(value, names) {
 		"items",
 		"available"
 	]) collectNames(record[key], names);
+}
+/** Diagnosis label for one action: kind plus the install source when present. */
+function skillDiagnosisOperation(action) {
+	if (action.kind !== SKILL_INSTALL_KIND) return action.kind;
+	return `skill-install:${action.source.type}/${action.source.value}`;
 }
 function runFailure(run, skillsTool) {
 	const error$2 = run.error;
@@ -30143,8 +30175,8 @@ var ImoSkillActionsService = class extends Service {
 			timeoutMs: this.#config.timeoutMs,
 			signal
 		});
-		if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
 		this.captureRunDiagnosis(pending, command, args, run);
+		if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
 		const recovery = await recoverInventory({
 			ctx: this.ctx,
 			skills: this.#skills,
@@ -30188,9 +30220,10 @@ var ImoSkillActionsService = class extends Service {
 	captureRunDiagnosis(pending, command, args, run) {
 		if (run.ok) return;
 		if (pending.input.kind !== SKILL_INSTALL_KIND && pending.input.kind !== SKILL_UPDATE_KIND) return;
+		const unavailable = run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND;
 		failureDiagnosis.record({
 			kind: "skill",
-			operation: diagnosisOperation(pending),
+			operation: skillDiagnosisOperation(pending.input),
 			commands: [`${command} ${args.join(" ")}`],
 			exitCode: run.error.exitCode ?? null,
 			streams: {
@@ -30198,6 +30231,13 @@ var ImoSkillActionsService = class extends Service {
 				stderr: run.detail?.stderr ?? "",
 				stdoutLossy: run.detail?.stdoutLossy ?? false,
 				stderrLossy: run.detail?.stderrLossy ?? false
+			},
+			error: unavailable ? {
+				code: "tool-unavailable",
+				message: "npx is unavailable; install Node.js/npm to sync Skills"
+			} : {
+				code: run.error.code,
+				message: run.error.message
 			}
 		});
 	}
@@ -30407,8 +30447,8 @@ var ImoSkillActionsService = class extends Service {
 			timeoutMs: this.#config.timeoutMs,
 			signal
 		});
-		if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
 		this.captureRunDiagnosis(pending, command, args, run);
+		if (!run.ok && run.error.code === "not-found" && command === SKILLS_TOOL_COMMAND) return executionFailure("tool-unavailable", "npx is unavailable; install Node.js/npm to sync Skills", operationId$1);
 		const recovery = await recoverInventory({
 			ctx: this.ctx,
 			skills: this.#skills,
@@ -30567,12 +30607,6 @@ function executionFailure(code, message, operationId$1) {
 			...operationId$1 === void 0 ? {} : { operationId: operationId$1 }
 		}
 	};
-}
-/** Diagnosis label for one pending action: kind plus the install source when present. */
-function diagnosisOperation(pending) {
-	if (pending.input.kind !== SKILL_INSTALL_KIND) return pending.input.kind;
-	const source = pending.input.source;
-	return `skill-install:${source.type}/${source.value}`;
 }
 
 //#endregion
