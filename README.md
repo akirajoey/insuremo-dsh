@@ -72,7 +72,7 @@ overview 200 断言持续守护。开发调试请使用分发包安装路径。
 
 ## 运行要求
 
-- Harness 基线:99f6f02(@deepseek-ai/* rc.7 系列);peer 版本声明为
+- Harness 基线:85d8062c8a(本地 master,含未上游提交 TASK-080 8e53387839/TASK-081 c6f268060c/TASK-082 85d8062c8a,需先在本地克隆同步这三个提交);peer 版本声明为
   `*`,在基线内解析,超出基线未经测试。
 - react ^18.2.0(客户端 UI)。
 - Host Web 组合提供 `directoryPicker`；解释卡片的原生文件选择使用 Harness 的 `@deepseek-ai/dsh-native-command`（argv-only、无 shell、支持 abort）。
