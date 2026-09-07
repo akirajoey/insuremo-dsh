@@ -10,14 +10,14 @@ modified by the Workbench packages.
 - Node.js `^22.19.0 || >=24.0.0`
 - pnpm `11.7.0`
 - the Harness checkout at `../deepseek-harness`, fixed to commit
-  `85d8062c8aecaf3c24bc84d45ba20c9223d40789`. This pin points at the local
-  Harness master and carries three not-yet-upstream commits: TASK-080
-  `8e53387839efd4f04c9dba068e69f434dee3aa06`, TASK-081
-  `c6f268060c13a628bd38ff3ae212f688da95e847`, and TASK-082
-  `85d8062c8aecaf3c24bc84d45ba20c9223d40789`. If a fresh clone cannot resolve
-  the pin, sync those three commits first (fetch from the project clone or
-  cherry-pick) — otherwise client capabilities such as the diagnosis draft
-  prefill (`setDraft`) are missing.
+  `85d8062c8aecaf3c24bc84d45ba20c9223d40789`. This pin is the
+  typecheck/development baseline only (out-of-tree types resolve against the
+  local checkout). The shipped plugin targets the UNMODIFIED official
+  rc.7 runtime: the install/update diagnosis hand-off (TASK-088) rides
+  official rc.7 seams only — the dedicated persistent "install diagnostics"
+  Workspace (`workspaces.create`/`connectWorkspace`), `sessions.open`, and
+  the session-scope `inputActions.setDraft` standard kit — with a visible
+  clipboard fallback. No 080–082 local patches are required at runtime.
 
 ### Prepare the Harness baseline on a new machine
 

@@ -3,7 +3,7 @@ import { ChevronIcon } from "./ChevronIcon.tsx";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import { OVERVIEW_URL, parseOverview, type ImoOverviewView } from "./overview.ts";
 import { postAction } from "./actions.ts";
-import { buildDiagnosisText, handOffDiagnosis, type DiagnosisActionPayload, type DiagnosisSessions } from "./diagnosis.ts";
+import { buildDiagnosisText, handOffDiagnosis, waitForDiagnosisPrefill, type DiagnosisActionPayload, type DiagnosisFaces } from "./diagnosis.ts";
 import type { InsuremoLocaleKey } from "./locales.ts";
 import css from "./InsuremoCard.module.css";
 
@@ -11,7 +11,7 @@ import css from "./InsuremoCard.module.css";
 export type InsuremoCardProps = PropsRuntime<"settings.plugin.item">
   & PropsLocale<"settings.insuremo">
   & { /** Narrow sessions face for the diagnosis hand-off (wired by apply; tests inject a double). */
-      diagnosisSessions?: DiagnosisSessions };
+      diagnosisFaces?: DiagnosisFaces };
 
 type LoadState =
   | { readonly status: "loading" }
@@ -111,8 +111,8 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
             {state.status === "error" ? <p className={css.error}>{t("error")}</p> : null}
             {state.status === "ready" ? (
               <>
-                <ImoRegion t={t} imo={state.view.imo} onChanged={() => void this.silentReload()} sessions={this.props.diagnosisSessions} />
-                <SkillsRegion t={t} skills={state.view.skills} onChanged={() => void this.silentReload()} sessions={this.props.diagnosisSessions} />
+                <ImoRegion t={t} imo={state.view.imo} onChanged={() => void this.silentReload()} faces={this.props.diagnosisFaces} />
+                <SkillsRegion t={t} skills={state.view.skills} onChanged={() => void this.silentReload()} faces={this.props.diagnosisFaces} />
                 {state.view.ici !== undefined ? <IciRegion t={t} ici={state.view.ici} /> : null}
               </>
             ) : null}
@@ -128,7 +128,7 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
 
 type Translate = (key: InsuremoLocaleKey) => string;
 
-function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; sessions?: DiagnosisSessions }): ReactNode {
+function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; faces?: DiagnosisFaces }): ReactNode {
   const { t, imo } = props;
   if (imo.code === "fast-uncached") {
     // Cold fast projection: loading skeleton, never a false "not detected".
@@ -152,8 +152,8 @@ function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged
         {imo.updateAvailable && imo.target !== undefined ? ` → ${imo.target}` : ""}
       </p>
       {failed ? <p role="alert" data-imo-state="error" className={css.error}>{t("imoDetectFailed")}: {imo.code}</p> : null}
-      {imo.available ? <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} sessions={props.sessions} /> : null}
-      {missing ? <InstallButton t={t} onChanged={props.onChanged} sessions={props.sessions} /> : null}
+      {imo.available ? <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} faces={props.faces} /> : null}
+      {missing ? <InstallButton t={t} onChanged={props.onChanged} faces={props.faces} /> : null}
     </div>
   );
 }
@@ -164,7 +164,7 @@ function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged
  * the user-level @insuremo registry write and the global package install —
  * and the failure line explains why retrying without rollback is safe.
  */
-class InstallButton extends Component<{ t: Translate; onChanged: () => void; sessions?: DiagnosisSessions }, { install: UpgradeState }> {
+class InstallButton extends Component<{ t: Translate; onChanged: () => void; faces?: DiagnosisFaces }, { install: UpgradeState }> {
   override state: { install: UpgradeState } = { install: { phase: "idle" } };
 
   private async run(): Promise<void> {
@@ -200,7 +200,7 @@ class InstallButton extends Component<{ t: Translate; onChanged: () => void; ses
           {this.state.install.phase === "failed" ? <span role="alert" data-install="failed" className={css.error}>{t("cliInstallFailed")}: {this.state.install.message}</span> : null}
         </p>
         {this.state.install.phase === "failed" ? (
-          <p className={css.hint} data-install-retry="1">{t("cliInstallRetryHint")} <DiagnoseButton t={t} kind="imo-cli" sessions={this.props.sessions} /></p>
+          <p className={css.hint} data-install-retry="1">{t("cliInstallRetryHint")} <DiagnoseButton t={t} kind="imo-cli" faces={this.props.faces} /></p>
         ) : (
           <p className={css.hint}>{t("cliInstallHint")}</p>
         )}
@@ -210,19 +210,30 @@ class InstallButton extends Component<{ t: Translate; onChanged: () => void; ses
 }
 
 /**
- * One failure state's 诊断 affordance (TASK-083): rendered only while that
- * install/update operation is failed. Clicking fetches the last failure's
- * full capture from the `imo-diagnosis` action, opens an ungrouped scratch
- * session, and stages the assembled Chinese diagnosis text (create →
- * setDraft → open). Runtimes without draft staging fall back to the
- * clipboard with a paste hint. Never rendered on success or without a
- * captured failure.
+ * One failure state's 诊断 affordance (TASK-083/088): rendered only while
+ * that install/update operation is failed. Clicking fetches the last
+ * failure's full capture from the `imo-diagnosis` action, then hands off
+ * through the dedicated persistent "install diagnostics" Workspace on
+ * official rc.7 seams only (TASK-088): the target session id is what
+ * `connectWorkspace` resolves, the prefill lands via the session-scope
+ * `inputActions.setDraft` kit, and the status reflects the REAL outcome —
+ * a dropped (user-first) or unconfirmed prefill never reports "prefilled".
+ * A visible copy button is the always-available fallback. Never rendered on
+ * success or without a captured failure; never auto-sends.
  */
 class DiagnoseButton extends Component<
-  { t: Translate; kind: "imo-cli" | "skill"; sessions?: DiagnosisSessions },
-  { phase: "idle" | "busy" | "staged" | "copied" | "clipboard-only" | "no-data" | "failed" }
+  { t: Translate; kind: "imo-cli" | "skill"; faces?: DiagnosisFaces },
+  {
+    phase: "idle" | "busy" | "prefilled" | "draft-occupied" | "copied" | "clipboard-only" | "no-data" | "failed";
+    lastText: string | null;
+    copyFlash: boolean;
+  }
 > {
-  override state: { phase: "idle" | "busy" | "staged" | "copied" | "clipboard-only" | "no-data" | "failed" } = { phase: "idle" };
+  override state: {
+    phase: "idle" | "busy" | "prefilled" | "draft-occupied" | "copied" | "clipboard-only" | "no-data" | "failed";
+    lastText: string | null;
+    copyFlash: boolean;
+  } = { phase: "idle", lastText: null, copyFlash: false };
 
   private async run(): Promise<void> {
     this.setState({ phase: "busy" });
@@ -231,26 +242,50 @@ class DiagnoseButton extends Component<
       this.setState({ phase: "failed" });
       return;
     }
-    if (!outcome.result.available || outcome.result.diagnosis === undefined || outcome.result.scratchCwd === undefined) {
+    if (!outcome.result.available || outcome.result.diagnosis === undefined || outcome.result.diagnosisCwd === undefined) {
       this.setState({ phase: "no-data" });
       return;
     }
     try {
       const text = buildDiagnosisText(outcome.result.diagnosis, this.props.t);
-      const handoff = await handOffDiagnosis(text, outcome.result.scratchCwd, this.props.sessions);
-      this.setState({ phase: handoff.kind });
-      // Close the settings modal through the shell's own close path: the
-      // panel's document-level Escape handler is the one public channel a
-      // card can reach (owner props supply no close callback).
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      const handoff = await handOffDiagnosis(text, outcome.result.diagnosisCwd, this.props.faces, this.props.t("diagWorkspaceTitle"));
+      if (handoff.kind === "clipboard-only") {
+        this.setState({ phase: "clipboard-only", lastText: text });
+        return;
+      }
+      // Honest status: wait for the real prefill outcome (the session-scope
+      // entry writes only while the draft is empty) before claiming success.
+      const prefill = await waitForDiagnosisPrefill(handoff.sessionId, 1500);
+      if (prefill === "written") {
+        this.setState({ phase: "prefilled", lastText: text });
+        // Close the settings modal through the shell's own close path so the
+        // user lands on the prefilled diagnosis session (owner props supply
+        // no close callback; the panel's document-level Escape handler is
+        // the one public channel a card can reach).
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        return;
+      }
+      this.setState({ phase: prefill === "dropped" ? "draft-occupied" : "copied", lastText: text });
     } catch {
       this.setState({ phase: "failed" });
     }
   }
 
+  private copyText(): void {
+    const { lastText } = this.state;
+    if (lastText === null) return;
+    void navigator.clipboard.writeText(lastText)
+      .then(() => {
+        this.setState({ copyFlash: true });
+        setTimeout(() => { this.setState({ copyFlash: false }); }, 1500);
+      })
+      .catch(() => { /* clipboard unavailable: the hint stays; user can select manually */ });
+  }
+
   override render(): ReactNode {
     const { t } = this.props;
     const busy = this.state.phase === "busy";
+    const showCopy = this.state.lastText !== null && (this.state.phase === "prefilled" || this.state.phase === "draft-occupied" || this.state.phase === "copied" || this.state.phase === "clipboard-only");
     return (
       <span data-diagnosis="1">
         {" "}
@@ -264,9 +299,20 @@ class DiagnoseButton extends Component<
         >
           {busy ? t("diagBusy") : t("diagButton")}
         </button>
-        {this.state.phase === "staged" ? <span role="status" data-diagnosis-state="staged" className={css.hint}>{t("diagOpening")}</span> : null}
-        {this.state.phase === "copied" || this.state.phase === "clipboard-only" ? (
-          <span role="status" data-diagnosis-state="copied" className={css.hint}>{t("diagCopied")}</span>
+        {this.state.phase === "prefilled" ? <span role="status" data-diagnosis-state="prefilled" className={css.hint}>{t("diagPrefilled")}</span> : null}
+        {this.state.phase === "draft-occupied" ? <span role="status" data-diagnosis-state="draft-occupied" className={css.hint}>{t("diagDraftOccupied")}</span> : null}
+        {this.state.phase === "copied" ? <span role="status" data-diagnosis-state="copied" className={css.hint}>{t("diagCopied")}</span> : null}
+        {this.state.phase === "clipboard-only" ? <span role="status" data-diagnosis-state="clipboard-only" className={css.hint}>{t("diagClipboardOnly")}</span> : null}
+        {showCopy ? (
+          <button
+            type="button"
+            className={css.action}
+            data-diagnosis-copy="1"
+            onClick={() => this.copyText()}
+            aria-label={t("diagCopy")}
+          >
+            {this.state.copyFlash ? t("diagCopyFlash") : t("diagCopy")}
+          </button>
         ) : null}
         {this.state.phase === "no-data" ? <span role="alert" data-diagnosis-state="no-data" className={css.error}>{t("diagNoData")}</span> : null}
         {this.state.phase === "failed" ? <span role="alert" data-diagnosis-state="failed" className={css.error}>{t("diagActionFailed")}</span> : null}
@@ -280,7 +326,7 @@ interface UpgradeState {
   readonly message?: string;
 }
 
-class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; sessions?: DiagnosisSessions }, { upgrade: UpgradeState }> {
+class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; faces?: DiagnosisFaces }, { upgrade: UpgradeState }> {
   override state: { upgrade: UpgradeState } = { upgrade: { phase: "idle" } };
 
   private async run(): Promise<void> {
@@ -307,7 +353,7 @@ class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"
         {this.state.upgrade.phase === "done" ? <span role="status" data-upgrade="done">{t("cliUpdated")}: {this.state.upgrade.message}</span> : null}
         {this.state.upgrade.phase === "failed" ? (
           <span role="alert" data-upgrade="failed" className={css.error}>
-            {t("cliUpdateFailed")}: {this.state.upgrade.message} <DiagnoseButton t={t} kind="imo-cli" sessions={this.props.sessions} />
+            {t("cliUpdateFailed")}: {this.state.upgrade.message} <DiagnoseButton t={t} kind="imo-cli" faces={this.props.faces} />
           </span>
         ) : null}
       </p>
@@ -360,7 +406,7 @@ interface ScenarioRunState {
 }
 
 class SkillsRegion extends Component<
-  { t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void; sessions?: DiagnosisSessions },
+  { t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void; faces?: DiagnosisFaces },
   {
     rows: Readonly<Record<string, SkillRowState>>;
     updatingAll: boolean;
@@ -512,7 +558,7 @@ class SkillsRegion extends Component<
         {run.phase === "failed" ? (
           <p role="alert" data-scenario="failed" className={css.error}>
             {t("skillsScenarioFailed")}: {run.message}{run.diff === undefined ? "" : ` · ${diffText(run.diff, t)}`} · {t("skillsRetryHint")}
-            <DiagnoseButton t={t} kind="skill" sessions={this.props.sessions} />
+            <DiagnoseButton t={t} kind="skill" faces={this.props.faces} />
           </p>
         ) : null}
         {this.state.updateResult !== undefined && this.state.updateResult.status === "completed" ? (
@@ -521,7 +567,7 @@ class SkillsRegion extends Component<
         {this.state.updateError !== undefined ? (
           <p role="alert" data-update="failed" className={css.error}>
             {t("skillsUpdateFailed")}: {this.state.updateError}{this.state.updateResult !== undefined && this.state.updateResult.status !== "completed" ? ` · ${diffText(diffOf(this.state.updateResult), t)}` : ""} · {t("skillsRetryHint")}
-            <DiagnoseButton t={t} kind="skill" sessions={this.props.sessions} />
+            <DiagnoseButton t={t} kind="skill" faces={this.props.faces} />
           </p>
         ) : null}
         {cold ? (

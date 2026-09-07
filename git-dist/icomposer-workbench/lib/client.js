@@ -243,20 +243,6 @@ async function postAction$1(action, body, signal) {
 
 //#endregion
 //#region ../ui-insuremo-settings/src/client/diagnosis.ts
-/** Human label for an operation; scenario/source installs carry a suffix. */
-function operationLabel(operation, t) {
-	if (operation === "imo-install") return t("diagOpImoInstall");
-	if (operation === "imo-upgrade") return t("diagOpImoUpgrade");
-	if (operation === "skill-update") return t("diagOpSkillUpdate");
-	if (operation === "skill-install") return t("diagOpSkillInstall");
-	if (operation.startsWith("skill-install:")) return t("diagOpSkillInstallSource");
-	return operation;
-}
-/** One rendered command line with its step number. */
-function commandLines(commands, t) {
-	if (commands.length === 0) return t("diagNoCommands");
-	return commands.map((command, index) => `${index + 1}. ${command}`).join("\n");
-}
 /** Assemble the localized diagnosis text the user reviews and sends. */
 function buildDiagnosisText(diagnosis, t) {
 	const scene = operationLabel(diagnosis.operation, t);
@@ -295,30 +281,165 @@ function buildDiagnosisText(diagnosis, t) {
 		t("diagClosing")
 	].join("\n");
 }
-/** Whether the running client runtime exposes the draft-staging API (≥ TASK-082). */
-function supportsDraftStaging(sessions) {
-	return sessions !== void 0 && typeof sessions.setDraft === "function" && typeof sessions.create === "function";
+/** Human label for an operation; scenario/source installs carry a suffix. */
+function operationLabel(operation, t) {
+	if (operation === "imo-install") return t("diagOpImoInstall");
+	if (operation === "imo-upgrade") return t("diagOpImoUpgrade");
+	if (operation === "skill-update") return t("diagOpSkillUpdate");
+	if (operation === "skill-install") return t("diagOpSkillInstall");
+	if (operation.startsWith("skill-install:")) return t("diagOpSkillInstallSource");
+	return operation;
+}
+/** One rendered command line with its step number. */
+function commandLines(commands, t) {
+	if (commands.length === 0) return t("diagNoCommands");
+	return commands.map((command, index) => `${index + 1}. ${command}`).join("\n");
+}
+const pendingPrefills = /* @__PURE__ */ new Map();
+const settledPrefills = /* @__PURE__ */ new Map();
+const prefillListeners = /* @__PURE__ */ new Set();
+function notifyPrefillListeners() {
+	for (const listener of [...prefillListeners]) listener();
+}
+/** Subscribe to queue/settle changes; returns the disposer. */
+function subscribeDiagnosisPrefill(listener) {
+	prefillListeners.add(listener);
+	return () => {
+		prefillListeners.delete(listener);
+	};
+}
+/** Queue the first-send diagnosis text for one session (overwrites a prior queue for the same id) and wake subscribers. */
+function queueDiagnosisPrefill(sessionId, text) {
+	pendingPrefills.set(sessionId, text);
+	notifyPrefillListeners();
 }
 /**
-* Open the diagnosis session in the mandated order, or fall back to the
-* clipboard when the runtime predates draft staging. Never sends anything:
-* the user reviews the prefilled text and presses Enter.
+* Consume one session's queued diagnosis text. The text returns only when
+* the composer draft is empty; a non-empty draft (user typed first) consumes
+* and drops the queue entry so the user's own text is never overwritten, and
+* settles the outcome as "dropped" immediately.
 */
-async function handOffDiagnosis(text, scratchCwd, sessions) {
-	if (supportsDraftStaging(sessions)) {
-		const sessionId = await sessions.create({ cwd: scratchCwd });
-		sessions.setDraft(sessionId, text);
-		sessions.open(sessionId);
-		return { kind: "staged" };
-	}
-	if (sessions !== void 0 && typeof sessions.create === "function") {
+function takeDiagnosisPrefill(sessionId, draftIsEmpty) {
+	const text = pendingPrefills.get(sessionId);
+	if (text === void 0) return void 0;
+	pendingPrefills.delete(sessionId);
+	if (!draftIsEmpty) settledPrefills.set(sessionId, "dropped");
+	notifyPrefillListeners();
+	return draftIsEmpty ? text : void 0;
+}
+/** The entry records a successful `setDraft` write so the card can report the real outcome. */
+function settleDiagnosisPrefill(sessionId, outcome) {
+	settledPrefills.set(sessionId, outcome);
+	notifyPrefillListeners();
+}
+/**
+* Wait for one session's prefill outcome (or timeout). Never throws: a
+* timeout means the outcome is unknown — the caller falls back to the copy
+* hint instead of claiming a prefill that may not have landed.
+*/
+function waitForDiagnosisPrefill(sessionId, timeoutMs) {
+	const settled = settledPrefills.get(sessionId);
+	if (settled !== void 0) return Promise.resolve(settled);
+	return new Promise((resolve) => {
+		let done = false;
+		let dispose;
+		const finish = (outcome) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			dispose?.();
+			resolve(outcome);
+		};
+		const timer = setTimeout(() => finish("timeout"), timeoutMs);
+		dispose = subscribeDiagnosisPrefill(() => {
+			const outcome = settledPrefills.get(sessionId);
+			if (outcome !== void 0) finish(outcome);
+		});
+	});
+}
+/** In-flight workspace creation keyed by cwd, so concurrent clicks coalesce into one create. */
+const ensuringWorkspaces = /* @__PURE__ */ new Map();
+function findDiagnosisWorkspace(workspaces, cwd) {
+	const items = workspaces.list.getSnapshot().items;
+	return items.find((item) => item.path === cwd)?.workspaceId;
+}
+/**
+* Resolve the dedicated install-diagnostics Workspace: reuse the workspace
+* already registered for `cwd` (restart reuse), else register it once.
+* Concurrent callers share one in-flight attempt; the Host's own create is
+* idempotent by path, so even a list-lag race cannot produce a duplicate.
+* The friendly title is applied once, best-effort, right after creation —
+* a reuse never renames, so a user's own title edit survives.
+*/
+async function ensureDiagnosisWorkspace(workspaces, cwd, title) {
+	const existing = findDiagnosisWorkspace(workspaces, cwd);
+	if (existing !== void 0) return existing;
+	const inflight = ensuringWorkspaces.get(cwd);
+	if (inflight !== void 0) return inflight;
+	const attempt = (async () => {
+		const created = await workspaces.create({ path: cwd });
+		try {
+			await workspaces.rename?.(created.workspaceId, title);
+		} catch {}
+		return created.workspaceId;
+	})().finally(() => {
+		ensuringWorkspaces.delete(cwd);
+	});
+	ensuringWorkspaces.set(cwd, attempt);
+	return attempt;
+}
+/** Best-effort clipboard write; `false` means the user must rely on the visible copy button. */
+async function copyToClipboard(text) {
+	try {
 		await navigator.clipboard.writeText(text);
-		const sessionId = await sessions.create({ cwd: scratchCwd });
-		sessions.open(sessionId);
-		return { kind: "copied" };
+		return true;
+	} catch {
+		return false;
 	}
-	await navigator.clipboard.writeText(text);
-	return { kind: "clipboard-only" };
+}
+/**
+* Open the dedicated diagnosis Workspace's session and queue the prefill.
+* Every step rides an unmodified official rc.7 seam; any failure falls back
+* to the clipboard WITHOUT creating or opening any session, so the user can
+* never be left in an inert Workspace-less composer. The target session id
+* is the value `connectWorkspace` RESOLVES (reuse or fresh — never guessed
+* from the current view). Never sends anything: the user reviews the
+* prefilled text, picks a model, and presses Enter.
+*/
+async function handOffDiagnosis(text, diagnosisCwd, faces, workspaceTitle) {
+	const workspaces = faces?.workspaces;
+	const sessions = faces?.sessions;
+	if (workspaces === void 0 || sessions === void 0) return {
+		kind: "clipboard-only",
+		copied: await copyToClipboard(text),
+		reason: "faces-unavailable"
+	};
+	let workspaceId;
+	try {
+		workspaceId = await ensureDiagnosisWorkspace(workspaces, diagnosisCwd, workspaceTitle);
+	} catch {
+		return {
+			kind: "clipboard-only",
+			copied: await copyToClipboard(text),
+			reason: "workspace-failed"
+		};
+	}
+	let sessionId;
+	try {
+		sessionId = await workspaces.connectWorkspace(workspaceId);
+	} catch {
+		return {
+			kind: "clipboard-only",
+			copied: await copyToClipboard(text),
+			reason: "connect-failed"
+		};
+	}
+	queueDiagnosisPrefill(sessionId, text);
+	sessions.open(sessionId);
+	return {
+		kind: "opened",
+		sessionId
+	};
 }
 
 //#endregion
@@ -333,30 +454,30 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"description": "wbf3683280_description",
+	"meta": "wbf3683280_meta",
 	"hint": "wbf3683280_hint",
+	"chevron": "wbf3683280_chevron",
+	"header": "wbf3683280_header",
 	"pending": "wbf3683280_pending",
 	"refresh": "wbf3683280_refresh",
-	"controls": "wbf3683280_controls",
-	"header": "wbf3683280_header",
-	"chevronOpen": "wbf3683280_chevronOpen",
-	"headText": "wbf3683280_headText",
-	"controlThumb": "wbf3683280_controlThumb",
-	"footer": "wbf3683280_footer",
-	"list": "wbf3683280_list",
-	"card": "wbf3683280_card",
-	"cardOpen": "wbf3683280_cardOpen",
-	"chevron": "wbf3683280_chevron",
 	"action": "wbf3683280_action",
-	"select": "wbf3683280_select",
-	"region": "wbf3683280_region",
-	"body": "wbf3683280_body",
-	"toggle": "wbf3683280_toggle",
-	"name": "wbf3683280_name",
-	"controlTrack": "wbf3683280_controlTrack",
-	"meta": "wbf3683280_meta",
+	"headText": "wbf3683280_headText",
+	"cardOpen": "wbf3683280_cardOpen",
+	"footer": "wbf3683280_footer",
+	"error": "wbf3683280_error",
+	"controlThumb": "wbf3683280_controlThumb",
 	"small": "wbf3683280_small",
-	"error": "wbf3683280_error"
+	"select": "wbf3683280_select",
+	"list": "wbf3683280_list",
+	"name": "wbf3683280_name",
+	"chevronOpen": "wbf3683280_chevronOpen",
+	"toggle": "wbf3683280_toggle",
+	"region": "wbf3683280_region",
+	"card": "wbf3683280_card",
+	"controlTrack": "wbf3683280_controlTrack",
+	"controls": "wbf3683280_controls",
+	"body": "wbf3683280_body",
+	"description": "wbf3683280_description"
 };
 
 //#endregion
@@ -483,13 +604,13 @@ var InsuremoCard = class extends react.Component {
 							t,
 							imo: state.view.imo,
 							onChanged: () => void this.silentReload(),
-							sessions: this.props.diagnosisSessions
+							faces: this.props.diagnosisFaces
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillsRegion, {
 							t,
 							skills: state.view.skills,
 							onChanged: () => void this.silentReload(),
-							sessions: this.props.diagnosisSessions
+							faces: this.props.diagnosisFaces
 						}),
 						state.view.ici !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IciRegion, {
 							t,
@@ -551,12 +672,12 @@ function ImoRegion(props) {
 				t,
 				imo,
 				onChanged: props.onChanged,
-				sessions: props.sessions
+				faces: props.faces
 			}) : null,
 			missing ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InstallButton, {
 				t,
 				onChanged: props.onChanged,
-				sessions: props.sessions
+				faces: props.faces
 			}) : null
 		]
 	});
@@ -630,7 +751,7 @@ var InstallButton = class extends react.Component {
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 					t,
 					kind: "imo-cli",
-					sessions: this.props.sessions
+					faces: this.props.faces
 				})
 			]
 		}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
@@ -640,16 +761,23 @@ var InstallButton = class extends react.Component {
 	}
 };
 /**
-* One failure state's 诊断 affordance (TASK-083): rendered only while that
-* install/update operation is failed. Clicking fetches the last failure's
-* full capture from the `imo-diagnosis` action, opens an ungrouped scratch
-* session, and stages the assembled Chinese diagnosis text (create →
-* setDraft → open). Runtimes without draft staging fall back to the
-* clipboard with a paste hint. Never rendered on success or without a
-* captured failure.
+* One failure state's 诊断 affordance (TASK-083/088): rendered only while
+* that install/update operation is failed. Clicking fetches the last
+* failure's full capture from the `imo-diagnosis` action, then hands off
+* through the dedicated persistent "install diagnostics" Workspace on
+* official rc.7 seams only (TASK-088): the target session id is what
+* `connectWorkspace` resolves, the prefill lands via the session-scope
+* `inputActions.setDraft` kit, and the status reflects the REAL outcome —
+* a dropped (user-first) or unconfirmed prefill never reports "prefilled".
+* A visible copy button is the always-available fallback. Never rendered on
+* success or without a captured failure; never auto-sends.
 */
 var DiagnoseButton = class extends react.Component {
-	state = { phase: "idle" };
+	state = {
+		phase: "idle",
+		lastText: null,
+		copyFlash: false
+	};
 	async run() {
 		this.setState({ phase: "busy" });
 		const outcome = await postAction$1("imo-diagnosis", { kind: this.props.kind });
@@ -657,22 +785,51 @@ var DiagnoseButton = class extends react.Component {
 			this.setState({ phase: "failed" });
 			return;
 		}
-		if (!outcome.result.available || outcome.result.diagnosis === void 0 || outcome.result.scratchCwd === void 0) {
+		if (!outcome.result.available || outcome.result.diagnosis === void 0 || outcome.result.diagnosisCwd === void 0) {
 			this.setState({ phase: "no-data" });
 			return;
 		}
 		try {
 			const text = buildDiagnosisText(outcome.result.diagnosis, this.props.t);
-			const handoff = await handOffDiagnosis(text, outcome.result.scratchCwd, this.props.sessions);
-			this.setState({ phase: handoff.kind });
-			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+			const handoff = await handOffDiagnosis(text, outcome.result.diagnosisCwd, this.props.faces, this.props.t("diagWorkspaceTitle"));
+			if (handoff.kind === "clipboard-only") {
+				this.setState({
+					phase: "clipboard-only",
+					lastText: text
+				});
+				return;
+			}
+			const prefill = await waitForDiagnosisPrefill(handoff.sessionId, 1500);
+			if (prefill === "written") {
+				this.setState({
+					phase: "prefilled",
+					lastText: text
+				});
+				document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+				return;
+			}
+			this.setState({
+				phase: prefill === "dropped" ? "draft-occupied" : "copied",
+				lastText: text
+			});
 		} catch {
 			this.setState({ phase: "failed" });
 		}
 	}
+	copyText() {
+		const { lastText } = this.state;
+		if (lastText === null) return;
+		navigator.clipboard.writeText(lastText).then(() => {
+			this.setState({ copyFlash: true });
+			setTimeout(() => {
+				this.setState({ copyFlash: false });
+			}, 1500);
+		}).catch(() => {});
+	}
 	render() {
 		const { t } = this.props;
 		const busy = this.state.phase === "busy";
+		const showCopy = this.state.lastText !== null && (this.state.phase === "prefilled" || this.state.phase === "draft-occupied" || this.state.phase === "copied" || this.state.phase === "clipboard-only");
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 			"data-diagnosis": "1",
 			children: [
@@ -686,17 +843,37 @@ var DiagnoseButton = class extends react.Component {
 					"aria-label": busy ? t("diagBusy") : t("diagButton"),
 					children: busy ? t("diagBusy") : t("diagButton")
 				}),
-				this.state.phase === "staged" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				this.state.phase === "prefilled" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					role: "status",
-					"data-diagnosis-state": "staged",
+					"data-diagnosis-state": "prefilled",
 					className: InsuremoCard_module_css_default.hint,
-					children: t("diagOpening")
+					children: t("diagPrefilled")
 				}) : null,
-				this.state.phase === "copied" || this.state.phase === "clipboard-only" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				this.state.phase === "draft-occupied" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					role: "status",
+					"data-diagnosis-state": "draft-occupied",
+					className: InsuremoCard_module_css_default.hint,
+					children: t("diagDraftOccupied")
+				}) : null,
+				this.state.phase === "copied" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					role: "status",
 					"data-diagnosis-state": "copied",
 					className: InsuremoCard_module_css_default.hint,
 					children: t("diagCopied")
+				}) : null,
+				this.state.phase === "clipboard-only" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					role: "status",
+					"data-diagnosis-state": "clipboard-only",
+					className: InsuremoCard_module_css_default.hint,
+					children: t("diagClipboardOnly")
+				}) : null,
+				showCopy ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: InsuremoCard_module_css_default.action,
+					"data-diagnosis-copy": "1",
+					onClick: () => this.copyText(),
+					"aria-label": t("diagCopy"),
+					children: this.state.copyFlash ? t("diagCopyFlash") : t("diagCopy")
 				}) : null,
 				this.state.phase === "no-data" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					role: "alert",
@@ -766,7 +943,7 @@ var UpgradeButton = class extends react.Component {
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 						t,
 						kind: "imo-cli",
-						sessions: this.props.sessions
+						faces: this.props.faces
 					})
 				]
 			}) : null
@@ -985,7 +1162,7 @@ var SkillsRegion = class extends react.Component {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 							t,
 							kind: "skill",
-							sessions: this.props.sessions
+							faces: this.props.faces
 						})
 					]
 				}) : null,
@@ -1012,7 +1189,7 @@ var SkillsRegion = class extends react.Component {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 							t,
 							kind: "skill",
-							sessions: this.props.sessions
+							faces: this.props.faces
 						})
 					]
 				}) : null,
@@ -1078,6 +1255,50 @@ function IciRegion(props) {
 			ici.explainWorkspaces
 		] })]
 	});
+}
+
+//#endregion
+//#region ../ui-insuremo-settings/src/client/prefill-slot.tsx
+/**
+* Consume the queued diagnosis prefill for the current session. Two triggers
+* make consumption independent of mount timing: the effect after EVERY
+* render (the map lookup is the guard, so an empty map is a cheap no-op),
+* and a subscription to the registry that re-renders the entry when a queue
+* or settle lands — an ALREADY-MOUNTED entry consumes without waiting for
+* any unrelated render. Delivery rules: write only while the composer draft
+* is empty (user-first), consume at most once, settle the real outcome so
+* the card never claims a prefill that did not land.
+*/
+function DiagnosisPrefillEntry({ sessionId, useInput, inputActions }) {
+	const draft = useInput((state) => state.draft);
+	const [, bump] = (0, react.useReducer)((count) => count + 1, 0);
+	(0, react.useEffect)(() => subscribeDiagnosisPrefill(bump), [bump]);
+	(0, react.useEffect)(() => {
+		if (inputActions === void 0) return;
+		const text = takeDiagnosisPrefill(sessionId, draft === "");
+		if (text === void 0) return;
+		try {
+			inputActions.setDraft(text);
+			settleDiagnosisPrefill(sessionId, "written");
+		} catch {}
+	});
+	return null;
+}
+/**
+* Register the silent prefill entry once per client apply. The inject/register
+* pair mirrors the official ui-agent-preset header-actions registration. The
+* slot is `conversation.input.dock` (NOT `conversation.session.header.actions`):
+* rc.7 hides the whole session header (`ConversationSessionHeader`
+* `hideChrome`) while a fresh session is blank, so a header-actions entry can
+* never mount to prefill a NEW diagnosis session — while `input.dock` renders
+* for every current session, blank/HERO included.
+*/
+function registerDiagnosisPrefillSlot(ctx) {
+	ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+		name: "conversation.input.dock",
+		id: "insuremo-diagnosis-prefill",
+		order: 900
+	}, DiagnosisPrefillEntry));
 }
 
 //#endregion
@@ -1176,8 +1397,12 @@ const zh$2 = {
 	diagButton: "诊断",
 	diagBusy: "正在生成诊断…",
 	diagNoData: "暂无诊断数据：请先复现一次失败，再点击诊断。",
-	diagOpening: "已创建诊断会话并预填内容，请检查后发送。",
-	diagCopied: "诊断内容已复制，请粘贴到新会话输入框",
+	diagPrefilled: "已打开安装诊断会话并预填：请选择模型后手动发送。",
+	diagDraftOccupied: "诊断会话输入框已有内容，未覆盖；请用「复制诊断文本」后粘贴发送。",
+	diagCopied: "诊断文本已复制：如输入框未预填，请粘贴后发送。",
+	diagClipboardOnly: "未能打开诊断会话；诊断文本已复制，可粘贴到任意会话发送。",
+	diagCopy: "复制诊断文本",
+	diagCopyFlash: "已复制",
 	diagActionFailed: "诊断生成失败",
 	diagTitleImo: "IMO CLI安装/更新失败诊断",
 	diagTitleSkill: "Skills安装/更新失败诊断",
@@ -1193,6 +1418,7 @@ const zh$2 = {
 	diagStderrTruncated: "（stderr 已截断）",
 	diagErrorLabel: "错误：",
 	diagEnvironmentLabel: "环境信息：",
+	diagWorkspaceTitle: "安装诊断",
 	diagClosing: "请分析失败原因并给出修复步骤。",
 	diagOpImoInstall: "IMO CLI 一键安装",
 	diagOpImoUpgrade: "IMO CLI 更新",
@@ -1293,8 +1519,12 @@ const en$2 = {
 	diagButton: "Diagnose",
 	diagBusy: "Preparing diagnosis…",
 	diagNoData: "No diagnosis captured yet: reproduce a failure first, then click Diagnose.",
-	diagOpening: "A diagnosis session was created and prefilled — review and send.",
-	diagCopied: "Diagnosis text copied — paste it into a new session composer",
+	diagPrefilled: "Diagnosis session opened and prefilled: pick a model, then send manually.",
+	diagDraftOccupied: "The diagnosis composer already had content — nothing was overwritten. Use “Copy diagnosis text” to copy and paste it.",
+	diagCopied: "Diagnosis text copied: if the composer was not prefilled, paste and send.",
+	diagClipboardOnly: "Could not open a diagnosis session; the text was copied — paste it into any session.",
+	diagCopy: "Copy diagnosis text",
+	diagCopyFlash: "Copied",
 	diagActionFailed: "Could not prepare the diagnosis",
 	diagTitleImo: "IMO CLI install/update failure diagnosis",
 	diagTitleSkill: "Skills install/update failure diagnosis",
@@ -1310,6 +1540,7 @@ const en$2 = {
 	diagStderrTruncated: "(stderr truncated)",
 	diagErrorLabel: "Error: ",
 	diagEnvironmentLabel: "Environment:",
+	diagWorkspaceTitle: "Install Diagnostics",
 	diagClosing: "Please analyze the cause of the failure and provide fix steps.",
 	diagOpImoInstall: "IMO CLI one-click install",
 	diagOpImoUpgrade: "IMO CLI update",
@@ -1322,22 +1553,45 @@ const en$2 = {
 //#region ../ui-insuremo-settings/src/client/index.ts
 /** Locale namespace contributed by the InsureMO settings card. */
 const NS$2 = "settings.insuremo";
-/** Register the localized InsureMO Plugins-tab card. */
+/** Services used by the client-side contribution. The card wrapper reads the
+* `sessions`/`workspaces` faces directly off ctx at render time (slot owner
+* props supply no runtime), so both must be declared here — cordis property
+* guards throw on an undeclared service access. */
+const inject$1 = [
+	"slots",
+	"locale",
+	"sessions",
+	"workspaces"
+];
+/**
+* Register the InsureMO Plugins-tab card and the diagnosis prefill entry
+* (TASK-088). Both close over the client runtime because slot owner props
+* supply no runtime: the card's hand-off reaches the official
+* `ctx.workspaces`/`ctx.sessions` faces, and the prefill entry rides the
+* official session-scope standard kit (`inputActions.setDraft`). A missing
+* or unusable face degrades to the clipboard fallback — no DSH seam outside
+* the unmodified rc.7 contracts is ever touched.
+*/
 function apply$1(ctx) {
 	ctx.effect(() => ctx.locale.register(NS$2, {
 		zh: zh$2,
 		en: en$2
 	}), "ui-insuremo-settings: dictionaries");
+	registerDiagnosisPrefillSlot(ctx);
 	ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
 		name: "settings.plugin.item",
 		key: "insuremo",
 		id: "insuremo",
 		locale: NS$2
 	}, function InsuremoCardWithRuntime(props) {
-		const sessions = ctx.sessions;
+		const source = ctx;
+		const diagnosisFaces = {
+			workspaces: source.workspaces,
+			sessions: source.sessions
+		};
 		return (0, react.createElement)(InsuremoCard, {
 			...props,
-			diagnosisSessions: sessions
+			diagnosisFaces
 		});
 	}));
 }
@@ -1367,16 +1621,16 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 }
 var BrandChrome_module_css_default = {
 	"wordmarkLight": "wb06155adc_wordmarkLight",
-	"dsh": "wb06155adc_dsh",
-	"railMark": "wb06155adc_railMark",
-	"driver": "wb06155adc_driver",
 	"wordmarkInner": "wb06155adc_wordmarkInner",
-	"wordmarkHost": "wb06155adc_wordmarkHost",
-	"railHost": "wb06155adc_railHost",
-	"heroHost": "wb06155adc_heroHost",
+	"wordmarkDark": "wb06155adc_wordmarkDark",
 	"heroMark": "wb06155adc_heroMark",
+	"dsh": "wb06155adc_dsh",
+	"wordmarkHost": "wb06155adc_wordmarkHost",
 	"wordmark": "wb06155adc_wordmark",
-	"wordmarkDark": "wb06155adc_wordmarkDark"
+	"driver": "wb06155adc_driver",
+	"railMark": "wb06155adc_railMark",
+	"railHost": "wb06155adc_railHost",
+	"heroHost": "wb06155adc_heroHost"
 };
 
 //#endregion
@@ -1654,9 +1908,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
+	"driver": "wb8730382c_driver",
 	"rowIcons": "wb8730382c_rowIcons",
-	"icon": "wb8730382c_icon",
-	"driver": "wb8730382c_driver"
+	"icon": "wb8730382c_icon"
 };
 
 //#endregion
@@ -1948,18 +2202,18 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"hint": "wba94a6eca_hint",
-	"pickerHeader": "wba94a6eca_pickerHeader",
 	"error": "wba94a6eca_error",
-	"rowName": "wba94a6eca_rowName",
-	"closeMark": "wba94a6eca_closeMark",
 	"picker": "wba94a6eca_picker",
 	"row": "wba94a6eca_row",
-	"trigger": "wba94a6eca_trigger",
-	"dot": "wba94a6eca_dot",
 	"label": "wba94a6eca_label",
+	"pickerHeader": "wba94a6eca_pickerHeader",
+	"hint": "wba94a6eca_hint",
+	"dot": "wba94a6eca_dot",
 	"rowMark": "wba94a6eca_rowMark",
-	"list": "wba94a6eca_list"
+	"list": "wba94a6eca_list",
+	"closeMark": "wba94a6eca_closeMark",
+	"rowName": "wba94a6eca_rowName",
+	"trigger": "wba94a6eca_trigger"
 };
 
 //#endregion
@@ -2277,6 +2531,8 @@ const en$1 = {
 //#region ../ui-insuremo-status/src/client/index.ts
 /** Locale namespace contributed by the InsureMO sidebar status. */
 const NS$1 = "sidebar.insuremo";
+/** Services used by the client-side sidebar contribution. */
+const inject$2 = ["slots", "locale"];
 /** Register the static localized status badge in the sidebar footer. */
 function apply$2(ctx) {
 	ctx.effect(() => ctx.locale.register(NS$1, {
@@ -2326,11 +2582,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"row": "wb6cd975b4_row",
-	"digest": "wb6cd975b4_digest",
-	"kind": "wb6cd975b4_kind",
 	"status": "wb6cd975b4_status",
-	"icon": "wb6cd975b4_icon"
+	"kind": "wb6cd975b4_kind",
+	"icon": "wb6cd975b4_icon",
+	"row": "wb6cd975b4_row",
+	"digest": "wb6cd975b4_digest"
 };
 
 //#endregion
@@ -2387,24 +2643,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"selectedReference": "wb13b81332_selectedReference",
-	"errorText": "wb13b81332_errorText",
-	"runMeta": "wb13b81332_runMeta",
 	"status": "wb13b81332_status",
-	"field": "wb13b81332_field",
-	"actions": "wb13b81332_actions",
-	"summary": "wb13b81332_summary",
-	"progress": "wb13b81332_progress",
-	"header": "wb13b81332_header",
-	"session": "wb13b81332_session",
-	"hint": "wb13b81332_hint",
-	"done": "wb13b81332_done",
-	"batchJobRow": "wb13b81332_batchJobRow",
-	"referenceActions": "wb13b81332_referenceActions",
-	"consent": "wb13b81332_consent",
-	"card": "wb13b81332_card",
 	"error": "wb13b81332_error",
-	"fieldset": "wb13b81332_fieldset"
+	"errorText": "wb13b81332_errorText",
+	"summary": "wb13b81332_summary",
+	"card": "wb13b81332_card",
+	"header": "wb13b81332_header",
+	"hint": "wb13b81332_hint",
+	"selectedReference": "wb13b81332_selectedReference",
+	"field": "wb13b81332_field",
+	"fieldset": "wb13b81332_fieldset",
+	"progress": "wb13b81332_progress",
+	"referenceActions": "wb13b81332_referenceActions",
+	"actions": "wb13b81332_actions",
+	"session": "wb13b81332_session",
+	"done": "wb13b81332_done",
+	"consent": "wb13b81332_consent",
+	"batchJobRow": "wb13b81332_batchJobRow",
+	"runMeta": "wb13b81332_runMeta"
 };
 
 //#endregion
@@ -3455,6 +3711,16 @@ const en = {
 //#region ../ui-workbench-jobs/src/client/index.ts
 /** Locale namespace contributed by the Workbench job conversation node. */
 const NS = "conversation.workbenchJob";
+/**
+* Runtime services required by the keyed render contribution. The current
+* phase consumes future node data through props; sessions remains an explicit
+* dependency so the jobs mirror is available when host node assembly lands.
+*/
+const inject$3 = [
+	"slots",
+	"locale",
+	"sessions"
+];
 /** Register dictionaries plus the generic Job node and interactive ICI toolview. */
 function apply$3(ctx) {
 	ctx.effect(() => ctx.locale.register(NS, {
@@ -3475,12 +3741,17 @@ function apply$3(ctx) {
 
 //#endregion
 //#region src/client/index.ts
-/** Union of the three sub-plugins' client injects. */
-const inject = [
-	"slots",
-	"locale",
-	"sessions"
-];
+/**
+* Union of the three sub-plugins' client injects, derived from each
+* sub-plugin's own declaration so a new service requirement never drifts:
+* the loader provides every listed service up front and cordis guards any
+* undeclared ctx property access at runtime.
+*/
+const inject = [...new Set([
+	...inject$1,
+	...inject$2,
+	...inject$3
+])];
 /** Register dictionaries + slot contributions for all three UI blocks. */
 function apply(ctx) {
 	apply$1(ctx);

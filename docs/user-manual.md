@@ -114,8 +114,9 @@ git -C ~/deepseek-harness checkout 85d8062c8aecaf3c24bc84d45ba20c9223d40789
 # 基线说明（TASK-084）：该 pin 指向本地 harness master，含三个未上游提交——
 # TASK-080 8e53387839efd4f04c9dba068e69f434dee3aa06、TASK-081
 # c6f268060c13a628bd38ff3ae212f688da95e847、TASK-082 85d8062c8aecaf3c24bc84d45ba20c9223d40789。
-# 克隆无法直接检出该 commit 时，先从项目提供的 harness 克隆 fetch 这三个提交
-# （或 cherry-pick 同名改动），否则 Workbench 的诊断预填（setDraft）等客户端能力缺失。
+# 该 pin 仅为类型检查/开发基线；插件运行目标是未修改的官方 rc.7——
+# 诊断预填（TASK-088）只使用官方 rc.7 契约（专用"安装诊断"工作区 + 会话级
+# inputActions.setDraft 标准件 + 可见复制兜底），运行时无需 080–082 本地补丁。
 
 # 2. 构建全部包（含 apps/cli 的 lib/bin.js——源码检出默认没有这个产物）
 cd ~/deepseek-harness

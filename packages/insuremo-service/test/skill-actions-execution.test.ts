@@ -321,7 +321,7 @@ test("TASK-085 E2E (same process): real runDirect preview failure → real imo-d
       assert.equal(direct.ok, false);
 
       // ...and the REAL HTTP route reads the same store: available with the
-      // captured dry-run argv, redacted output, and a created scratch dir.
+      // captured dry-run argv, redacted output, and a created diagnosis dir.
       const response = await post();
       assert.equal(response.status, 200);
       const payload = await response.json();
@@ -333,8 +333,8 @@ test("TASK-085 E2E (same process): real runDirect preview failure → real imo-d
       assert.ok(payload.result.diagnosis.stderr.includes("_auth=***"));
       assert.ok(!payload.result.diagnosis.stderr.includes("wire-leak"));
       assert.equal(payload.result.diagnosis.error.code, "non-zero-exit");
-      assert.equal(payload.result.scratchCwd, join(home, "scratch"));
-      await assert.doesNotReject(() => stat(join(home, "scratch")));
+      assert.equal(payload.result.diagnosisCwd, join(home, "install-diagnostics"));
+      await assert.doesNotReject(() => stat(join(home, "install-diagnostics")));
     } finally {
       await new Promise(resolve => httpServer.close(resolve));
     }

@@ -7,12 +7,17 @@
  * bundles would do, minus two extra loader entries.
  */
 import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
-import { apply as settingsApply } from "../../../ui-insuremo-settings/src/client/index.ts";
-import { apply as statusApply } from "../../../ui-insuremo-status/src/client/index.ts";
-import { apply as jobsApply } from "../../../ui-workbench-jobs/src/client/index.ts";
+import { apply as settingsApply, inject as settingsInject } from "../../../ui-insuremo-settings/src/client/index.ts";
+import { apply as statusApply, inject as statusInject } from "../../../ui-insuremo-status/src/client/index.ts";
+import { apply as jobsApply, inject as jobsInject } from "../../../ui-workbench-jobs/src/client/index.ts";
 
-/** Union of the three sub-plugins' client injects. */
-export const inject = ["slots", "locale", "sessions"];
+/**
+ * Union of the three sub-plugins' client injects, derived from each
+ * sub-plugin's own declaration so a new service requirement never drifts:
+ * the loader provides every listed service up front and cordis guards any
+ * undeclared ctx property access at runtime.
+ */
+export const inject = [...new Set([...settingsInject, ...statusInject, ...jobsInject])];
 
 /** Register dictionaries + slot contributions for all three UI blocks. */
 export function apply(ctx: ClientContext): void {

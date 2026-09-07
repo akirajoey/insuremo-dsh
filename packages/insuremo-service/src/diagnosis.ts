@@ -143,12 +143,15 @@ export class FailureDiagnosisStore {
 export const failureDiagnosis = new FailureDiagnosisStore();
 
 /**
- * The harness home's scratch directory — the same `$DSH_HOME` (default
- * `~/.dsh`) the bootstrap resolves, plus the `scratch` segment the harness
- * uses for Workspace-less sessions. Computed on the Host because browser
- * clients cannot resolve host paths.
+ * The harness home's dedicated install-diagnostics directory — the same
+ * `$DSH_HOME` (default `~/.dsh`) the bootstrap resolves, plus the
+ * `install-diagnostics` segment. Computed on the Host because browser clients
+ * cannot resolve host paths. This directory backs the persistent
+ * "install diagnostics" Workspace the diagnosis hand-off registers
+ * (TASK-088): application-data space, independent of every business project
+ * cwd, created on first use and reused across restarts.
  */
-export function scratchDirectory(env: NodeJS.ProcessEnv = process.env): string {
+export function diagnosisDirectory(env: NodeJS.ProcessEnv = process.env): string {
   const configured = typeof env.DSH_HOME === "string" ? env.DSH_HOME.trim() : "";
-  return resolve(configured === "" ? join(homedir(), ".dsh") : configured, "scratch");
+  return resolve(configured === "" ? join(homedir(), ".dsh") : configured, "install-diagnostics");
 }

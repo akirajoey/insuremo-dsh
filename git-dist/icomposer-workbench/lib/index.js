@@ -17399,14 +17399,17 @@ var FailureDiagnosisStore = class {
 /** Process-wide store shared by the install/skill kernels and the action route. */
 const failureDiagnosis = new FailureDiagnosisStore();
 /**
-* The harness home's scratch directory — the same `$DSH_HOME` (default
-* `~/.dsh`) the bootstrap resolves, plus the `scratch` segment the harness
-* uses for Workspace-less sessions. Computed on the Host because browser
-* clients cannot resolve host paths.
+* The harness home's dedicated install-diagnostics directory — the same
+* `$DSH_HOME` (default `~/.dsh`) the bootstrap resolves, plus the
+* `install-diagnostics` segment. Computed on the Host because browser clients
+* cannot resolve host paths. This directory backs the persistent
+* "install diagnostics" Workspace the diagnosis hand-off registers
+* (TASK-088): application-data space, independent of every business project
+* cwd, created on first use and reused across restarts.
 */
-function scratchDirectory(env = process.env) {
+function diagnosisDirectory(env = process.env) {
 	const configured = typeof env.DSH_HOME === "string" ? env.DSH_HOME.trim() : "";
-	return resolve(configured === "" ? join(homedir(), ".dsh") : configured, "scratch");
+	return resolve(configured === "" ? join(homedir(), ".dsh") : configured, "install-diagnostics");
 }
 
 //#endregion
@@ -20006,16 +20009,16 @@ function mountWriteRoutes(ctx) {
 			ok: true,
 			result: { available: false }
 		};
-		const scratchCwd = scratchDirectory();
+		const diagnosisCwd = diagnosisDirectory();
 		try {
-			await mkdir(scratchCwd, { recursive: true });
+			await mkdir(diagnosisCwd, { recursive: true });
 		} catch {}
 		return {
 			ok: true,
 			result: {
 				available: true,
 				diagnosis,
-				scratchCwd
+				diagnosisCwd
 			}
 		};
 	}));

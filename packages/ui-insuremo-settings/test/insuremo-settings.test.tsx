@@ -7,7 +7,11 @@ import { resolveSlotLabel } from "@deepseek-ai/dsh-client-ui-slots";
 import { apply, inject, NS } from "../src/client/index.ts";
 import { OVERVIEW_URL } from "../src/client/overview.ts";
 import { InsuremoCard } from "../src/client/InsuremoCard.tsx";
-import { buildDiagnosisText, type DiagnosisSessions } from "../src/client/diagnosis.ts";
+import {
+  buildDiagnosisText, ensureDiagnosisWorkspace, handOffDiagnosis, peekDiagnosisPrefill, queueDiagnosisPrefill,
+  settleDiagnosisPrefill, waitForDiagnosisPrefill, type DiagnosisFaces, type DiagnosisWorkspaces,
+} from "../src/client/diagnosis.ts";
+import { DiagnosisPrefillEntry } from "../src/client/prefill-slot.tsx";
 import { en, zh, type InsuremoLocaleKey } from "../src/client/locales.ts";
 
 
@@ -630,14 +634,14 @@ const DIAGNOSIS_PAYLOAD = {
     arch: "arm64",
     occurredAt: "2026-09-05T08:00:00.000Z",
   },
-  scratchCwd: "/tmp/dsh-home/scratch",
+  diagnosisCwd: "/tmp/dsh-home/install-diagnostics",
 } as const;
 
-/** Render the card directly with a localized t seat and an injected sessions double. */
-function renderCard(diagnosisSessions?: DiagnosisSessions, translate: (key: InsuremoLocaleKey) => string = key => zh[key]) {
+/** Render the card directly with a localized t seat and injected runtime faces. */
+function renderCard(diagnosisFaces?: DiagnosisFaces, translate: (key: InsuremoLocaleKey) => string = key => zh[key]) {
   const props = {
     t: translate,
-    diagnosisSessions,
+    diagnosisFaces,
   } as unknown as ComponentProps<typeof InsuremoCard>;
   return render(<InsuremoCard {...props} />);
 }
@@ -653,7 +657,7 @@ async function renderFailedInstall(overrides: Record<string, unknown> = {}) {
     return jsonResponse(unavailableView);
   });
   vi.stubGlobal("fetch", fetchMock);
-  const view = renderCard(overrides.sessions as DiagnosisSessions | undefined);
+  const view = renderCard(overrides.faces as DiagnosisFaces | undefined);
   const toggle = await view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
   toggle.click();
   await view.findByRole("button", { name: zh.cliInstall });
@@ -662,57 +666,48 @@ async function renderFailedInstall(overrides: Record<string, unknown> = {}) {
   return { view, fetchMock };
 }
 
-describe("install/update one-click diagnosis (TASK-083)", () => {
+describe("install/update one-click diagnosis (TASK-083/088)", () => {
   afterEach(() => { cleanup(); });
 
-  it("TASK-086: buildDiagnosisText localizes every label per Settings locale and keeps raw material verbatim", () => {
-    const payload = {
-      kind: "skill",
-      operation: "skill-install:scenario/ask-insuremo",
-      commands: ["npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool add insuremo-skills -g -a universal -s ask-insuremo -l --skip-update-check"],
-      exitCode: null,
-      stdout: "",
-      stderr: "",
-      stdoutTruncated: true,
-      stderrTruncated: false,
-      nodeVersion: "v22.19.0",
-      platform: "darwin",
-      arch: "arm64",
-      occurredAt: "2026-09-06T09:00:00.000Z",
-      error: { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" },
+  /**
+   * Faces double over ONLY official rc.7 contract members (IWorkspaces:
+   * list/create/connectWorkspace/rename; ISessions: open). `items` is the
+   * live list the ensure step scans, so create→list-projection behaves like
+   * the real manager's synchronous merge.
+   */
+  function makeFaces(options: {
+    items?: ReadonlyArray<{ workspaceId: string; path?: string }>;
+    createError?: Error;
+    connectError?: Error;
+    sessionIdPrefix?: string;
+  } = {}) {
+    const items = [...(options.items ?? [])];
+    const calls: string[] = [];
+    const workspaces = {
+      list: { getSnapshot: () => ({ items }) },
+      create: vi.fn(async (input: { path: string }) => {
+        calls.push(`create:${input.path}`);
+        if (options.createError !== undefined) throw options.createError;
+        const workspaceId = `ws-${items.length + 1}`;
+        items.push({ workspaceId, path: input.path });
+        return { workspaceId };
+      }),
+      connectWorkspace: vi.fn(async (workspaceId: string) => {
+        calls.push(`connect:${workspaceId}`);
+        if (options.connectError !== undefined) throw options.connectError;
+        return `${options.sessionIdPrefix ?? "session-of"}-${workspaceId}`;
+      }),
+      rename: vi.fn(async (workspaceId: string, title: string) => {
+        calls.push(`rename:${workspaceId}:${title}`);
+        return { workspaceId, title };
+      }),
     };
-    const zhText = buildDiagnosisText(payload, key => zh[key]);
-    // zh: every structural label localized; raw material verbatim.
-    expect(zhText).toContain("Skills安装/更新失败诊断");
-    expect(zhText).toContain("场景：Skills 场景/来源安装（skill-install:scenario/ask-insuremo）");
-    expect(zhText).toContain("发生时间：2026-09-06T09:00:00.000Z");
-    expect(zhText).toContain("执行的命令：");
-    expect(zhText).toContain("exitCode: （未运行）");
-    expect(zhText).toContain("错误：tool-unavailable: npx is unavailable; install Node.js/npm to sync Skills");
-    expect(zhText).toContain("（空）");
-    expect(zhText).toContain("（stdout 已截断）");
-    expect(zhText).not.toContain("（stderr 已截断）");
-    expect(zhText).toContain("环境信息：");
-    expect(zhText).toContain("请分析失败原因并给出修复步骤。");
-    expect(zhText).toContain("-l --skip-update-check");
-    expect(zhText).toContain("os: darwin arm64");
-
-    const enText = buildDiagnosisText(payload, key => en[key]);
-    expect(enText).toContain("Skills install/update failure diagnosis");
-    expect(enText).toContain("Scenario: Skills scenario/source install (skill-install:scenario/ask-insuremo)");
-    expect(enText).toContain("Occurred at: 2026-09-06T09:00:00.000Z");
-    expect(enText).toContain("Executed commands:");
-    expect(enText).toContain("exitCode: (not run)");
-    expect(enText).toContain("Error: tool-unavailable: npx is unavailable; install Node.js/npm to sync Skills");
-    expect(enText).toContain("(empty)");
-    expect(enText).toContain("(stdout truncated)");
-    expect(enText).not.toContain("(stderr truncated)");
-    expect(enText).toContain("Environment:");
-    expect(enText).toContain("Please analyze the cause of the failure and provide fix steps.");
-    // Raw material identical across locales except labels.
-    const strip = (text: string): string[] => text.split("\n").filter(line => /^\d+\. /.test(line) || line.startsWith("node:") || line.startsWith("os:") || line.startsWith("stdout") || line.startsWith("stderr") || line === "```");
-    expect(strip(enText)).toEqual(strip(zhText));
-  });
+    const sessions = {
+      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
+    };
+    const faces: DiagnosisFaces = { workspaces: workspaces as unknown as DiagnosisWorkspaces, sessions };
+    return { faces, workspaces, sessions, calls, items };
+  }
 
   it("the diagnosis button appears only in the failed state", async () => {
     const failed = await renderFailedInstall();
@@ -738,58 +733,128 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     ok.unmount();
   });
 
-  it("diagnosis opens a scratch session staged create → setDraft → open, then closes settings via Escape", async () => {
-    const calls: string[] = [];
-    const sessions: DiagnosisSessions = {
-      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
-      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-9"; }),
-      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}:${text.length}`); }),
-    };
+  it("TASK-088: diagnose registers the dedicated install-diagnostics Workspace, opens the connectWorkspace-resolved session, and reports prefilled only after the entry writes", async () => {
+    const faces = makeFaces();
     const dispatchSpy = vi.spyOn(document, "dispatchEvent");
-    const failed = await renderFailedInstall({ sessions });
+    const failed = await renderFailedInstall({ faces });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
-    await failed.view.findByText(zh.diagOpening);
-    // The harness hard order: create → setDraft → open (staging before navigation).
-    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", expect.stringMatching(/^setDraft:session-9:/), "open:session-9"]);
-    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
-    expect(draft).toContain("IMO CLI安装/更新失败诊断");
-    expect(draft).toContain("npm config set @insuremo:registry <registry>");
-    expect(draft).toContain("exitCode: 1");
-    expect(draft).toContain("npm ERR");
-    expect(draft).toContain("_auth=***");
-    expect(draft).toContain("请分析失败原因并给出修复步骤。");
-    expect(draft).not.toContain("leaky-value");
-    // The settings shell's own Escape channel is the close path.
+    // The hand-off keys everything by the session id connectWorkspace RESOLVED
+    // (reuse or fresh) — never a current-view guess.
+    const sessionId = "session-of-ws-1";
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
+    const queued = peekDiagnosisPrefill(sessionId) ?? "";
+    expect(queued).toContain("IMO CLI安装/更新失败诊断");
+    expect(queued).toContain("npm config set @insuremo:registry <registry>");
+    expect(queued).toContain("exitCode: 1");
+    expect(queued).toContain("npm ERR");
+    expect(queued).toContain("_auth=***");
+    expect(queued).toContain("请分析失败原因并给出修复步骤。");
+    // Official order: create → rename(安装诊断) → connect → open.
+    expect(faces.calls).toEqual([
+      "create:/tmp/dsh-home/install-diagnostics",
+      "rename:ws-1:安装诊断",
+      "connect:ws-1",
+      `open:${sessionId}`,
+    ]);
+    // Honest status: no "prefilled" claim before the entry settles the write.
+    expect(failed.view.queryByText(zh.diagPrefilled)).toBeNull();
+    settleDiagnosisPrefill(sessionId, "written");
+    await failed.view.findByText(zh.diagPrefilled);
+    // The settings shell's own Escape channel closes the panel only on a real
+    // prefill, landing the user on the diagnosis session.
     const escape = dispatchSpy.mock.calls.map(call => call[0]).find(event => event instanceof KeyboardEvent && event.key === "Escape");
     expect(escape).toBeTruthy();
+    // The visible copy fallback rides every terminal state with text.
+    expect(failed.view.getByRole("button", { name: zh.diagCopy })).toBeTruthy();
     dispatchSpy.mockRestore();
   });
 
-  it("without draft staging the text is copied and the ungrouped session still opens", async () => {
+  it("TASK-088: a dropped prefill (user-first) never claims prefilled and keeps the visible copy fallback", async () => {
+    const faces = makeFaces({ sessionIdPrefix: "s-drop" });
+    const failed = await renderFailedInstall({ faces });
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    const sessionId = "s-drop-ws-1";
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
+    settleDiagnosisPrefill(sessionId, "dropped");
+    await failed.view.findByText(zh.diagDraftOccupied);
+    expect(failed.view.queryByText(zh.diagPrefilled)).toBeNull();
+    expect(failed.view.getByRole("button", { name: zh.diagCopy })).toBeTruthy();
+  });
+
+  it("TASK-088: workspace-registration failure copies the text and creates/opens NO session (never an inert Ungrouped)", async () => {
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const sessions: DiagnosisSessions = {
-      open: vi.fn(),
-      create: vi.fn(async () => "session-7"),
-    };
-    const failed = await renderFailedInstall({ sessions });
+    const faces = makeFaces({ createError: new Error("mkdir failed") });
+    const failed = await renderFailedInstall({ faces });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
-    await failed.view.findByText(zh.diagCopied);
+    await failed.view.findByText(zh.diagClipboardOnly);
     expect(writeText).toHaveBeenCalledTimes(1);
-    expect((writeText.mock.calls[0]?.[0] as string)).toContain("请分析失败原因并给出修复步骤。");
-    expect(sessions.create).toHaveBeenCalledWith({ cwd: "/tmp/dsh-home/scratch" });
-    expect(sessions.open).toHaveBeenCalledWith("session-7");
+    expect(writeText.mock.calls[0]?.[0] as string).toContain("请分析失败原因并给出修复步骤。");
+    expect(faces.workspaces.connectWorkspace).not.toHaveBeenCalled();
+    expect(faces.sessions.open).not.toHaveBeenCalled();
+    expect(failed.view.getByRole("button", { name: zh.diagCopy })).toBeTruthy();
+  });
+
+  it("TASK-088: connectWorkspace failure falls back to the clipboard and never opens a session", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const faces = makeFaces({ connectError: new Error("connect failed") });
+    const failed = await renderFailedInstall({ faces });
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    await failed.view.findByText(zh.diagClipboardOnly);
+    expect(faces.workspaces.create).toHaveBeenCalledTimes(1);
+    expect(faces.sessions.open).not.toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it("without runtime faces the text is copied and no workspace/session is touched", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const failed = await renderFailedInstall();
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    await failed.view.findByText(zh.diagClipboardOnly);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText.mock.calls[0]?.[0] as string).toContain("请分析失败原因并给出修复步骤。");
+  });
+
+  it("TASK-088: repeated clicks reuse the Workspace (create/rename once) and concurrent ensures coalesce", async () => {
+    const faces = makeFaces();
+    const failed = await renderFailedInstall({ faces });
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill("session-of-ws-1")).toBeDefined(); });
+    settleDiagnosisPrefill("session-of-ws-1", "written");
+    await failed.view.findByText(zh.diagPrefilled);
+    // Second click: the Workspace is found by path (restart reuse) — no
+    // second create, no rename; the same blank session reconnects.
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    await vi.waitFor(() => { expect(faces.workspaces.connectWorkspace).toHaveBeenCalledTimes(2); });
+    settleDiagnosisPrefill("session-of-ws-1", "written");
+    await failed.view.findByText(zh.diagPrefilled);
+    expect(faces.workspaces.create).toHaveBeenCalledTimes(1);
+    expect(faces.workspaces.rename).toHaveBeenCalledTimes(1);
+    expect(faces.sessions.open).toHaveBeenCalledTimes(2);
+    // Concurrent ensures share one in-flight attempt: a single create.
+    const slowItems: Array<{ workspaceId: string; path?: string }> = [];
+    const slow = {
+      list: { getSnapshot: () => ({ items: slowItems }) },
+      create: vi.fn(async (input: { path: string }) => {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        slowItems.push({ workspaceId: "ws-slow", path: input.path });
+        return { workspaceId: "ws-slow" };
+      }),
+      connectWorkspace: vi.fn(async (workspaceId: string) => `session-of-${workspaceId}`),
+      rename: vi.fn(async () => undefined),
+    };
+    const [a, b] = await Promise.all([
+      ensureDiagnosisWorkspace(slow as unknown as DiagnosisWorkspaces, "/tmp/dsh-home/install-diagnostics", "安装诊断"),
+      ensureDiagnosisWorkspace(slow as unknown as DiagnosisWorkspaces, "/tmp/dsh-home/install-diagnostics", "安装诊断"),
+    ]);
+    expect(a).toBe(b);
+    expect(slow.create).toHaveBeenCalledTimes(1);
   });
 
   it("an upgrade failure diagnoses under the imo-upgrade operation", async () => {
-    const writeText = vi.fn(async () => undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const calls: string[] = [];
-    const sessions: DiagnosisSessions = {
-      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
-      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-5"; }),
-      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}`); }),
-    };
+    const faces = makeFaces({ sessionIdPrefix: "s-up" });
     const upgradeDiagnosis = {
       ...DIAGNOSIS_PAYLOAD,
       diagnosis: { ...DIAGNOSIS_PAYLOAD.diagnosis, operation: "imo-upgrade" },
@@ -801,29 +866,25 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = renderCard(sessions);
+    const view = renderCard(faces);
     const toggle = await view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
     toggle.click();
     (await view.findByRole("button", { name: zh.cliUpdate })).click();
     await view.findByText(new RegExp(zh.cliUpdateFailed));
     expect(view.queryAllByRole("button", { name: zh.diagButton })).toHaveLength(1);
     view.getByRole("button", { name: zh.diagButton }).click();
-    await view.findByText(zh.diagOpening);
-    // The upgrade diagnosis flows through the same create → setDraft → open order.
-    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", "setDraft:session-5", "open:session-5"]);
-    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    const sessionId = "s-up-ws-1";
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
+    const draft = peekDiagnosisPrefill(sessionId) ?? "";
     expect(draft).toContain("IMO CLI安装/更新失败诊断");
     expect(draft).toContain("场景：IMO CLI 更新（imo-upgrade）");
+    settleDiagnosisPrefill(sessionId, "written");
+    await view.findByText(zh.diagPrefilled);
     view.unmount();
   });
 
   it("TASK-085: a failed scenario install diagnoses with the scenario identity and hands off the draft", async () => {
-    const calls: string[] = [];
-    const sessions: DiagnosisSessions = {
-      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
-      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-3"; }),
-      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}`); }),
-    };
+    const faces = makeFaces({ sessionIdPrefix: "s-sc" });
     const scenarioDiagnosis = {
       available: true,
       diagnosis: {
@@ -841,7 +902,7 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
         arch: "arm64",
         occurredAt: "2026-09-06T09:00:00.000Z",
       },
-      scratchCwd: "/tmp/dsh-home/scratch",
+      diagnosisCwd: "/tmp/dsh-home/install-diagnostics",
     };
     const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -853,32 +914,28 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = renderCard(sessions);
+    const view = renderCard(faces);
     const toggle = await view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
     toggle.click();
     // The scenario install fails at the PREVIEW (dry-run) stage offline.
     (await view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) })).click();
     await view.findByText(new RegExp(zh.skillsScenarioFailed));
-    // The failure carries a diagnosis affordance; clicking it stages the draft.
     view.getByRole("button", { name: zh.diagButton }).click();
-    await view.findByText(zh.diagOpening);
-    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", "setDraft:session-3", "open:session-3"]);
-    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    const sessionId = "s-sc-ws-1";
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
+    const draft = peekDiagnosisPrefill(sessionId) ?? "";
     expect(draft).toContain("Skills 场景/来源安装");
     expect(draft).toContain("skill-install:scenario/ask-insuremo");
     expect(draft).toContain("-l --skip-update-check");
     expect(draft).toContain("错误：non-zero-exit: IMO CLI exited with code 1");
     expect(draft).toContain("请分析失败原因并给出修复步骤。");
+    settleDiagnosisPrefill(sessionId, "written");
+    await view.findByText(zh.diagPrefilled);
     view.unmount();
   });
 
   it("TASK-086: en translator direct-render coverage (no locale switch)", async () => {
-    const calls: string[] = [];
-    const sessions: DiagnosisSessions = {
-      open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
-      create: vi.fn(async (opts: { cwd: string }) => { calls.push(`create:${opts.cwd}`); return "session-6"; }),
-      setDraft: vi.fn((id: string, text: string) => { calls.push(`setDraft:${id}`); }),
-    };
+    const faces = makeFaces({ sessionIdPrefix: "s-en" });
     const scenarioDiagnosis = {
       available: true,
       diagnosis: {
@@ -896,7 +953,7 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
         arch: "arm64",
         occurredAt: "2026-09-06T09:30:00.000Z",
       },
-      scratchCwd: "/tmp/dsh-home/scratch",
+      diagnosisCwd: "/tmp/dsh-home/install-diagnostics",
     };
     const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -909,15 +966,15 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     // English translator seat injected — it proves the click path consumes the
     // current seat, with NO runtime locale switching (that lives in the
     // same-instance switch case below).
-    const view = renderCard(sessions, key => en[key]);
+    const view = renderCard(faces, key => en[key]);
     const toggle = await view.findByRole("button", { name: new RegExp(`${en.expand}: ${en.title}`) });
     toggle.click();
     (await view.findByRole("button", { name: new RegExp(`^${en.skillsScenarioInstall}`) })).click();
     await view.findByText(new RegExp(en.skillsScenarioFailed));
     view.getByRole("button", { name: en.diagButton }).click();
-    await view.findByText(en.diagOpening);
-    expect(calls).toEqual(["create:/tmp/dsh-home/scratch", "setDraft:session-6", "open:session-6"]);
-    const draft = (sessions.setDraft as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    const sessionId = "s-en-ws-1";
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
+    const draft = peekDiagnosisPrefill(sessionId) ?? "";
     expect(draft).toContain("Skills install/update failure diagnosis");
     expect(draft).toContain("Scenario: Skills scenario/source install (skill-install:scenario/ask-insuremo)");
     expect(draft).toContain("Executed commands:");
@@ -931,6 +988,10 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     expect(draft).toContain("node: v22.19.0");
     expect(draft).not.toContain("场景：");
     expect(draft).not.toContain("请分析失败原因");
+    // The Workspace title follows the Settings locale at click time.
+    expect(faces.workspaces.rename).toHaveBeenCalledWith("ws-1", "Install Diagnostics");
+    settleDiagnosisPrefill(sessionId, "written");
+    await view.findByText(en.diagPrefilled);
     view.unmount();
   });
 
@@ -952,7 +1013,7 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
         arch: "arm64",
         occurredAt: "2026-09-06T09:45:00.000Z",
       },
-      scratchCwd: "/tmp/dsh-home/scratch",
+      diagnosisCwd: "/tmp/dsh-home/install-diagnostics",
     };
     const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -963,11 +1024,11 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     // A self-contained runtime: ONE mounted renderSlot instance for the whole
-    // case. Cordis forbids re-providing 'sessions', so the runtime's own
-    // TestSessions double is used, with the draft-staging members grafted/
-    // wrapped for observation (open/setDraft natively exist; create does not).
-    // A local localStorage stub covers SlotTestRuntime's dispose (this describe
-    // sits outside the outer beforeEach's stub scope).
+    // case. The runtime's native TestSessions/TestWorkspaces doubles carry
+    // the official faces; the dedicated Workspace is pre-seeded into the
+    // list, so every round exercises restart-reuse (create never called).
+    // A local localStorage stub covers SlotTestRuntime's dispose (this
+    // describe sits outside the outer beforeEach's stub scope).
     const storageValues = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => storageValues.get(key) ?? null,
@@ -982,12 +1043,17 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     const switchLocale = new LocaleRuntime(switchRuntime.ctx);
     switchRuntime.ctx.provide("locale", switchLocale);
     switchRuntime.slots.installLocale(switchLocale);
-    const setDraft = vi.fn((id: string, text: string) => { void id; void text; });
-    const open = vi.fn((id: string) => { void id; });
-    const create = vi.fn(async (opts: { cwd: string }) => { void opts; return "session-8"; });
-    (switchRuntime.sessions as unknown as Record<string, unknown>).create = create;
-    (switchRuntime.sessions as unknown as Record<string, unknown>).setDraft = setDraft;
-    (switchRuntime.sessions as unknown as Record<string, unknown>).open = open;
+    await switchRuntime.workspaces.update(draft => {
+      (draft.items as unknown[]) = [{
+        workspaceId: "ws-diagnosis", title: "安装诊断", path: "/tmp/dsh-home/install-diagnostics", sessionIds: [],
+      }];
+    });
+    // The connectWorkspace-resolved session id is not a fixture session, so
+    // the native TestSessions.open (which requires listed ids) is grafted to
+    // a recording spy — the hand-off contract under test is the CALL, and the
+    // workspaces double proves reuse independently.
+    const openSpy = vi.fn((id: string) => { void id; });
+    (switchRuntime.sessions as unknown as Record<string, unknown>).open = openSpy;
     const switchFeature = await switchRuntime.mount({ inject, apply });
     try {
       const view = switchRuntime.renderSlot("settings.plugin.item", {});
@@ -997,12 +1063,15 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
       (await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) })).click();
       await view.view.findByText(new RegExp(zh.skillsScenarioFailed));
       view.view.getByRole("button", { name: zh.diagButton }).click();
-      await view.view.findByText(zh.diagOpening);
-      let draft = setDraft.mock.calls[0]?.[1] as string;
+      const sessionId = "session-of-ws-diagnosis";
+      await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
+      let draft = peekDiagnosisPrefill(sessionId) ?? "";
       expect(draft).toContain("Skills安装/更新失败诊断");
       expect(draft).toContain("场景：");
       expect(draft).toContain("错误：tool-unavailable");
       expect(draft).toContain("请分析失败原因并给出修复步骤。");
+      settleDiagnosisPrefill(sessionId, "written");
+      await view.view.findByText(zh.diagPrefilled);
 
       // SAME mounted instance: the Settings locale flips to English and the
       // next click stages an English draft (no remount involved).
@@ -1013,9 +1082,8 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
         expect(view.view.getByRole("button", { name: new RegExp(`${en.collapse}: ${en.title}`) })).toBeTruthy();
       });
       view.view.getByRole("button", { name: en.diagButton }).click();
-      await view.view.findByText(en.diagOpening);
-      draft = setDraft.mock.calls[1]?.[1] as string;
-      expect(draft).toContain("Skills install/update failure diagnosis");
+      await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toContain("Skills install/update failure diagnosis"); });
+      draft = peekDiagnosisPrefill(sessionId) ?? "";
       expect(draft).toContain("Scenario: Skills scenario/source install (skill-install:scenario/ask-insuremo)");
       expect(draft).toContain("Error: tool-unavailable: npx is unavailable; install Node.js/npm to sync Skills");
       expect(draft).toContain("Please analyze the cause of the failure and provide fix steps.");
@@ -1024,6 +1092,8 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
       expect(draft).toContain("node: v22.19.0");
       expect(draft).not.toContain("场景：");
       expect(draft).not.toContain("请分析失败原因");
+      settleDiagnosisPrefill(sessionId, "written");
+      await view.view.findByText(en.diagPrefilled);
 
       // And back to Chinese on the same instance.
       switchLocale.setLocale("zh");
@@ -1031,17 +1101,19 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
         expect(view.view.getByRole("button", { name: new RegExp(`${zh.collapse}: ${zh.title}`) })).toBeTruthy();
       });
       view.view.getByRole("button", { name: zh.diagButton }).click();
-      await view.view.findByText(zh.diagOpening);
-      draft = setDraft.mock.calls[2]?.[1] as string;
-      expect(draft).toContain("场景：");
+      await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toContain("场景："); });
+      draft = peekDiagnosisPrefill(sessionId) ?? "";
       expect(draft).toContain("请分析失败原因并给出修复步骤。");
+      settleDiagnosisPrefill(sessionId, "written");
+      await view.view.findByText(zh.diagPrefilled);
 
-      // Every round kept the mandated hand-off order.
-      expect(create).toHaveBeenCalledTimes(3);
-      expect(open).toHaveBeenCalledTimes(3);
-      expect(setDraft).toHaveBeenCalledTimes(3);
-      for (const call of setDraft.mock.calls) expect(call[0]).toBe("session-8");
-      for (const call of create.mock.calls) expect(call[0]).toEqual({ cwd: "/tmp/dsh-home/scratch" });
+      // Every round reused the dedicated Workspace: never a duplicate create,
+      // always the connectWorkspace-resolved session id.
+      const workspaceCalls = switchRuntime.workspaces.calls.filter(call => call.method === "create");
+      expect(workspaceCalls).toHaveLength(0);
+      const connectCalls = switchRuntime.workspaces.calls.filter(call => call.method === "connectWorkspace");
+      expect(connectCalls).toHaveLength(3);
+      for (const call of connectCalls) expect(call.args[0]).toBe("ws-diagnosis");
     } finally {
       await switchFeature.dispose();
       await switchRuntime.dispose();
@@ -1049,14 +1121,100 @@ describe("install/update one-click diagnosis (TASK-083)", () => {
     }
   });
 
-  it("an empty diagnosis store answers no-data without touching sessions", async () => {
-    const sessions: DiagnosisSessions = { open: vi.fn(), create: vi.fn(async () => "x"), setDraft: vi.fn() };
-    const failed = await renderFailedInstall({ sessions, diagnosis: { available: false } });
+  it("an empty diagnosis store answers no-data without touching workspaces or sessions", async () => {
+    const faces = makeFaces();
+    const failed = await renderFailedInstall({ faces, diagnosis: { available: false } });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     await failed.view.findByText(zh.diagNoData);
-    expect(sessions.create).not.toHaveBeenCalled();
-    expect(sessions.open).not.toHaveBeenCalled();
-    expect(sessions.setDraft).not.toHaveBeenCalled();
+    expect(faces.workspaces.create).not.toHaveBeenCalled();
+    expect(faces.workspaces.connectWorkspace).not.toHaveBeenCalled();
+    expect(faces.sessions.open).not.toHaveBeenCalled();
+  });
+});
+
+describe("diagnosis hand-off + prefill entry units (TASK-088)", () => {
+  afterEach(() => { cleanup(); });
+
+  function mountEntry(sessionId: string, draftState: { draft: string }, setDraft: ReturnType<typeof vi.fn>) {
+    const useInput = (selector: (state: { draft: string }) => unknown) => selector(draftState);
+    const inputActions = { setDraft: (text: string) => setDraft(text) };
+    return render(<DiagnosisPrefillEntry sessionId={sessionId} useInput={useInput as never} inputActions={inputActions} />);
+  }
+
+  it("handOffDiagnosis keys the queue and open by the connectWorkspace-resolved id (never a current guess)", async () => {
+    const workspaces = {
+      list: { getSnapshot: () => ({ items: [] as ReadonlyArray<{ workspaceId: string; path?: string }> }) },
+      create: vi.fn(async () => ({ workspaceId: "ws-x" })),
+      connectWorkspace: vi.fn(async () => "session-42"),
+      rename: vi.fn(async () => undefined),
+    };
+    const open = vi.fn();
+    const handoff = await handOffDiagnosis("TEXT", "/d", { workspaces: workspaces as unknown as DiagnosisWorkspaces, sessions: { open } }, "安装诊断");
+    expect(handoff).toEqual({ kind: "opened", sessionId: "session-42" });
+    expect(open).toHaveBeenCalledWith("session-42");
+    expect(peekDiagnosisPrefill("session-42")).toBe("TEXT");
+    settleDiagnosisPrefill("session-42", "written");
+  });
+
+  it("prefill entry writes the queued text once into an empty draft and settles written", async () => {
+    const sessionId = `entry-empty-${Date.now()}`;
+    const setDraft = vi.fn();
+    const draftState = { draft: "" };
+    queueDiagnosisPrefill(sessionId, "PREFILL-TEXT");
+    const entry = mountEntry(sessionId, draftState, setDraft);
+    await vi.waitFor(() => { expect(setDraft).toHaveBeenCalledWith("PREFILL-TEXT"); });
+    await expect(waitForDiagnosisPrefill(sessionId, 50)).resolves.toBe("written");
+    // Consume-once: further renders never rewrite.
+    entry.rerender(<DiagnosisPrefillEntry sessionId={sessionId} useInput={selector => selector(draftState)} inputActions={{ setDraft }} />);
+    await Promise.resolve();
+    expect(setDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefill entry never overwrites a user draft (drop + settled dropped)", async () => {
+    const sessionId = `entry-occupied-${Date.now()}`;
+    const setDraft = vi.fn();
+    const draftState = { draft: "user typed first" };
+    queueDiagnosisPrefill(sessionId, "PREFILL-TEXT");
+    mountEntry(sessionId, draftState, setDraft);
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeUndefined(); });
+    expect(setDraft).not.toHaveBeenCalled();
+    await expect(waitForDiagnosisPrefill(sessionId, 50)).resolves.toBe("dropped");
+  });
+
+  it("prefill entry consumes reactively while already mounted (no remount needed)", async () => {
+    const sessionId = `entry-reactive-${Date.now()}`;
+    const setDraft = vi.fn();
+    const draftState = { draft: "" };
+    // Mounted BEFORE anything is queued.
+    mountEntry(sessionId, draftState, setDraft);
+    await Promise.resolve();
+    expect(setDraft).not.toHaveBeenCalled();
+    // Queueing notifies subscribers; the mounted entry consumes immediately.
+    queueDiagnosisPrefill(sessionId, "REACTIVE-TEXT");
+    await vi.waitFor(() => { expect(setDraft).toHaveBeenCalledWith("REACTIVE-TEXT"); });
+  });
+
+  it("prefill entry is session-keyed: another session's queued text never lands", async () => {
+    const setDraft = vi.fn();
+    const draftState = { draft: "" };
+    mountEntry("entry-isolation-a", draftState, setDraft);
+    queueDiagnosisPrefill("entry-isolation-b", "OTHER-SESSION-TEXT");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(setDraft).not.toHaveBeenCalled();
+  });
+
+  it("ensureDiagnosisWorkspace reuses by path without rename (restart reuse)", async () => {
+    const items = [{ workspaceId: "ws-keep", path: "/tmp/dsh-home/install-diagnostics" }];
+    const workspaces = {
+      list: { getSnapshot: () => ({ items }) },
+      create: vi.fn(async () => ({ workspaceId: "ws-new" })),
+      connectWorkspace: vi.fn(async () => "s"),
+      rename: vi.fn(async () => undefined),
+    };
+    const id = await ensureDiagnosisWorkspace(workspaces as unknown as DiagnosisWorkspaces, "/tmp/dsh-home/install-diagnostics", "安装诊断");
+    expect(id).toBe("ws-keep");
+    expect(workspaces.create).not.toHaveBeenCalled();
+    expect(workspaces.rename).not.toHaveBeenCalled();
   });
 });
 

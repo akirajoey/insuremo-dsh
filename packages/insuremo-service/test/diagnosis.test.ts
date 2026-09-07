@@ -10,7 +10,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { ImoInstallService, IMO_PACKAGE } from "../src/imo-install.ts";
 import { ImoCliService } from "../src/index.ts";
 import {
-  failureDiagnosis, FailureDiagnosisStore, redactSecrets, clipDiagnosisStream, scratchDirectory,
+  failureDiagnosis, FailureDiagnosisStore, redactSecrets, clipDiagnosisStream, diagnosisDirectory,
 } from "../src/diagnosis.ts";
 import { runCapture, runCaptureDetailed } from "../src/run.ts";
 import { fakeHandle, fakeOperationLog, fakeSubprocess, makeFakeIo, upgradeFixture, approveAndRun } from "./support/fake-subprocess.ts";
@@ -130,12 +130,12 @@ test("streams are clipped at the 256KB budget with an explicit truncation marker
   assert.ok(clipped.text.endsWith(marker));
 });
 
-test("scratchDirectory resolves $DSH_HOME/scratch with the ~/.dsh default", () => {
-  const underHome = scratchDirectory({ DSH_HOME: "/tmp/dsh-home-a" });
-  assert.equal(underHome, resolve("/tmp/dsh-home-a", "scratch"));
-  const blank = scratchDirectory({ DSH_HOME: "   " });
-  assert.ok(blank.endsWith(join(".dsh", "scratch")));
-  assert.equal(scratchDirectory({}), scratchDirectory({ DSH_HOME: "" }));
+test("diagnosisDirectory resolves $DSH_HOME/install-diagnostics with the ~/.dsh default", () => {
+  const underHome = diagnosisDirectory({ DSH_HOME: "/tmp/dsh-home-a" });
+  assert.equal(underHome, resolve("/tmp/dsh-home-a", "install-diagnostics"));
+  const blank = diagnosisDirectory({ DSH_HOME: "   " });
+  assert.ok(blank.endsWith(join(".dsh", "install-diagnostics")));
+  assert.equal(diagnosisDirectory({}), diagnosisDirectory({ DSH_HOME: "" }));
 });
 
 test("runCaptureDetailed exposes a failed run's raw streams while runCapture stays digest-only", async () => {
@@ -200,13 +200,13 @@ test("a failed IMO install captures full output; a successful install clears it"
   }
 });
 
-test("the scratch directory materializes against a real temp DSH_HOME", async () => {
+test("the diagnosis directory materializes against a real temp DSH_HOME", async () => {
   const home = await mkdtemp(join(tmpdir(), "dsh-diagnosis-"));
   try {
-    const scratch = scratchDirectory({ DSH_HOME: home });
-    assert.equal(scratch, join(home, "scratch"));
-    await mkdir(scratch, { recursive: true });
-    await stat(scratch);
+    const diagnosisCwd = diagnosisDirectory({ DSH_HOME: home });
+    assert.equal(diagnosisCwd, join(home, "install-diagnostics"));
+    await mkdir(diagnosisCwd, { recursive: true });
+    await stat(diagnosisCwd);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

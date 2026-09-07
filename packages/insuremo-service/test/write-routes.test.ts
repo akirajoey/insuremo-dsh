@@ -393,7 +393,7 @@ test("TASK-047 active-profile route delegates only to Active Profile and maps fa
   assert.equal(h.server.routes.has(actionPath("active-profile")), false);
 });
 
-test("TASK-083 imo-diagnosis: empty store answers unavailable; a captured failure answers full payload plus a created scratch dir", async () => {
+test("TASK-083/088 imo-diagnosis: empty store answers unavailable; a captured failure answers full payload plus a created diagnosis dir", async () => {
   failureDiagnosis.reset();
   const home = await mkdtemp(join(tmpdir(), "dsh-diag-route-"));
   const originalHome = process.env.DSH_HOME;
@@ -407,7 +407,7 @@ test("TASK-083 imo-diagnosis: empty store answers unavailable; a captured failur
     const invalid = await call(h.server, "imo-diagnosis", { body: JSON.stringify({ kind: "everything" }) });
     assert.equal(JSON.parse(invalid.body).error.code, "invalid-input");
 
-    // A recorded failure answers the full diagnosis payload, and the scratch
+    // A recorded failure answers the full diagnosis payload, and the diagnosis
     // directory is created eagerly under $DSH_HOME.
     failureDiagnosis.record({
       kind: "skill",
@@ -425,8 +425,8 @@ test("TASK-083 imo-diagnosis: empty store answers unavailable; a captured failur
     assert.equal(parsed.result.diagnosis.stderrTruncated, true);
     assert.match(parsed.result.diagnosis.stderr, /_auth=\*\*\*/);
     assert.doesNotMatch(parsed.result.diagnosis.stderr, /leaked-value/);
-    assert.equal(parsed.result.scratchCwd, join(home, "scratch"));
-    await assert.doesNotReject(() => stat(join(home, "scratch")));
+    assert.equal(parsed.result.diagnosisCwd, join(home, "install-diagnostics"));
+    await assert.doesNotReject(() => stat(join(home, "install-diagnostics")));
 
     // Per-kind slots: the imo-cli read stays empty.
     const imoEmpty = await call(h.server, "imo-diagnosis", { body: JSON.stringify({ kind: "imo-cli" }) });

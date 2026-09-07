@@ -2,7 +2,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { mkdir } from "node:fs/promises";
 import { isSkillName } from "@deepseek-ai/dsh-skill";
-import { failureDiagnosis, scratchDirectory, type FailureKind } from "../diagnosis.ts";
+import { failureDiagnosis, diagnosisDirectory, type FailureKind } from "../diagnosis.ts";
 import { SKILL_SCENARIOS, type SkillScenario } from "../skill-actions/types.ts";
 import { OVERVIEW_PATH } from "./paths.ts";
 
@@ -217,9 +217,9 @@ export function mountWriteRoutes(ctx: Context): () => void {
 
   // imo-diagnosis: the LAST failed install/update run's full output (memory
   // only; secrets redacted at capture time). When a failure exists, the
-  // response also carries the Host-computed scratch directory (created
-  // eagerly) so the UI can open a pre-filled diagnosis session without ever
-  // resolving a host path itself.
+  // response also carries the Host-computed install-diagnostics directory
+  // (created eagerly) that backs the persistent diagnosis Workspace, so the
+  // UI never resolves a host path itself (TASK-088).
   register(actionRoute(`${ACTIONS_PREFIX}/imo-diagnosis`, async (body) => {
     const kind = body.kind === "imo-cli" || body.kind === "skill" ? body.kind : undefined;
     if (kind === undefined) {
@@ -227,14 +227,16 @@ export function mountWriteRoutes(ctx: Context): () => void {
     }
     const diagnosis = failureDiagnosis.snapshot(kind as FailureKind);
     if (diagnosis === undefined) return { ok: true, result: { available: false as const } };
-    const scratchCwd = scratchDirectory();
+    const diagnosisCwd = diagnosisDirectory();
     try {
-      await mkdir(scratchCwd, { recursive: true });
+      await mkdir(diagnosisCwd, { recursive: true });
     } catch {
-      // Non-fatal: the session-creation path on the harness side re-ensures
-      // the directory; the diagnosis payload is still complete.
+      // Non-fatal here: the workspace-registration path in the client needs
+      // the directory to exist, so a mkdir failure surfaces there as a normal
+      // hand-off failure (clipboard fallback); the diagnosis payload itself
+      // is still complete.
     }
-    return { ok: true, result: { available: true as const, diagnosis, scratchCwd } };
+    return { ok: true, result: { available: true as const, diagnosis, diagnosisCwd } };
   }));
 
   // skill-activation: durable activation domain (unchanged semantics).
