@@ -3,8 +3,16 @@ import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { inspectSkillDocument } from "../src/skill-document.ts";
 import { InsuremoSkillProvider } from "../src/skill-provider.ts";
 import { expectOk, makeFakeIo, skillsFixture } from "./support/fake-subprocess.ts";
+
+async function skillRoot(root: string, name: string, content: string): Promise<string> {
+  const directory = join(root, name);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "SKILL.md"), content);
+  return directory;
+}
 
 test("skills list defaults to project scope and returns a digest-only inventory", async () => {
   const io = makeFakeIo({ skillsListJson: "[]" });
@@ -112,6 +120,73 @@ test("skills validate keeps damaged rows and marks inventory incomplete", async 
     assert.deepEqual(value.items.find((item) => item.name === "bad")?.reasons, ["missing-skill-md"]);
     assert.deepEqual(value.items.find((item) => item.name === "missing")?.reasons, ["missing-directory"]);
   } finally {
+    await fx.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("skills validate and provider share canonical format decisions while retaining safe fallbacks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-skills-format-diagnostics-"));
+  const valid = await skillRoot(root, "valid", "# Valid body\n");
+  const multiline = await skillRoot(root, "multiline", "---\ndescription: |\n  first line\n  second line\n---\n# Multiline\n");
+  const fallback = await skillRoot(root, "fallback", "---\ntitle: 42\nwhenToUse: 42\nunknown: [one, two]\n---\n# Fallback\n");
+  const yamlBroken = await skillRoot(root, "yaml-broken", "---\ntitle: [unterminated\n---\n# Broken\n");
+  const fieldBroken = await skillRoot(root, "field-broken", "---\ndescription: [not a string]\n---\n# Broken field\n");
+  const unclosed = await skillRoot(root, "unclosed", "---\ntitle: Unclosed\n# Body\n");
+  const io = makeFakeIo({ skillsListJson: JSON.stringify([
+    { name: "valid", description: "Valid", path: valid },
+    { name: "multiline", description: "CLI multiline", path: multiline },
+    { name: "fallback", description: "Fallback", path: fallback },
+    { name: "yaml-broken", description: "Broken YAML", path: yamlBroken },
+    { name: "field-broken", description: "Broken field", path: fieldBroken },
+    { name: "unclosed", description: "Unclosed", path: unclosed },
+    { name: "missing", description: "Missing", path: join(root, "missing") },
+  ]) });
+  const fx = await skillsFixture(io, {}, root);
+  const controller = new AbortController();
+  try {
+    const multilineInspection = await inspectSkillDocument(join(multiline, "SKILL.md"));
+    assert.equal(multilineInspection.invalid, false);
+    assert.equal(multilineInspection.frontmatter?.description, "first line\nsecond line\n");
+    const fallbackInspection = await inspectSkillDocument(join(fallback, "SKILL.md"));
+    assert.equal(fallbackInspection.invalid, false, "non-canonical metadata remains a supported fallback");
+
+    const validation = await expectOk(await fx.skills.validate("global"));
+    const item = (name: string) => validation.items.find(entry => entry.name === name)!;
+    assert.equal(item("valid").valid, true);
+    assert.equal(item("multiline").valid, true);
+    assert.equal(item("fallback").valid, true);
+    assert.equal(item("fallback").diagnostic, undefined);
+    assert.deepEqual(item("yaml-broken").diagnostic, { code: "frontmatter-yaml-invalid", line: 2, canonicalInvalid: false });
+    assert.deepEqual(item("field-broken").diagnostic, { code: "frontmatter-field-type-invalid", line: 2, canonicalInvalid: true });
+    assert.deepEqual(item("unclosed").diagnostic, { code: "frontmatter-unclosed", line: 1, canonicalInvalid: false });
+    assert.deepEqual(item("missing").diagnostic, { code: "missing-directory" });
+    assert.equal(validation.inventoryComplete, false);
+
+    const provider = new InsuremoSkillProvider(fx.ctx, { signal: controller.signal, invalidate() {} }, fx.skills, "global");
+    const listed = await provider.list({});
+    assert.equal(Array.isArray(listed), false);
+    if (!Array.isArray(listed)) {
+      assert.equal(listed.complete, false);
+      assert.deepEqual(listed.candidates.map(candidate => candidate.name), ["valid", "multiline", "fallback", "yaml-broken", "unclosed"]);
+      assert.equal(listed.candidates.some(candidate => candidate.name === "field-broken"), false, "canonical-invalid candidate stays omitted from provider catalog");
+      assert.equal(await provider.get(listed.candidates.find(candidate => candidate.name === "yaml-broken")!, {}), undefined);
+      assert.equal((await provider.get(listed.candidates.find(candidate => candidate.name === "fallback")!, {}))?.content, "# Fallback\n");
+
+      await writeFile(join(yamlBroken, "SKILL.md"), "# Fixed YAML\n");
+      const refreshed = await expectOk(await fx.skills.validate("global"));
+      assert.equal(refreshed.items.find(entry => entry.name === "yaml-broken")?.valid, true);
+      assert.equal(refreshed.items.find(entry => entry.name === "yaml-broken")?.diagnostic, undefined);
+      const relisted = await provider.list({});
+      assert.equal(Array.isArray(relisted), false);
+      if (!Array.isArray(relisted)) {
+        const fixed = relisted.candidates.find(candidate => candidate.name === "yaml-broken");
+        assert.ok(fixed !== undefined);
+        assert.equal((await provider.get(fixed!, {}))?.content, "# Fixed YAML\n");
+      }
+    }
+  } finally {
+    controller.abort();
     await fx.dispose();
     await rm(root, { recursive: true, force: true });
   }

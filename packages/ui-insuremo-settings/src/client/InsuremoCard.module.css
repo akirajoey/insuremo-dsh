@@ -267,6 +267,14 @@
   font-size: 12px;
 }
 
+.diagnostic {
+  flex: 1 1 100%;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .small {
   border: 0;
   background: transparent;

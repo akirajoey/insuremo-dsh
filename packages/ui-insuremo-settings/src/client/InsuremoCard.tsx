@@ -1,7 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { ChevronIcon } from "./ChevronIcon.tsx";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
-import { OVERVIEW_URL, parseOverview, type ImoOverviewView } from "./overview.ts";
+import { OVERVIEW_URL, parseOverview, type ImoOverviewView, type OverviewSkillDiagnosticView } from "./overview.ts";
 import { postAction } from "./actions.ts";
 import { buildDiagnosisText, handOffDiagnosis, waitForDiagnosisPrefill, type DiagnosisActionPayload, type DiagnosisFaces } from "./diagnosis.ts";
 import type { InsuremoLocaleKey } from "./locales.ts";
@@ -518,6 +518,15 @@ class SkillsRegion extends Component<
     return (
       <div className={css.region}>
         <h4>{t("skillsTitle")}</h4>
+        {skills.code === "scan-failed" || skills.code === "unavailable" ? (
+          <p role="alert" data-skills-scan="failed" className={css.error}>{t("skillsScanFailed")}</p>
+        ) : null}
+        {skills.diagnosticCount > 0 ? (
+          <p role="alert" data-skills-diagnostics="summary" className={css.error}>
+            {t("skillsDiagnosticsSummary")}: {t("skillsFormatInvalidCount")} {skills.formatInvalidCount} · {t("skillsPathIssueCount")} {skills.pathIssueCount}
+            {skills.diagnosticsTruncated ? ` · ${t("skillsDiagnosticsVisible")} ${skills.diagnosticCount}` : ""}
+          </p>
+        ) : null}
         <div className={css.controls}>
           <label>
             <span className={css.meta}>{t("skillsScenarioLabel")}</span>{" "}
@@ -595,6 +604,8 @@ class SkillsRegion extends Component<
                     <span className={css.controlTrack} aria-hidden="true"><span className={css.controlThumb} /></span>
                   </button>
                   <code>{entry.name}</code>
+                  {!enabled ? <span className={css.meta} data-skill-state="disabled">{t("skillsDisabledState")}</span> : null}
+                  {entry.diagnostic !== undefined ? <SkillDiagnosticView t={t} diagnostic={entry.diagnostic} /> : null}
                   {row.error !== undefined ? <span role="alert" className={css.error}>{row.error}{row.retry === true ? ` · ${t("skillsRetryHint")}` : ""}</span> : null}
                 </li>
               );
@@ -605,6 +616,51 @@ class SkillsRegion extends Component<
       </div>
     );
   }
+}
+
+function SkillDiagnosticView(props: { t: Translate; diagnostic: OverviewSkillDiagnosticView }): ReactNode {
+  const { t, diagnostic } = props;
+  const format = isFormatDiagnostic(diagnostic.reason);
+  const reason = skillReasonLabel(diagnostic.reason, t);
+  const impact = diagnostic.contextImpact === "disabled"
+    ? t("skillsDiagnosticImpactDisabled")
+    : diagnostic.contextImpact === "source-unavailable"
+      ? t("skillsDiagnosticImpactUnavailable")
+      : t("skillsDiagnosticImpactMaybe");
+  return (
+    <span
+      role="alert"
+      className={css.diagnostic}
+      data-skill-diagnostic={diagnostic.skill}
+      data-skill-diagnostic-code={diagnostic.code}
+    >
+      {format ? t("skillsDiagnosticFormat") : t("skillsDiagnosticPath")} · <code>{diagnostic.code}</code> · {t("skillsDiagnosticSource")}: {diagnostic.source} · {t("skillsDiagnosticReason")}: {reason}
+      {diagnostic.line === undefined ? "" : ` · ${t("skillsDiagnosticLine")} ${diagnostic.line}`} · {impact}
+    </span>
+  );
+}
+
+function isFormatDiagnostic(reason: string): boolean {
+  return reason.startsWith("frontmatter-") || reason === "skill-file-too-large";
+}
+
+function skillReasonLabel(reason: string, t: Translate): string {
+  const labels: Record<string, InsuremoLocaleKey> = {
+    "frontmatter-unclosed": "skillsReasonFrontmatterUnclosed",
+    "frontmatter-too-large": "skillsReasonFrontmatterTooLarge",
+    "frontmatter-yaml-invalid": "skillsReasonFrontmatterYaml",
+    "frontmatter-root-invalid": "skillsReasonFrontmatterRoot",
+    "frontmatter-field-type-invalid": "skillsReasonFieldType",
+    "frontmatter-field-too-large": "skillsReasonFieldTooLarge",
+    "skill-file-too-large": "skillsReasonFileTooLarge",
+    "outside-allowed-root": "skillsReasonPathOutside",
+    "missing-directory": "skillsReasonMissingDirectory",
+    "path-unreadable": "skillsReasonPathUnreadable",
+    "not-directory": "skillsReasonNotDirectory",
+    "missing-skill-md": "skillsReasonManifestMissing",
+    "skill-md-unreadable": "skillsReasonManifestUnreadable",
+  };
+  return t(labels[reason] ?? "skillsReasonUnknown");
 }
 
 function IciRegion(props: { t: Translate; ici: NonNullable<ImoOverviewView["ici"]> }): ReactNode {

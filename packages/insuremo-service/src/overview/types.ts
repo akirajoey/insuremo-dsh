@@ -42,12 +42,31 @@ export interface OverviewAuthSection extends OverviewSectionBase {
   readonly activeProfileStatus?: "active" | "none" | "missing" | "unavailable";
 }
 
+/** Why one source entry cannot supply a model-facing Skill.md document. */
+export type OverviewSkillContextImpact = "source-unavailable" | "source-may-be-unavailable" | "disabled";
+
+/** Per-skill diagnostic; all fields are bounded and path/parser-error free. */
+export interface OverviewSkillDiagnostic {
+  /** Stable machine code (format/path), never a raw parser or filesystem error. */
+  readonly code: string;
+  readonly skill: string;
+  /** Safe source locator such as `global`; never an absolute home path. */
+  readonly source: string;
+  /** Stable redaction-safe reason code for localized rendering. */
+  readonly reason: string;
+  /** 1-based SKILL.md line only when reliably derived. */
+  readonly line?: number;
+  /** Impact applies to this source, not same-name higher-priority sources. */
+  readonly contextImpact: OverviewSkillContextImpact;
+}
+
 /** Per-skill row for the Settings skills panel (allowlist, ≤100 entries). */
 export interface OverviewSkillEntry {
   readonly name: string;
   readonly description: string;
   readonly enabled: boolean;
   readonly sourceDigest?: string;
+  readonly diagnostic?: OverviewSkillDiagnostic;
 }
 
 export interface OverviewSkillsSection extends OverviewSectionBase {
@@ -61,6 +80,14 @@ export interface OverviewSkillsSection extends OverviewSectionBase {
   /** Bounded per-skill rows for the UI panel (≤100, truncated flag). */
   readonly entries: readonly OverviewSkillEntry[];
   readonly entriesTruncated: boolean;
+  /** Total format-invalid sources, before the visible diagnostic bound. */
+  readonly formatInvalidCount: number;
+  /** Total path/unreadable/missing sources, before the visible diagnostic bound. */
+  readonly pathIssueCount: number;
+  /** Visible diagnostics are bounded; this is their unbounded total. */
+  readonly diagnosticCount: number;
+  readonly diagnostics: readonly OverviewSkillDiagnostic[];
+  readonly diagnosticsTruncated: boolean;
 }
 
 export interface OverviewOperationEntry {

@@ -191,7 +191,16 @@ export class InsuremoSkillProvider implements SkillProvider {
             this.throwIfCancelled(cancellation.signal);
             if (!item.valid || !isSkillName(item.name)) {
               complete = false;
-              continue;
+              // Preserve the historical bounded fallback for a malformed
+              // non-canonical document: the provider may expose its summary,
+              // while get() still fails closed. Canonical-invalid fields and
+              // path failures remain omitted from the model catalog. The
+              // decision comes from the same canonical inspection used by
+              // inventory validation; this branch only preserves its old
+              // candidate-surface behavior.
+              const canRetainFallback = item.diagnostic?.canonicalInvalid === false
+                && (item.diagnostic.code === "skill-file-too-large" || item.diagnostic.code.startsWith("frontmatter-"));
+              if (!canRetainFallback) continue;
             }
             // A deliberate disabled state is healthy: do not inspect its file
             // and do not turn an otherwise complete inventory incomplete.

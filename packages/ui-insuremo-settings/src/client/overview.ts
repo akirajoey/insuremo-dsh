@@ -24,6 +24,24 @@ export interface OverviewDiagnosticView {
   readonly messageKey: string;
 }
 
+export type OverviewSkillContextImpact = "source-unavailable" | "source-may-be-unavailable" | "disabled";
+
+export interface OverviewSkillDiagnosticView {
+  readonly code: string;
+  readonly skill: string;
+  readonly source: string;
+  readonly reason: string;
+  readonly line?: number;
+  readonly contextImpact: OverviewSkillContextImpact;
+}
+
+export interface OverviewSkillEntryView {
+  readonly name: string;
+  readonly description: string;
+  readonly enabled: boolean;
+  readonly diagnostic?: OverviewSkillDiagnosticView;
+}
+
 export interface ImoOverviewView {
   readonly schemaVersion: string;
   readonly generatedAt: string;
@@ -54,8 +72,13 @@ export interface ImoOverviewView {
     readonly enabled: number;
     readonly disabled: number;
     readonly names: readonly string[];
-    readonly entries?: readonly { name: string; description: string; enabled: boolean }[];
+    readonly entries?: readonly OverviewSkillEntryView[];
     readonly activationRevision?: number;
+    readonly formatInvalidCount: number;
+    readonly pathIssueCount: number;
+    readonly diagnosticCount: number;
+    readonly diagnostics: readonly OverviewSkillDiagnosticView[];
+    readonly diagnosticsTruncated: boolean;
   };
   readonly operations: {
     readonly status: string;
@@ -139,8 +162,21 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
       names: arr(skills.names).filter((name): name is string => typeof name === "string").slice(0, 512),
       ...(arr(skills.entries).length > 0 ? { entries: arr(skills.entries).slice(0, 100).map(item => {
         const e = obj(item);
-        return { name: str(e?.name, ""), description: str(e?.description, ""), enabled: bool(e?.enabled) };
+        const diagnostic = parseSkillDiagnostic(e?.diagnostic);
+        return {
+          name: boundedSkillName(e?.name),
+          description: boundedText(e?.description, 200),
+          enabled: bool(e?.enabled),
+          ...(diagnostic === undefined ? {} : { diagnostic }),
+        };
       }).filter(e => e.name.length > 0) } : {}),
+      formatInvalidCount: boundedCount(skills.formatInvalidCount),
+      pathIssueCount: boundedCount(skills.pathIssueCount),
+      diagnosticCount: boundedCount(skills.diagnosticCount),
+      diagnostics: arr(skills.diagnostics).slice(0, 100)
+        .map(parseSkillDiagnostic)
+        .filter((item): item is OverviewSkillDiagnosticView => item !== undefined),
+      diagnosticsTruncated: bool(skills.diagnosticsTruncated),
       ...(typeof skills.activationRevision === "number" && Number.isFinite(skills.activationRevision) ? { activationRevision: Math.trunc(skills.activationRevision) } : {}),
     },
     operations: {
@@ -170,6 +206,56 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
     },
     ...(ici === undefined ? {} : { ici }),
   };
+}
+
+function parseSkillDiagnostic(value: unknown): OverviewSkillDiagnosticView | undefined {
+  const diagnostic = obj(value);
+  const code = safeDiagnosticToken(diagnostic?.code);
+  const skill = boundedSkillName(diagnostic?.skill);
+  const source = safeSource(diagnostic?.source);
+  const reason = safeDiagnosticToken(diagnostic?.reason);
+  const contextImpact = diagnostic?.contextImpact;
+  if (code === undefined || skill.length === 0 || source === undefined || reason === undefined
+    || (contextImpact !== "source-unavailable" && contextImpact !== "source-may-be-unavailable" && contextImpact !== "disabled")) return undefined;
+  const line = safeLine(diagnostic?.line);
+  return {
+    code,
+    skill,
+    source,
+    reason,
+    ...(line === undefined ? {} : { line }),
+    contextImpact,
+  };
+}
+
+function boundedSkillName(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return text.length > 0 && text.length <= 128 && !text.includes("/") && !text.includes("\\") ? text : "";
+}
+
+function boundedText(value: unknown, max: number): string {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function safeSource(value: unknown): string | undefined {
+  const text = boundedText(value, 32);
+  return text.length > 0 && !text.includes("/") && !text.includes("\\") && !text.startsWith("~") ? text : undefined;
+}
+
+function safeDiagnosticToken(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 96 || !/^[a-z0-9][a-z0-9-]*$/.test(value)) return undefined;
+  return value;
+}
+
+function safeLine(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 100_000 ? value : undefined;
+}
+
+function boundedCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(Math.trunc(value), 1_000_000) : 0;
 }
 
 function obj(value: unknown): Record<string, unknown> | null {

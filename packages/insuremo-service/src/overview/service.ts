@@ -14,7 +14,22 @@ import type { OverviewOperationsSection, ImoOverviewView } from "./types.ts";
 
 /** Cold-start degraded sections for the fast channel (never fake "None"). */
 const FAST_UNCACHED_IMO = Object.freeze({ status: "warning", code: "fast-uncached", available: false, updateAvailable: false });
-const FAST_UNCACHED_SKILLS = Object.freeze({ status: "warning", code: "fast-uncached", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false });
+const FAST_UNCACHED_SKILLS = Object.freeze({
+  status: "warning",
+  code: "fast-uncached",
+  installed: 0,
+  valid: 0,
+  enabled: 0,
+  disabled: 0,
+  names: [],
+  entries: [],
+  entriesTruncated: false,
+  formatInvalidCount: 0,
+  pathIssueCount: 0,
+  diagnosticCount: 0,
+  diagnostics: [],
+  diagnosticsTruncated: false,
+});
 
 type ImoOverviewAuthSection = ImoOverviewView["auth"];
 
@@ -216,7 +231,22 @@ export class ImoOverviewService extends Service implements ImoOverview {
       generatedAt: new Date().toISOString(),
       imo: Object.freeze({ status: "error", code: "cancelled", available: false, updateAvailable: false }),
       auth: Object.freeze({ status: "error", code: "cancelled", profiles: [], count: 0 }),
-      skills: Object.freeze({ status: "error", code: "cancelled", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false }),
+      skills: Object.freeze({
+        status: "error",
+        code: "cancelled",
+        installed: 0,
+        valid: 0,
+        enabled: 0,
+        disabled: 0,
+        names: [],
+        entries: [],
+        entriesTruncated: false,
+        formatInvalidCount: 0,
+        pathIssueCount: 0,
+        diagnosticCount: 0,
+        diagnostics: [],
+        diagnosticsTruncated: false,
+      }),
       operations: Object.freeze({ status: "error", code: "cancelled", pending: 0, approved: 0, rejected: 0, recorded: 0, recent: [] }),
       diagnostics: Object.freeze({ status: "error", diagnostics: [Object.freeze({ id: "overview-cancelled", severity: "error", messageKey: "overview.diagnostic.cancelled" })] }),
       ici: Object.freeze({ status: "warning", embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT, graphWorkspaces: 0, explainWorkspaces: 0 }),

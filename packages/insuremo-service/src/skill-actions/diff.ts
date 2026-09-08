@@ -41,7 +41,7 @@ export async function snapshotInventory(
     const allowedRoot = await resolveAllowedSkillRoot(root);
     for (const item of validation.value.items) {
       if (signal?.aborted) return failure("cancelled", "skill inventory operation was cancelled");
-      if (!item.valid || !names.includes(item.name)) continue;
+      if ((!item.valid && !isFormatDiagnostic(item.diagnostic?.code)) || !names.includes(item.name)) continue;
       const manifest = await resolveSkillPath(join(item.path, "SKILL.md"), root, allowedRoot);
       if (manifest.canonical === undefined) continue;
       try {
@@ -78,6 +78,10 @@ export function diffInventory(before: SkillInventorySnapshot, after: SkillInvent
     removed: [...removed].sort((left, right) => left.localeCompare(right)),
     updated: [...updated].sort((left, right) => left.localeCompare(right)),
   };
+}
+
+function isFormatDiagnostic(code: string | undefined): boolean {
+  return code !== undefined && (code.startsWith("frontmatter-") || code === "skill-file-too-large");
 }
 
 function allowedRootOf(skills: ImoSkills): string {

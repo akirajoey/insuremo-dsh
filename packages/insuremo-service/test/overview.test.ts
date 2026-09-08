@@ -106,6 +106,73 @@ test("partial failure sections degrade to fixed codes and never leak secrets", a
   assert.equal(text.includes("/secret/path"), false);
 });
 
+test("overview keeps source-level format/path diagnostics distinct from disabled skills", async () => {
+  const deps = fakeDeps({
+    imoSkills: {
+      list: async () => ok({ scope: "global", skills: [
+        { name: "healthy", description: "Healthy", path: "/secret/healthy" },
+        { name: "bad-format", description: "Bad format", path: "/secret/bad-format" },
+        { name: "disabled-format", description: "Disabled format", path: "/secret/disabled-format" },
+        { name: "missing", description: "Missing", path: "/secret/missing" },
+      ], stdoutDigest: "sha256:c" }),
+      validate: async () => ok({ scope: "global", inventoryComplete: false, checkedAt: "now", items: [
+        { name: "healthy", description: "Healthy", path: "/secret/healthy", valid: true, reasons: [] },
+        { name: "bad-format", description: "Bad format", path: "/secret/bad-format", valid: false, reasons: ["frontmatter-yaml-invalid"], diagnostic: { code: "frontmatter-yaml-invalid", line: 2, canonicalInvalid: false } },
+        { name: "disabled-format", description: "Disabled format", path: "/secret/disabled-format", valid: false, reasons: ["frontmatter-field-type-invalid"], diagnostic: { code: "frontmatter-field-type-invalid", line: 2, canonicalInvalid: true } },
+        { name: "missing", description: "Missing", path: "/secret/missing", valid: false, reasons: ["missing-directory"], diagnostic: { code: "missing-directory" } },
+      ] }),
+    } as unknown as ImoSkills,
+    imoSkillActivation: {
+      snapshot: async () => ({ initialized: true, installed: ["healthy", "bad-format", "disabled-format", "missing"], enabled: ["healthy", "bad-format"], disabled: ["disabled-format", "missing"], stale: [], revision: 2 }),
+    } as unknown as ImoSkillActivation,
+  });
+  const view = await buildOverview(deps);
+  assert.equal(view.skills.status, "warning");
+  assert.equal(view.skills.formatInvalidCount, 2);
+  assert.equal(view.skills.pathIssueCount, 1);
+  assert.equal(view.skills.diagnosticCount, 3);
+  assert.equal(view.skills.diagnosticsTruncated, false);
+  assert.equal(view.skills.entries.find(entry => entry.name === "healthy")?.diagnostic, undefined);
+  assert.equal(view.skills.entries.find(entry => entry.name === "bad-format")?.diagnostic?.contextImpact, "source-may-be-unavailable");
+  assert.equal(view.skills.entries.find(entry => entry.name === "disabled-format")?.diagnostic?.contextImpact, "disabled");
+  assert.equal(view.skills.diagnostics.find(diagnostic => diagnostic.skill === "missing")?.contextImpact, "disabled");
+  const text = JSON.stringify(view);
+  assert.equal(text.includes("/secret/"), false);
+  assert.equal(text.includes("raw parser"), false);
+});
+
+test("overview separates scan failure from per-skill diagnostics", async () => {
+  const view = await buildOverview(fakeDeps({
+    imoSkills: {
+      list: async () => ({ ok: false, error: { code: "parse-error", message: "sensitive parser detail" } }),
+      validate: async () => ({ ok: false, error: { code: "parse-error", message: "sensitive parser detail" } }),
+    } as unknown as ImoSkills,
+  }));
+  assert.equal(view.skills.status, "error");
+  assert.equal(view.skills.code, "scan-failed");
+  assert.equal(view.skills.diagnosticCount, 0);
+  assert.equal(view.skills.diagnostics.length, 0);
+  assert.equal(view.diagnostics.diagnostics.some(diagnostic => diagnostic.id === "skills-scan-failed"), true);
+  assert.equal(JSON.stringify(view).includes("sensitive parser detail"), false);
+});
+
+test("overview bounds format diagnostics and reports the total when visible rows are truncated", async () => {
+  const names = Array.from({ length: 101 }, (_, index) => `bad-${String(index).padStart(3, "0")}`);
+  const items = names.map(name => ({ name, description: name, path: `/secret/${name}`, valid: false, reasons: ["frontmatter-unclosed"], diagnostic: { code: "frontmatter-unclosed", line: 1, canonicalInvalid: false } }));
+  const view = await buildOverview(fakeDeps({
+    imoSkills: {
+      list: async () => ok({ scope: "global", skills: names.map(name => ({ name, description: name, path: `/secret/${name}` })), stdoutDigest: "sha256:c" }),
+      validate: async () => ok({ scope: "global", inventoryComplete: false, items, checkedAt: "now" }),
+    } as unknown as ImoSkills,
+  }));
+  assert.equal(view.skills.diagnosticCount, 101);
+  assert.equal(view.skills.formatInvalidCount, 101);
+  assert.equal(view.skills.pathIssueCount, 0);
+  assert.equal(view.skills.diagnostics.length, 100);
+  assert.equal(view.skills.diagnosticsTruncated, true);
+  assert.equal(view.skills.entries.length, 100);
+});
+
 test("overview TASK-035 extensions: skill entries/busy/defaultProfileName with allowlist bounds", async () => {
   const manySkills = Array.from({ length: 150 }, (_, i) => ({ name: `skill-${String(i).padStart(3, "0")}`, description: `d${i}`, path: `/s/${i}` }));
   const longDescription = "L".repeat(500);

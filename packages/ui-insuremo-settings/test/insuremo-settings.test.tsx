@@ -5,7 +5,7 @@ import { LocaleRuntime } from "@deepseek-ai/dsh-client-locale/client";
 import { SlotTestRuntime, usePinnedBrowserLanguages } from "@deepseek-ai/dsh-client-test-runtime";
 import { resolveSlotLabel } from "@deepseek-ai/dsh-client-ui-slots";
 import { apply, inject, NS } from "../src/client/index.ts";
-import { OVERVIEW_URL } from "../src/client/overview.ts";
+import { OVERVIEW_URL, parseOverview } from "../src/client/overview.ts";
 import { InsuremoCard } from "../src/client/InsuremoCard.tsx";
 import {
   buildDiagnosisText, ensureDiagnosisWorkspace, handOffDiagnosis, peekDiagnosisPrefill, queueDiagnosisPrefill,
@@ -424,6 +424,91 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     expect(view.view.getByText("imo-audit-helper")).toBeTruthy();
     expect(view.view.queryByText("audit")).toBeNull();
     expect(view.view.queryByRole("button", { name: "remove imo-audit-helper" })).toBeNull();
+  });
+
+  it("renders per-source format diagnostics, separate counts, disabled state, and accessible alerts", async () => {
+    const issue = {
+      code: "frontmatter-field-type-invalid",
+      skill: "imo-broken",
+      source: "global",
+      reason: "frontmatter-field-type-invalid",
+      line: 3,
+      contextImpact: "source-unavailable",
+    } as const;
+    const issueView = {
+      ...fixtureView,
+      skills: {
+        ...fixtureView.skills,
+        installed: 3,
+        valid: 2,
+        enabled: 1,
+        disabled: 2,
+        formatInvalidCount: 1,
+        pathIssueCount: 0,
+        diagnosticCount: 1,
+        diagnostics: [issue],
+        diagnosticsTruncated: false,
+        entries: [
+          { name: "imo-audit-helper", description: "audit", enabled: true },
+          { name: "imo-broken", description: "broken", enabled: true, diagnostic: issue },
+          { name: "imo-disabled", description: "disabled", enabled: false },
+        ],
+      },
+    };
+    const cleanView = { ...fixtureView, skills: { ...fixtureView.skills, valid: 3, enabled: 2, disabled: 1, formatInvalidCount: 0, pathIssueCount: 0, diagnosticCount: 0, diagnostics: [], diagnosticsTruncated: false } };
+    let refreshed = false;
+    const fetchMock: StubFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("fast=0")) {
+        refreshed = true;
+        return jsonResponse(cleanView);
+      }
+      return jsonResponse(refreshed ? cleanView : issueView);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    expect(await view.view.findByText(/Skills 异常/)).toBeTruthy();
+    expect(view.container.querySelector('[data-skills-diagnostics="summary"]')?.textContent).toContain("格式异常 1");
+    expect(view.container.querySelector('[data-skills-diagnostics="summary"]')?.textContent).toContain("路径异常 0");
+    const alert = view.container.querySelector('[data-skill-diagnostic="imo-broken"]');
+    expect(alert?.getAttribute("role")).toBe("alert");
+    expect(alert?.textContent).toContain("此来源的 Skill 无法加载");
+    expect(alert?.textContent).toContain("来源: global");
+    expect(alert?.textContent).toContain("行 3");
+    expect(view.container.querySelector('[data-skill-state="disabled"]')?.textContent).toBe(zh.skillsDisabledState);
+    expect(view.container.querySelector('[data-skill-diagnostic="imo-audit-helper"]')).toBeNull();
+
+    view.view.getByRole("button", { name: zh.refresh }).click();
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('[data-skills-diagnostics="summary"]')).toBeNull();
+      expect(view.container.querySelector('[data-skill-diagnostic="imo-broken"]')).toBeNull();
+    });
+  });
+
+  it("keeps scan failure distinct and drops untrusted diagnostic payload fields", async () => {
+    const scanFailed = { ...fixtureView, skills: { ...fixtureView.skills, code: "scan-failed", diagnosticCount: 0, diagnostics: [] } };
+    const fetchMock: StubFetch = vi.fn(async () => jsonResponse(scanFailed));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("settings.plugin.item", {});
+    await expand(view);
+    expect(await view.view.findByText(zh.skillsScanFailed)).toBeTruthy();
+    expect(view.container.querySelector('[data-skills-scan="failed"]')?.getAttribute("role")).toBe("alert");
+
+    const parsed = parseOverview({
+      ...fixtureView,
+      skills: {
+        ...fixtureView.skills,
+        diagnostics: [{
+          code: "<script>", skill: "../../secret", source: "/Users/private/.agents/skills", reason: "raw parser error",
+          line: 999999999, contextImpact: "source-unavailable", message: "do-not-leak",
+        }],
+        diagnosticCount: 1,
+      },
+    });
+    expect(parsed?.skills.diagnostics).toEqual([]);
+    expect(JSON.stringify(parsed)).not.toContain("/Users/private");
+    expect(JSON.stringify(parsed)).not.toContain("raw parser error");
+    expect(JSON.stringify(parsed)).not.toContain("do-not-leak");
   });
 
   const SCENARIO_IDS = ["icomposer-full-stack", "icomposer-coding-lite", "icomposer-api-design", "uic-developer", "ask-insuremo"];

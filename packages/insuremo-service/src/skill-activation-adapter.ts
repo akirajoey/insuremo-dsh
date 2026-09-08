@@ -5,7 +5,11 @@ import { raceSkillAbort, throwIfSkillAborted } from "./skill-cancellation.ts";
 
 export type SkillActivationInput = ImoSkillActivation | (() => ImoSkillActivation | undefined);
 
-type ActivationItem = { readonly name: string; readonly valid: boolean };
+type ActivationItem = {
+  readonly name: string;
+  readonly valid: boolean;
+  readonly diagnostic?: { readonly code?: string };
+};
 
 /** Provider-local adapter: activation storage stays outside the catalog provider contract. */
 export class SkillActivationGate {
@@ -79,7 +83,17 @@ export function sameActivation(
 }
 
 function eligibleNames(items: readonly ActivationItem[]): string[] {
-  return items.filter((item) => item.valid && typeof item.name === "string" && isSkillName(item.name)).map((item) => item.name);
+  return items
+    // A format-invalid but path-contained skill remains an installed name so
+    // existing enable/update state is preserved; the provider still fails
+    // closed for its document. Path failures remain ineligible as before.
+    .filter((item) => (item.valid || isFormatDiagnostic(item.diagnostic)) && typeof item.name === "string" && isSkillName(item.name))
+    .map((item) => item.name);
+}
+
+function isFormatDiagnostic(diagnostic: ActivationItem["diagnostic"]): boolean {
+  const code = diagnostic?.code;
+  return typeof code === "string" && (code.startsWith("frontmatter-") || code === "skill-file-too-large");
 }
 
 function activationRevision(value: unknown): number | undefined {

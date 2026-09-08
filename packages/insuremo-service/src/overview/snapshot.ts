@@ -2,7 +2,7 @@ import { isSkillName } from "@deepseek-ai/dsh-skill";
 import type { ImoCli } from "../cli.ts";
 import type { ImoAuth } from "../auth/types.ts";
 import type { ImoActiveProfile } from "../active-profile.ts";
-import type { ImoSkills } from "../skills.ts";
+import type { ImoSkillValidationItem, ImoSkills } from "../skills.ts";
 import type { ImoSkillActivation } from "../skill-activation.ts";
 import type { OperationLogLike } from "../operation-log-face.ts";
 import type {
@@ -12,12 +12,14 @@ import type {
   OverviewDiagnosticsSection,
   OverviewImoSection,
   OverviewOperationsSection,
+  OverviewSkillDiagnostic,
   OverviewSkillsSection,
 } from "./types.ts";
 
 const MAX_PROFILES = 100;
 const MAX_SKILL_NAMES = 512;
 const MAX_SKILL_ENTRIES = 100;
+const MAX_SKILL_DIAGNOSTICS = 100;
 const MAX_RECENT = 20;
 
 export interface OverviewDependencies {
@@ -144,14 +146,29 @@ async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Pr
 }
 
 async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): Promise<OverviewSkillsSection> {
-  let section: OverviewSkillsSection = Object.freeze({ status: "error", code: "unavailable", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false });
+  const empty = (): OverviewSkillsSection => Object.freeze({
+    status: "error",
+    code: "scan-failed",
+    installed: 0,
+    valid: 0,
+    enabled: 0,
+    disabled: 0,
+    names: [],
+    entries: [],
+    entriesTruncated: false,
+    formatInvalidCount: 0,
+    pathIssueCount: 0,
+    diagnosticCount: 0,
+    diagnostics: [],
+    diagnosticsTruncated: false,
+  });
+  let section: OverviewSkillsSection = empty();
   try {
     const list = await deps.imoSkills.list("global", signal);
     if (!list.ok) {
       section = Object.freeze({
-        status: "error",
-        code: list.error.code === "cancelled" ? "cancelled" : "unavailable",
-        installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false,
+        ...empty(),
+        code: list.error.code === "cancelled" ? "cancelled" : "scan-failed",
       });
       return section;
     }
@@ -172,17 +189,38 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
     } catch {
       activationCode = "activation-unavailable";
     }
-    // per-skill rows for the Settings panel (≤100, description clipped)
+
     const described = new Map(list.value.skills.map(skill => [skill.name, skill.description]));
+    const validationItems = validation.ok
+      ? validation.value.items.filter(item => names.includes(item.name))
+      : [];
+    const diagnostics = validationItems
+      .map(item => skillDiagnostic(item, "global", enabledSet))
+      .filter((item): item is OverviewSkillDiagnostic => item !== undefined);
+    const formatInvalidCount = diagnostics.filter(item => isFormatDiagnostic(item.reason)).length;
+    const pathIssueCount = diagnostics.length - formatInvalidCount;
+    const visibleDiagnostics = diagnostics.slice(0, MAX_SKILL_DIAGNOSTICS);
+    const diagnosticBySkill = new Map(diagnostics.map(item => [item.skill, item]));
+
+    // Per-skill rows for the Settings panel (≤100, description clipped). A
+    // diagnostic is attached to its row as well as the bounded aggregate so
+    // the UI can render the exact source without exposing its filesystem path.
     const entries = names.slice(0, MAX_SKILL_ENTRIES).map(name => {
       const rawDescription = described.get(name) ?? "";
       const description = rawDescription.length > 200 ? `${rawDescription.slice(0, 199)}…` : rawDescription;
-      return Object.freeze({ name, description, enabled: enabledSet.has(name) });
+      const diagnostic = diagnosticBySkill.get(name);
+      return Object.freeze({
+        name,
+        description,
+        enabled: enabledSet.has(name),
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+      });
     });
     const incomplete = validation.ok ? !validation.value.inventoryComplete : true;
+    const scanCode = validation.ok ? undefined : validation.error.code === "cancelled" ? "cancelled" : "scan-failed";
     section = Object.freeze({
-      status: incomplete && validation.ok ? "warning" : validation.ok ? "ok" : "error",
-      ...(activationCode === undefined ? {} : { code: activationCode }),
+      status: validation.ok ? incomplete ? "warning" : "ok" : "error",
+      ...(scanCode === undefined && activationCode === undefined ? {} : { code: scanCode ?? activationCode }),
       installed: names.length,
       valid: validCount ?? names.length,
       enabled,
@@ -190,12 +228,41 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
       names: names.slice(0, MAX_SKILL_NAMES),
       entries,
       entriesTruncated: names.length > MAX_SKILL_ENTRIES,
+      formatInvalidCount,
+      pathIssueCount,
+      diagnosticCount: diagnostics.length,
+      diagnostics: visibleDiagnostics,
+      diagnosticsTruncated: diagnostics.length > MAX_SKILL_DIAGNOSTICS,
       ...(activationRevision === undefined ? {} : { activationRevision }),
     });
   } catch {
-    section = Object.freeze({ status: "error", code: "unavailable", installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [], entriesTruncated: false });
+    section = empty();
   }
   return section;
+}
+
+function isFormatDiagnostic(reason: string): boolean {
+  return reason.startsWith("frontmatter-") || reason === "skill-file-too-large";
+}
+
+function skillDiagnostic(
+  item: ImoSkillValidationItem,
+  source: string,
+  enabledSet: ReadonlySet<string>,
+): OverviewSkillDiagnostic | undefined {
+  const issue = item.diagnostic;
+  if (issue === undefined) return undefined;
+  const disabled = !enabledSet.has(item.name);
+  return Object.freeze({
+    code: issue.code,
+    skill: item.name,
+    source,
+    reason: issue.code,
+    ...(issue.line === undefined ? {} : { line: issue.line }),
+    contextImpact: disabled
+      ? "disabled"
+      : issue.canonicalInvalid === false ? "source-may-be-unavailable" : "source-unavailable",
+  });
 }
 
 function operationsSection(deps: OverviewDependencies): OverviewOperationsSection {
@@ -243,7 +310,17 @@ function diagnosticsSection(
   if (auth.status === "warning" && auth.defaultProfile === undefined && auth.count > 0) {
     diagnostics.push(Object.freeze({ id: "auth-no-default", severity: "warning", messageKey: "overview.diagnostic.authNoDefault" }));
   }
-  if (skills.code === "unavailable") diagnostics.push(Object.freeze({ id: "skills-unavailable", severity: "error", messageKey: "overview.diagnostic.skillsUnavailable" }));
+  if (skills.code === "scan-failed") {
+    diagnostics.push(Object.freeze({
+      id: "skills-scan-failed",
+      severity: "error",
+      messageKey: "overview.diagnostic.skillsScanFailed",
+    }));
+  } else if (skills.code === "unavailable") {
+    // Preserve the existing diagnostic id for callers that still provide the
+    // legacy unavailable code; new scan failures use the distinct code above.
+    diagnostics.push(Object.freeze({ id: "skills-unavailable", severity: "error", messageKey: "overview.diagnostic.skillsUnavailable" }));
+  }
   if (skills.status === "warning") diagnostics.push(Object.freeze({ id: "skills-incomplete", severity: "warning", messageKey: "overview.diagnostic.skillsIncomplete" }));
   if (operations.pending > 0) diagnostics.push(Object.freeze({ id: "operations-pending", severity: "info", messageKey: "overview.diagnostic.operationsPending" }));
   const severity = diagnostics.some(diagnostic => diagnostic.severity === "error")

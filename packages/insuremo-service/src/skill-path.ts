@@ -10,7 +10,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
  */
 
 /** Why a skill path could not be used. */
-export type SkillPathReason = "outside-allowed-root" | "missing";
+export type SkillPathReason = "outside-allowed-root" | "missing" | "unreadable";
 
 export interface AllowedSkillRoot {
   readonly lexical: string;
@@ -69,7 +69,8 @@ export async function resolveSkillPath(
       return { absolute, reason: "outside-allowed-root" };
     }
     return { absolute: canonical, canonical };
-  } catch {
-    return { absolute, reason: "missing" };
+  } catch (error) {
+    const code = (error as { readonly code?: unknown })?.code;
+    return { absolute, reason: code === "EACCES" || code === "EPERM" ? "unreadable" : "missing" };
   }
 }

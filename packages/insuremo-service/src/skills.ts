@@ -10,6 +10,7 @@ import {
   throwIfSkillAborted,
 } from "./skill-cancellation.ts";
 import { resolveAllowedSkillRoot, resolveSkillPath } from "./skill-path.ts";
+import { inspectSkillDocument, type SkillDocumentIssue } from "./skill-document.ts";
 
 // ---- IMO Skills inventory (read-only) ----
 
@@ -35,13 +36,24 @@ export interface ImoSkillConfigPath {
   readonly exists: boolean;
 }
 
+export interface ImoSkillValidationDiagnostic {
+  /** Stable, redaction-safe code from the canonical loader/path resolver. */
+  readonly code: string;
+  /** 1-based SKILL.md line only when it is reliable and safe to expose. */
+  readonly line?: number;
+  /** Canonical frontmatter rejection keeps provider fallback behavior explicit. */
+  readonly canonicalInvalid?: boolean;
+}
+
 export interface ImoSkillValidationItem {
   readonly name: string;
   readonly description: string;
-  /** Absolute path used for validation. */
+  /** Absolute path used internally for validation; overview never exposes it. */
   readonly path: string;
   readonly valid: boolean;
   readonly reasons: readonly string[];
+  /** Present only for a bounded, sanitized diagnostic. */
+  readonly diagnostic?: ImoSkillValidationDiagnostic;
 }
 
 export interface ImoSkillValidation {
@@ -155,18 +167,25 @@ export class ImoSkillsService extends Service implements ImoSkills {
         throwIfSkillAborted(signal);
         const absolute = resolved.canonical ?? resolved.absolute;
         const reasons: string[] = [];
+        let diagnostic: ImoSkillValidationDiagnostic | undefined;
+        const addPathReason = (code: string): void => {
+          reasons.push(code);
+          diagnostic = { code };
+        };
         if (resolved.reason === "outside-allowed-root") {
           // The resolver rejects lexically before any candidate stat/access/read.
-          reasons.push("outside-allowed-root");
+          addPathReason("outside-allowed-root");
         } else if (resolved.reason === "missing") {
-          reasons.push("missing-directory");
+          addPathReason("missing-directory");
+        } else if (resolved.reason === "unreadable") {
+          addPathReason("path-unreadable");
         } else if (resolved.canonical === undefined) {
-          reasons.push("missing-directory");
+          addPathReason("missing-directory");
         } else {
           try {
             throwIfSkillAborted(signal);
             if (!(await stat(resolved.canonical)).isDirectory()) {
-              reasons.push("not-directory");
+              addPathReason("not-directory");
             } else {
               throwIfSkillAborted(signal);
               const manifest = await resolveSkillPath(
@@ -176,26 +195,53 @@ export class ImoSkillsService extends Service implements ImoSkills {
               );
               throwIfSkillAborted(signal);
               if (manifest.reason === "outside-allowed-root") {
-                reasons.push("outside-allowed-root");
+                addPathReason("outside-allowed-root");
+              } else if (manifest.reason === "unreadable") {
+                addPathReason("skill-md-unreadable");
               } else if (manifest.canonical === undefined) {
-                reasons.push("missing-skill-md");
+                addPathReason("missing-skill-md");
               } else {
                 try {
                   throwIfSkillAborted(signal);
-                  if (!(await stat(manifest.canonical)).isFile()) reasons.push("missing-skill-md");
+                  if (!(await stat(manifest.canonical)).isFile()) {
+                    addPathReason("missing-skill-md");
+                  } else {
+                    const inspection = await inspectSkillDocument(manifest.canonical, signal);
+                    throwIfSkillAborted(signal);
+                    if (inspection.invalid) {
+                      const issue: SkillDocumentIssue = inspection.issue ?? {
+                        code: "skill-file-unreadable",
+                        canonicalInvalid: false,
+                      };
+                      const issueCode = issue.code === "skill-file-unreadable" ? "skill-md-unreadable" : issue.code;
+                      reasons.push(issueCode);
+                      diagnostic = {
+                        code: issueCode,
+                        canonicalInvalid: issue.canonicalInvalid,
+                        ...(issue.line === undefined ? {} : { line: issue.line }),
+                      };
+                    }
+                  }
                   throwIfSkillAborted(signal);
                 } catch (error) {
                   if (isSkillAbortError(error)) throw error;
-                  reasons.push("missing-skill-md");
+                  addPathReason("skill-md-unreadable");
                 }
               }
             }
           } catch (error) {
             if (isSkillAbortError(error)) throw error;
-            reasons.push("missing-directory");
+            addPathReason("path-unreadable");
           }
         }
-        items.push({ name: skill.name, description: skill.description, path: absolute, valid: reasons.length === 0, reasons });
+        items.push({
+          name: skill.name,
+          description: skill.description,
+          path: absolute,
+          valid: reasons.length === 0,
+          reasons,
+          ...(diagnostic === undefined ? {} : { diagnostic }),
+        });
       }
       throwIfSkillAborted(signal);
       return {
