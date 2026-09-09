@@ -42,6 +42,22 @@ export interface OverviewSkillEntryView {
   readonly diagnostic?: OverviewSkillDiagnosticView;
 }
 
+export interface SkillCatalogEntryView {
+  readonly type: "skill" | "scenario";
+  readonly name: string;
+  readonly description: string;
+  readonly group?: string;
+}
+
+export interface SkillCatalogView {
+  readonly schemaVersion: string;
+  readonly status: "ready" | "empty";
+  readonly source: "insuremo-skills";
+  readonly fetchedAt: string;
+  readonly expiresAt: string;
+  readonly entries: readonly SkillCatalogEntryView[];
+}
+
 export interface ImoOverviewView {
   readonly schemaVersion: string;
   readonly generatedAt: string;
@@ -102,6 +118,8 @@ export interface ImoOverviewView {
 }
 
 export const OVERVIEW_URL = "/api/icomposer-workbench/insuremo/overview" as const;
+export const SKILL_CATALOG_URL = `${OVERVIEW_URL}/skill-catalog` as const;
+const MAX_CATALOG_ENTRIES = 128 + 5; // source cap plus the fixed scenario rows
 
 /** Rebuild a fresh view from only the allowlisted fields; `null` on garbage. */
 export function parseOverview(value: unknown): ImoOverviewView | null {
@@ -206,6 +224,56 @@ export function parseOverview(value: unknown): ImoOverviewView | null {
     },
     ...(ici === undefined ? {} : { ici }),
   };
+}
+
+/** Parse the explicit catalog-refresh response; unknown rows fail closed. */
+export function parseSkillCatalog(value: unknown): SkillCatalogView | null {
+  const root = obj(value);
+  if (root === null) return null;
+  const candidate = obj(root.result) ?? root;
+  if ((candidate.status !== "ready" && candidate.status !== "empty") || candidate.schemaVersion !== "1" || candidate.source !== "insuremo-skills") return null;
+  const status: "ready" | "empty" = candidate.status === "empty" ? "empty" : "ready";
+  const fetchedAt = candidate.fetchedAt;
+  const expiresAt = candidate.expiresAt;
+  if (typeof fetchedAt !== "string" || fetchedAt.length > 64 || typeof expiresAt !== "string" || expiresAt.length > 64) return null;
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) return null;
+  const rawEntries = arr(candidate.entries);
+  if (rawEntries.length === 0 || rawEntries.length > MAX_CATALOG_ENTRIES) return null;
+  const entries: SkillCatalogEntryView[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawEntries) {
+    const item = obj(raw);
+    if (item === null || (item.type !== "skill" && item.type !== "scenario")) return null;
+    const name = catalogName(item.name, item.type === "scenario");
+    const description = catalogDescription(item.description);
+    if (name === undefined || description === undefined) return null;
+    const key = `${item.type}:${name}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    const group = item.group === undefined ? undefined : boundedGroup(item.group);
+    if (item.group !== undefined && group === undefined) return null;
+    entries.push({ type: item.type, name, description, ...(group === undefined ? {} : { group }) });
+  }
+  const skillCount = entries.filter(entry => entry.type === "skill").length;
+  if ((status === "empty") !== (skillCount === 0)) return null;
+  return { schemaVersion: "1", status, source: "insuremo-skills", fetchedAt, expiresAt, entries };
+}
+
+function catalogDescription(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= 500 && !/[\u0000-\u001F\u007F]/u.test(value) ? value : undefined;
+}
+
+function catalogName(value: unknown, scenario: boolean): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 128) return undefined;
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value)) return undefined;
+  if (scenario && !["icomposer-full-stack", "icomposer-coding-lite", "icomposer-api-design", "uic-developer", "ask-insuremo"].includes(value)) return undefined;
+  return value;
+}
+
+function boundedGroup(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9 ._&'()\\-]*$/u.test(value)) return undefined;
+  return value;
 }
 
 function parseSkillDiagnostic(value: unknown): OverviewSkillDiagnosticView | undefined {

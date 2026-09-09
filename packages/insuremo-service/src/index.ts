@@ -52,9 +52,28 @@ export {
   SKILL_UPDATE_KIND,
 } from "./skill-actions/types.ts";
 export { SKILL_ACTIVATION_CHANGED_EVENT, SKILL_ACTIVATION_DOMAIN_NAME } from "./skill-activation.ts";
-export { SKILLS_TOOL_COMMAND, SKILLS_TOOL_PACKAGE, SKILLS_TOOL_REGISTRY } from "./skill-actions/index.ts";
+export {
+  SKILLS_TOOL_COMMAND,
+  SKILLS_TOOL_PACKAGE,
+  SKILLS_TOOL_REGISTRY,
+  SKILLS_TOOL_SOURCE,
+  SKILL_CATALOG_DESCRIPTION_MAX,
+  SKILL_CATALOG_MAX_ENTRIES,
+  SKILL_CATALOG_OUTPUT_LIMIT_BYTES,
+  SKILL_CATALOG_SCHEMA_VERSION,
+  SKILL_CATALOG_TIMEOUT_MS,
+  SKILL_CATALOG_TTL_MS,
+  buildSkillCatalog,
+  catalogSkillNames,
+  isEmptySkillCatalogOutput,
+  parseCatalogOutput,
+  parseSkillCatalogOutput,
+  skillCatalogArgs,
+} from "./skill-actions/index.ts";
+export type { SkillCatalogEntry, SkillCatalogScenario, SkillCatalogSkill, SkillCatalogSnapshot } from "./skill-actions/catalog.ts";
 export type { ImoOverview } from "./overview/service.ts";
 export { OVERVIEW_PATH } from "./overview/service.ts";
+export { SKILL_CATALOG_PATH } from "./overview/paths.ts";
 export * from "./overview/types.ts";
 export {
   INSUREMO_SKILL_CATALOG_INVALIDATE_EVENT,

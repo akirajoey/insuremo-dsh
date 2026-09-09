@@ -112,6 +112,8 @@ export interface RunOptions {
 	readonly args: readonly string[];
 	readonly timeoutMs: number;
 	readonly signal?: AbortSignal;
+	/** Explicit child environment overrides for deterministic read-only probes. */
+	readonly env?: NodeJS.ProcessEnv;
 }
 
 /** SHA-256 hex digest with a stable `sha256:` prefix. */
@@ -269,17 +271,19 @@ async function captureCore(
 
 	let handle: SubprocessHandle;
 	try {
-		handle = rt.spawn({
+		const spawnSpec = {
 			argv: toSpawnArgv(executablePath, options.args, process.platform),
 			cwd: process.cwd(),
 			stdio: {
-				stdin: "ignore",
-				stdout: { maxBytes: OUTPUT_LIMIT_BYTES },
-				stderr: { maxBytes: OUTPUT_LIMIT_BYTES },
+				stdin: "ignore" as const,
+				stdout: { maxBytes: OUTPUT_LIMIT_BYTES } as const,
+				stderr: { maxBytes: OUTPUT_LIMIT_BYTES } as const,
 			},
 			graceMs: GRACE_MS,
 			signal: deadlineSignal,
-		});
+			...(options.env === undefined ? {} : { env: options.env }),
+		};
+		handle = rt.spawn(spawnSpec);
 	} catch {
 		cleanup();
 		return {

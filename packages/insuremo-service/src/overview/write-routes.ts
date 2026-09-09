@@ -3,8 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { mkdir } from "node:fs/promises";
 import { isSkillName } from "@deepseek-ai/dsh-skill";
 import { failureDiagnosis, diagnosisDirectory, type FailureKind } from "../diagnosis.ts";
-import { SKILL_SCENARIOS, type SkillScenario } from "../skill-actions/types.ts";
+import { SKILL_SCENARIOS, type SkillActionResult, type SkillScenario } from "../skill-actions/types.ts";
+import { SKILLS_TOOL_SOURCE, type SkillCatalogSnapshot } from "../skill-actions/catalog.ts";
 import { OVERVIEW_PATH } from "./paths.ts";
+import { sanitizeSkillCatalogSnapshot } from "./skill-catalog-route.ts";
 
 const JSON_TYPE = "application/json; charset=utf-8";
 const MAX_ACTION_BODY_BYTES = 8 * 1024;
@@ -263,6 +265,19 @@ export function mountWriteRoutes(ctx: Context): () => void {
     }
   }));
 
+  // skill-catalog-refresh: explicit user action. The GET projection above is
+  // cache-only; only this same-origin POST may invoke the trusted npx probe.
+  register(actionRoute(`${ACTIONS_PREFIX}/skill-catalog-refresh`, async (body, signal) => {
+    const actions = ctx.get("imoSkillActions" as never) as unknown as CatalogSkillActionsFace | undefined;
+    if (actions === undefined || typeof actions.refreshCatalog !== "function") return faceError(undefined, "service-unavailable");
+    const force = body.force === true;
+    const result = await actions.refreshCatalog(signal, force);
+    if (!result.ok) return faceError(result.error, "catalog-unavailable");
+    const snapshot = sanitizeSkillCatalogSnapshot(result.value);
+    if (snapshot === undefined) return faceError({ code: "catalog-unavailable", message: "the trusted Skills catalog is unavailable" }, "catalog-unavailable");
+    return { ok: true, result: snapshot };
+  }));
+
   // skill-update: whole-inventory update, direct kernel.
   register(actionRoute(`${ACTIONS_PREFIX}/skill-update`, async (_body, signal) => {
     const actions = ctx.get("imoSkillActions" as never) as unknown as DirectSkillActionsFace | undefined;
@@ -271,13 +286,40 @@ export function mountWriteRoutes(ctx: Context): () => void {
     return directSkillOutcome(outcome);
   }));
 
-  // skill-install: scenario sync is intentionally server-owned: source,
-  // agent, selected skills, registry and argv are not accepted from the UI.
+  // skill-install: scenario sync and single-skill install remain distinct.
+  // Source, agent, registry and argv are server-owned in both branches.
   register(actionRoute(`${ACTIONS_PREFIX}/skill-install`, async (body, signal) => {
-    const actions = ctx.get("imoSkillActions" as never) as unknown as DirectSkillActionsFace | undefined;
+    const actions = ctx.get("imoSkillActions" as never) as unknown as CatalogSkillActionsFace | undefined;
     if (actions === undefined) return faceError(undefined, "service-unavailable");
+    const hasScenario = body.scenario !== undefined;
+    const hasSkill = body.skill !== undefined;
+    if (hasScenario && hasSkill) return faceError({ code: "invalid-input", message: "choose either a scenario or a single Skill" }, "invalid-input");
+    if (hasSkill) {
+      const skill = body.skill;
+      if (typeof skill !== "string" || !isSkillName(skill)) {
+        return faceError({ code: "invalid-skill-name", message: "skill name is invalid" }, "invalid-input");
+      }
+      if (typeof actions.installCatalogSkill === "function") {
+        const outcome = await actions.installCatalogSkill(skill, signal);
+        return directSkillOutcome(outcome);
+      }
+      // Compatibility fallback for a narrow face double: revalidate against
+      // the cache before constructing the fixed-source argv ourselves.
+      if (typeof actions.getCatalog !== "function") return faceError(undefined, "service-unavailable");
+      const catalog = await actions.getCatalog(signal);
+      if (!catalog.ok) return faceError(catalog.error, "catalog-unavailable");
+      const snapshot = sanitizeSkillCatalogSnapshot(catalog.value);
+      if (snapshot === undefined) return faceError({ code: "catalog-unavailable", message: "the trusted Skills catalog is unavailable" }, "catalog-unavailable");
+      if (!snapshot.entries.some(entry => entry.type === "skill" && entry.name === skill)) {
+        return faceError({ code: "catalog-selection-invalid", message: "the selected Skill is not in the current trusted catalog" }, "catalog-selection-invalid");
+      }
+      if (typeof actions.runDirect !== "function") return faceError(undefined, "service-unavailable");
+      const outcome = await actions.runDirect({ kind: "skill-install", source: { type: "alias", value: SKILLS_TOOL_SOURCE }, agent: "universal", skills: [skill] }, signal);
+      return directSkillOutcome(outcome);
+    }
     const scenario = parseScenario(body.scenario);
     if (scenario === undefined) return faceError({ code: "invalid-input", message: "scenario is not in the built-in allowlist" }, "invalid-input");
+    if (typeof actions.runDirect !== "function") return faceError(undefined, "service-unavailable");
     const outcome = await actions.runDirect({ kind: "skill-install", source: { type: "scenario", scenario }, agent: "universal", skills: [] }, signal);
     return directSkillOutcome(outcome);
   }));
@@ -338,6 +380,15 @@ interface DirectSkillReceipt {
 
 interface DirectSkillActionsFace {
   runDirect(input: { kind: string; source?: unknown; agent?: string; skills?: readonly string[]; names?: readonly string[] }, signal?: AbortSignal): Promise<
+    | { ok: true; receipt: DirectSkillReceipt }
+    | { ok: false; error: { code?: string; message?: string } }
+  >;
+}
+
+interface CatalogSkillActionsFace extends DirectSkillActionsFace {
+  getCatalog?(signal?: AbortSignal): Promise<SkillActionResult<SkillCatalogSnapshot>>;
+  refreshCatalog?(signal?: AbortSignal, force?: boolean): Promise<SkillActionResult<SkillCatalogSnapshot>>;
+  installCatalogSkill?(name: string, signal?: AbortSignal): Promise<
     | { ok: true; receipt: DirectSkillReceipt }
     | { ok: false; error: { code?: string; message?: string } }
   >;

@@ -2,6 +2,7 @@ import { isSkillName } from "@deepseek-ai/dsh-skill";
 import type { Context } from "@deepseek-ai/cordis";
 import { IMO_REGISTRY } from "../imo-install.ts";
 import type { ImoSkillActivation, ImoSkillActivationSnapshot } from "../skill-activation.ts";
+import { parseSkillCatalogOutput, SKILLS_TOOL_SOURCE } from "./catalog.ts";
 import type { ImoSkills } from "../skills.ts";
 import { digest, runCapture, runCaptureDetailed, type RunResult } from "../run.ts";
 import { failureDiagnosis } from "../diagnosis.ts";
@@ -24,6 +25,14 @@ export const SKILLS_TOOL_COMMAND = "npx" as const;
 export const SKILLS_TOOL_PACKAGE = "@insuremo/skills-tool" as const;
 export const SKILLS_TOOL_REGISTRY: string = IMO_REGISTRY;
 const MAX_PREVIEW_NAMES = 100;
+
+/** Read-only discovery argv for the trusted source; `-l` never mutates a store. */
+export function skillCatalogArgs(): readonly string[] {
+  return [
+    "-y", `--registry=${SKILLS_TOOL_REGISTRY}`, SKILLS_TOOL_PACKAGE, "add", SKILLS_TOOL_SOURCE,
+    "-l", "--skip-update-check",
+  ];
+}
 const ANSI_ESCAPE = /\u001B(?:\][^\u0007]*(?:\u0007|\u001B\\)|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 const BOX_DECORATION = /[┌┐└┘─━│┃┏┓┗┛╭╮╰╯═║╔╗╚╝╴╵╶╷]/gu;
 
@@ -73,6 +82,29 @@ export async function previewSkillAction(
       });
       return runFailure(run, command === SKILLS_TOOL_COMMAND);
     }
+    const catalogInstall = action.kind === SKILL_INSTALL_KIND
+      && action.source.type === "alias"
+      && action.source.value === SKILLS_TOOL_SOURCE;
+    if (catalogInstall) {
+      if (run.value.stdout.truncated) return failure("catalog-unavailable", "the trusted Skills catalog could not be verified");
+      const parsed = parseSkillCatalogOutput(run.value.stdout.text);
+      if (!parsed.ok) return failure("catalog-unavailable", "the trusted Skills catalog could not be verified");
+      const candidateNames = parsed.value.skills.map(entry => entry.name);
+      if (action.skills.some(name => !candidateNames.includes(name))) {
+        return failure("catalog-selection-invalid", "the selected Skill is not in the current trusted catalog");
+      }
+      return {
+        ok: true,
+        value: {
+          kind: action.kind,
+          scope: action.scope,
+          before: before.value,
+          activation: activationSnapshot,
+          candidateNames,
+          stdoutDigest: run.value.stdoutDigest,
+        },
+      };
+    }
     const candidateNames = parsePreviewNames(run.value.stdout.text);
     return { ok: true, value: { kind: action.kind, scope: action.scope, before: before.value, activation: activationSnapshot, candidateNames, stdoutDigest: run.value.stdoutDigest } };
   }
@@ -92,7 +124,11 @@ export async function previewSkillAction(
 }
 
 export function actionCommand(action: NormalizedSkillAction, defaultCommand: string): string {
-  return action.kind === SKILL_UPDATE_KIND || (action.kind === SKILL_INSTALL_KIND && action.source.type === "scenario")
+  const catalogInstall = action.kind === SKILL_INSTALL_KIND
+    && action.source.type === "alias"
+    && action.source.value === SKILLS_TOOL_SOURCE;
+  return action.kind === SKILL_UPDATE_KIND
+    || (action.kind === SKILL_INSTALL_KIND && (action.source.type === "scenario" || catalogInstall))
     ? SKILLS_TOOL_COMMAND
     : defaultCommand;
 }
@@ -106,9 +142,10 @@ export function executionArgs(action: NormalizedSkillAction): readonly string[] 
 
 export function installArgs(action: NormalizedInstallAction, preview: boolean): readonly string[] {
   const source = action.source;
-  if (source.type === "scenario") {
+  if (source.type === "scenario" || (source.type === "alias" && source.value === SKILLS_TOOL_SOURCE)) {
     return [
-      "-y", `--registry=${SKILLS_TOOL_REGISTRY}`, SKILLS_TOOL_PACKAGE, "add", "insuremo-skills", "-g", "-a", action.agent, "-s", source.value,
+      "-y", `--registry=${SKILLS_TOOL_REGISTRY}`, SKILLS_TOOL_PACKAGE, "add", SKILLS_TOOL_SOURCE, "-g", "-a", action.agent,
+      ...(source.type === "scenario" ? ["-s", source.value] : action.skills.flatMap(skill => ["-s", skill])),
       ...(preview ? ["-l"] : ["-y"]), "--skip-update-check",
     ];
   }

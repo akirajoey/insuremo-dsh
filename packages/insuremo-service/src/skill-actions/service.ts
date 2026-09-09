@@ -1,5 +1,6 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
+import { isSkillName } from "@deepseek-ai/dsh-skill";
 import { Config, resolveConfig, type Config as ImoConfig } from "../config.ts";
 import { failureDiagnosis } from "../diagnosis.ts";
 import { digest, runCaptureDetailed } from "../run.ts";
@@ -12,7 +13,16 @@ import { diffInventory } from "./diff.ts";
 import { buildSkillReceipt, type SkillReceiptInput } from "./finalize.ts";
 import { ExecutionJournal, type ExecutionJournalEntry } from "./execution-journal.ts";
 import { recoverInventory, type RecoveryReport } from "./recovery.ts";
-import { actionCommand, executionArgs, previewSkillAction, skillDiagnosisOperation, SKILLS_TOOL_COMMAND } from "./preview.ts";
+import { actionCommand, executionArgs, previewSkillAction, skillCatalogArgs, skillDiagnosisOperation, SKILLS_TOOL_COMMAND } from "./preview.ts";
+import {
+  buildSkillCatalog,
+  catalogSkillNames,
+  isEmptySkillCatalogOutput,
+  parseSkillCatalogOutput,
+  SKILL_CATALOG_TIMEOUT_MS,
+  SKILLS_TOOL_SOURCE,
+  type SkillCatalogSnapshot,
+} from "./catalog.ts";
 import { installSourceProvenance, normalizeSkillAction, skillActionParamsDigest } from "./validation.ts";
 import {
   SKILL_ACTION_COMPLETED_EVENT,
@@ -30,6 +40,7 @@ import {
 
 const EMPTY_DIGEST = digest("");
 const EMPTY_DIFF = Object.freeze({ added: [], removed: [], updated: [] });
+const MAX_CATALOG_CACHE_KEYS = 4;
 
 /** Approval-gated global IMO Skills install/update/remove/activation actions. */
 interface SkillActionsState {
@@ -37,6 +48,12 @@ interface SkillActionsState {
   journal: ExecutionJournal;
   running: { operationId: string; kind: PendingSkillAction["kind"] } | null;
   disposed: boolean;
+}
+interface CatalogFlight {
+  readonly key: string;
+  readonly controller: AbortController;
+  readonly promise: Promise<SkillActionResult<SkillCatalogSnapshot>>;
+  waiters: number;
 }
 let skillActionsStateSlot: SkillActionsState | undefined;
 function skillActionsStateFor(_receiver: unknown): SkillActionsState {
@@ -53,6 +70,8 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
   #activation: ImoSkillActivation;
   #controller: SkillActivationController | undefined;
   #operationLog: OperationLogLike;
+  #catalogCache = new Map<string, { readonly snapshot: SkillCatalogSnapshot; readonly expiresAtMs: number }>();
+  #catalogInFlight = new Map<string, CatalogFlight>();
 
   constructor(ctx: Context, config: Partial<ImoConfig> = {}) {
     super(ctx, "imoSkillActions");
@@ -70,19 +89,179 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     this.#operationLog = ctx.get<OperationLogLike>("operationLog")!;
     this.request = this.request.bind(this);
     this.execute = this.execute.bind(this);
+    this.getCatalog = this.getCatalog.bind(this);
+    this.refreshCatalog = this.refreshCatalog.bind(this);
+    this.installCatalogSkill = this.installCatalogSkill.bind(this);
+    this.runDirect = this.runDirect.bind(this);
     this.status = this.status.bind(this);
-    ctx.set("imoSkillActions", Object.freeze({
+    // Keep the long-standing face's own-key surface stable for existing
+    // consumers. Catalog capabilities live on a private prototype so legacy
+    // reflection cannot mistake them for action kinds while routes can still
+    // call the typed methods normally.
+    const catalogFace = Object.create(null) as Record<string, unknown>;
+    Object.defineProperties(catalogFace, {
+      getCatalog: { value: (signal?: AbortSignal) => this.getCatalog(signal), enumerable: false },
+      refreshCatalog: { value: (signal?: AbortSignal, force?: boolean) => this.refreshCatalog(signal, force), enumerable: false },
+      installCatalogSkill: { value: (name: string, signal?: AbortSignal) => this.installCatalogSkill(name, signal), enumerable: false },
+    });
+    Object.freeze(catalogFace);
+    const face = Object.assign(Object.create(catalogFace), {
       request: (input: SkillActionInput, signal?: AbortSignal) => this.request(input, signal),
       execute: (operationId: string, signal?: AbortSignal) => this.execute(operationId, signal),
       runDirect: (input: SkillActionInput, signal?: AbortSignal) => this.runDirect(input, signal),
       status: () => this.status(),
-    } satisfies ImoSkillActions));
+    }) as ImoSkillActions;
+    ctx.set("imoSkillActions", Object.freeze(face));
     this.ctx.effect(() => () => {
       skillActionsStateFor(this).disposed = true;
       skillActionsStateFor(this).pending.clear();
       skillActionsStateFor(this).journal.clear();
       skillActionsStateFor(this).running = null;
+      this.#catalogCache.clear();
+      for (const flight of this.#catalogInFlight.values()) flight.controller.abort();
+      this.#catalogInFlight.clear();
     }, "imoSkillActions.state");
+  }
+
+  /**
+   * Cache-only catalog read. This is intentionally separate from refresh so a
+   * browser GET cannot make npx download/execute a package or contact a
+   * registry implicitly.
+   */
+  async getCatalog(signal?: AbortSignal): Promise<SkillActionResult<SkillCatalogSnapshot>> {
+    if (signal?.aborted) return resultFailure("cancelled", "Skills catalog read was cancelled");
+    if (skillActionsStateFor(this).disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
+    const cached = this.#catalogCache.get(this.catalogCacheKey());
+    if (cached !== undefined && cached.expiresAtMs > Date.now()) return { ok: true, value: cached.snapshot };
+    return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable; refresh it explicitly");
+  }
+
+  /** Explicit, bounded/coalesced source discovery used by the UI refresh action. */
+  async refreshCatalog(signal?: AbortSignal, force = true): Promise<SkillActionResult<SkillCatalogSnapshot>> {
+    if (skillActionsStateFor(this).running !== null) return resultFailure("busy", "another skill action is already running");
+    return this.loadCatalog(signal, force);
+  }
+
+  /**
+   * Single-skill install face. The exact name must be present in a fresh
+   * server-side catalog before any install preview or mutation is spawned.
+   */
+  async installCatalogSkill(name: string, signal?: AbortSignal): Promise<SkillActionExecution> {
+    if (signal?.aborted) return executionFailure("cancelled", "skill install was cancelled");
+    if (!isSkillName(name)) return executionFailure("invalid-skill-name", "skill name is invalid");
+    // Keep scenario and single-skill argv paths separate. This fixed source is
+    // the only alias that action code may translate to skills-tool here. The
+    // runDirect kernel performs the catalog check after taking its busy lock.
+    return this.runDirect({
+      kind: SKILL_INSTALL_KIND,
+      source: { type: "alias", value: SKILLS_TOOL_SOURCE },
+      agent: "universal",
+      skills: [name],
+    }, signal);
+  }
+
+  private async loadCatalog(signal: AbortSignal | undefined, force: boolean): Promise<SkillActionResult<SkillCatalogSnapshot>> {
+    if (signal?.aborted) return resultFailure("cancelled", "Skills catalog read was cancelled");
+    if (skillActionsStateFor(this).disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
+    const key = this.catalogCacheKey();
+    const cached = this.#catalogCache.get(key);
+    if (!force && cached !== undefined && cached.expiresAtMs > Date.now()) return { ok: true, value: cached.snapshot };
+    // Concurrent opens/refreshes share one bounded process. Each caller gets
+    // an abortable view of that process; cancelling one request never cancels
+    // another request that joined the same trusted-source flight.
+    let flight = this.#catalogInFlight.get(key);
+    if (flight === undefined) {
+      const controller = new AbortController();
+      const promise = this.fetchCatalog(controller.signal, key).catch(() => resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable"));
+      flight = { key, controller, promise, waiters: 0 };
+      this.#catalogInFlight.set(key, flight);
+      void promise.finally(() => {
+        if (this.#catalogInFlight.get(key) === flight) this.#catalogInFlight.delete(key);
+      }).catch(() => undefined);
+    }
+    return this.awaitCatalogFlight(flight, signal);
+  }
+
+  private async awaitCatalogFlight(flight: CatalogFlight, signal?: AbortSignal): Promise<SkillActionResult<SkillCatalogSnapshot>> {
+    flight.waiters += 1;
+    try {
+      if (signal === undefined) return await flight.promise;
+      if (signal.aborted) return resultFailure("cancelled", "Skills catalog read was cancelled");
+      return await new Promise<SkillActionResult<SkillCatalogSnapshot>>(resolve => {
+        let settled = false;
+        const finish = (value: SkillActionResult<SkillCatalogSnapshot>) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        };
+        const onAbort = () => finish(resultFailure("cancelled", "Skills catalog read was cancelled"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        void flight.promise.then(finish, () => finish(resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable")));
+      });
+    } finally {
+      flight.waiters -= 1;
+      if (flight.waiters === 0 && this.#catalogInFlight.get(flight.key) === flight) flight.controller.abort();
+    }
+  }
+
+  private catalogCacheKey(): string {
+    // The skills-tool resolves its config/store from the process home. Keep
+    // distinct isolated homes from sharing either a whitelist or a flight;
+    // this key never leaves the Host process.
+    return process.env.HOME ?? process.env.USERPROFILE ?? "<default-home>";
+  }
+
+  private async fetchCatalog(signal: AbortSignal | undefined, cacheKey: string): Promise<SkillActionResult<SkillCatalogSnapshot>> {
+    const run = await runCaptureDetailed(this.ctx.subprocess, {
+      command: SKILLS_TOOL_COMMAND,
+      args: skillCatalogArgs(),
+      timeoutMs: Math.min(this.#config.timeoutMs, SKILL_CATALOG_TIMEOUT_MS),
+      signal,
+      // clack's spinner writes to stdout. CI + no-color makes the known 1.1.2
+      // envelope deterministic; the parser still accepts ANSI when a runtime
+      // ignores these hints and fails closed on all other structure.
+      env: { CI: "true", FORCE_COLOR: "0", TERM: "dumb" },
+    });
+    if (!run.ok) {
+      const emptyOutput = run.error.code === "non-zero-exit" && isEmptySkillCatalogOutput(run.detail?.stdout ?? "");
+      if (!emptyOutput) return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable");
+      const snapshot = buildSkillCatalog({ skills: [], foundCount: 0 });
+      this.cacheCatalog(cacheKey, snapshot);
+      return { ok: true, value: snapshot };
+    }
+    if (run.value.stdout.truncated) return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable");
+    const parsed = parseSkillCatalogOutput(run.value.stdout.text);
+    if (!parsed.ok) {
+      return resultFailure("catalog-unavailable", "the trusted Skills catalog could not be verified");
+    }
+    const snapshot = buildSkillCatalog(parsed.value);
+    this.cacheCatalog(cacheKey, snapshot);
+    return { ok: true, value: snapshot };
+  }
+
+  private cacheCatalog(cacheKey: string, snapshot: SkillCatalogSnapshot): void {
+    this.#catalogCache.delete(cacheKey);
+    this.#catalogCache.set(cacheKey, { snapshot, expiresAtMs: Date.parse(snapshot.expiresAt) });
+    while (this.#catalogCache.size > MAX_CATALOG_CACHE_KEYS) {
+      const oldest = this.#catalogCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#catalogCache.delete(oldest);
+    }
+  }
+
+  private async validateCatalogInstall(action: NormalizedSkillAction, signal?: AbortSignal): Promise<SkillActionResult<NormalizedSkillAction>> {
+    if (action.kind !== SKILL_INSTALL_KIND || action.source.type !== "alias" || action.source.value !== SKILLS_TOOL_SOURCE) {
+      return { ok: true, value: action };
+    }
+    if (action.skills.length !== 1) return resultFailure("catalog-selection-invalid", "exactly one catalog Skill must be selected");
+    const catalog = await this.loadCatalog(signal, false);
+    if (!catalog.ok) return catalog;
+    const known = new Set(catalogSkillNames(catalog.value));
+    if (action.skills.some(name => !known.has(name))) {
+      return resultFailure("catalog-selection-invalid", "the selected Skill is not in the current trusted catalog");
+    }
+    return { ok: true, value: action };
   }
 
   async request(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionResult<SkillActionRequest>> {
@@ -90,23 +269,26 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     if (skillActionsStateFor(this).disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
     const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
     if (!normalized.ok) return normalized;
-    const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
+    const catalogValidated = await this.validateCatalogInstall(normalized.value, signal);
+    if (!catalogValidated.ok) return catalogValidated;
+    const action = catalogValidated.value;
+    const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, action, this.#config, signal);
     if (!preview.ok) return preview;
     if (signal?.aborted) return resultFailure("cancelled", "skill action request was cancelled");
-    const paramsDigest = skillActionParamsDigest(normalized.value);
+    const paramsDigest = skillActionParamsDigest(action);
     let record;
     try {
       record = await this.#operationLog.append({
-        requestId: `skills:${normalized.value.kind}:${Date.now()}`,
-        kind: normalized.value.kind,
+        requestId: `skills:${action.kind}:${Date.now()}`,
+        kind: action.kind,
         paramsDigest,
         artifactRefs: [],
       });
     } catch {
       return resultFailure("record-failed", "could not record skill action request");
     }
-    skillActionsStateFor(this).pending.set(record.id, { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest });
-    return { ok: true, value: { operationId: record.id, kind: normalized.value.kind, paramsDigest, preview: preview.value } };
+    skillActionsStateFor(this).pending.set(record.id, { kind: action.kind, input: action, preview: preview.value, paramsDigest });
+    return { ok: true, value: { operationId: record.id, kind: action.kind, paramsDigest, preview: preview.value } };
   }
 
   /** One-shot UI execution (TASK-039): same kernel, no operation log. */
@@ -115,13 +297,16 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     if (signal?.aborted) return executionFailure("cancelled", "skill action was cancelled", "");
     const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
     if (!normalized.ok) return normalized as unknown as SkillActionExecution;
-    if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", "");
+    if (skillActionsStateFor(this).running !== null || this.#catalogInFlight.size > 0) return executionFailure("busy", "another skill action is already running", "");
     const operationId = `direct:${normalized.value.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     skillActionsStateFor(this).running = { operationId, kind: normalized.value.kind };
     try {
-      const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
+      const catalogValidated = await this.validateCatalogInstall(normalized.value, signal);
+      if (!catalogValidated.ok) return executionFailure(catalogValidated.error.code, catalogValidated.error.message);
+      const action = catalogValidated.value;
+      const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, action, this.#config, signal);
       if (!preview.ok) return preview as unknown as SkillActionExecution;
-      const pending: PendingSkillAction = { kind: normalized.value.kind, input: normalized.value, preview: preview.value, paramsDigest: skillActionParamsDigest(normalized.value) };
+      const pending: PendingSkillAction = { kind: action.kind, input: action, preview: preview.value, paramsDigest: skillActionParamsDigest(action) };
       return await this.executeDirectKernel(operationId, pending, signal);
     } finally {
       skillActionsStateFor(this).running = null;
@@ -209,6 +394,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
     const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
     const status = run.ok ? "completed" : (changed ? "partial-failure" : "failed");
+    this.#catalogCache.clear();
     if (status === "completed") failureDiagnosis.clear("skill");
     const stdoutDigest = run.ok ? run.value.stdoutDigest : (run.error.stdoutDigest ?? EMPTY_DIGEST);
     const stderrDigest = run.ok ? run.value.stderrDigest : (run.error.stderrDigest ?? EMPTY_DIGEST);
@@ -289,6 +475,11 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     if (record.kind !== pending.kind || record.paramsDigest !== pending.paramsDigest || record.paramsDigest !== skillActionParamsDigest(pending.input)) {
       return executionFailure("operation-params-mismatch", "skill action operation parameters do not match", operationId);
     }
+    // Approval may outlive the catalog TTL. Re-check the trusted membership
+    // immediately before mutation so an expired/failed cache never acts as a
+    // stale whitelist. The check may perform one bounded controlled refresh.
+    const catalogValidated = await this.validateCatalogInstall(pending.input, signal);
+    if (!catalogValidated.ok) return executionFailure(catalogValidated.error.code, catalogValidated.error.message, operationId);
     if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", operationId);
     skillActionsStateFor(this).running = { operationId, kind: pending.kind };
     try {
@@ -419,6 +610,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     const diff = after === undefined ? EMPTY_DIFF : diffInventory(before, after);
     const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
     const status = run.ok ? "completed" : (changed ? "partial-failure" : "failed");
+    this.#catalogCache.clear();
     if (status === "completed") failureDiagnosis.clear("skill");
     const stdoutDigest = run.ok ? run.value.stdoutDigest : (run.error.stdoutDigest ?? EMPTY_DIGEST);
     const stderrDigest = run.ok ? run.value.stderrDigest : (run.error.stderrDigest ?? EMPTY_DIGEST);

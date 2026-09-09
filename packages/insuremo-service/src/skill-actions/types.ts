@@ -1,4 +1,5 @@
 import type { ImoSkillActivationSnapshot } from "../skill-activation.ts";
+import type { SkillCatalogSnapshot } from "./catalog.ts";
 
 export const SKILL_INSTALL_KIND = "skill-install" as const;
 export const SKILL_UPDATE_KIND = "skill-update" as const;
@@ -109,7 +110,9 @@ export type SkillActionErrorCode =
   | "spawn-failed"
   | "non-zero-exit"
   | "timeout"
-  | "tool-unavailable";
+  | "tool-unavailable"
+  | "catalog-unavailable"
+  | "catalog-selection-invalid";
 
 export interface SkillActionError {
   readonly code: SkillActionErrorCode;
@@ -228,6 +231,12 @@ export interface ImoSkillActions {
   execute(operationId: string, signal?: AbortSignal): Promise<SkillActionExecution>;
   /** One-shot direct execution (TASK-039): no operation record, same kernel. */
   runDirect(input: SkillActionInput, signal?: AbortSignal): Promise<SkillActionExecution>;
+  /** Return only a still-valid catalog cache; this method never spawns npx. */
+  getCatalog(signal?: AbortSignal): Promise<SkillActionResult<SkillCatalogSnapshot>>;
+  /** Explicit catalog refresh, bounded/coalesced and backed by the trusted alias. */
+  refreshCatalog(signal?: AbortSignal, force?: boolean): Promise<SkillActionResult<SkillCatalogSnapshot>>;
+  /** Validate an exact catalog name before constructing the single-skill argv. */
+  installCatalogSkill(name: string, signal?: AbortSignal): Promise<SkillActionExecution>;
   status(): SkillActionStatus;
 }
 

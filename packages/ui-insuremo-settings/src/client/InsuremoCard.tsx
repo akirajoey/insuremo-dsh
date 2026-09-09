@@ -1,7 +1,16 @@
 import { Component, type ReactNode } from "react";
 import { ChevronIcon } from "./ChevronIcon.tsx";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
-import { OVERVIEW_URL, parseOverview, type ImoOverviewView, type OverviewSkillDiagnosticView } from "./overview.ts";
+import {
+  OVERVIEW_URL,
+  SKILL_CATALOG_URL,
+  parseOverview,
+  parseSkillCatalog,
+  type ImoOverviewView,
+  type OverviewSkillDiagnosticView,
+  type SkillCatalogEntryView,
+  type SkillCatalogView,
+} from "./overview.ts";
 import { postAction } from "./actions.ts";
 import { buildDiagnosisText, handOffDiagnosis, waitForDiagnosisPrefill, type DiagnosisActionPayload, type DiagnosisFaces } from "./diagnosis.ts";
 import type { InsuremoLocaleKey } from "./locales.ts";
@@ -373,6 +382,13 @@ const SKILL_SCENARIOS = [
   "icomposer-full-stack", "icomposer-coding-lite", "icomposer-api-design", "uic-developer", "ask-insuremo",
 ] as const;
 type SkillScenarioId = typeof SKILL_SCENARIOS[number];
+const SCENARIO_DESCRIPTION_KEYS: Record<SkillScenarioId, InsuremoLocaleKey> = {
+  "icomposer-full-stack": "skillsCatalogDescriptionFullStack",
+  "icomposer-coding-lite": "skillsCatalogDescriptionCodingLite",
+  "icomposer-api-design": "skillsCatalogDescriptionApiDesign",
+  "uic-developer": "skillsCatalogDescriptionUic",
+  "ask-insuremo": "skillsCatalogDescriptionAsk",
+};
 
 interface SkillDiff {
   readonly added: readonly string[];
@@ -405,6 +421,15 @@ interface ScenarioRunState {
   readonly diff?: SkillDiff;
 }
 
+type CatalogState =
+  | { readonly phase: "idle" | "loading" }
+  | { readonly phase: "ready"; readonly view: SkillCatalogView }
+  | { readonly phase: "unavailable"; readonly message?: string };
+
+function catalogKey(entry: Pick<SkillCatalogEntryView, "type" | "name">): string {
+  return `${entry.type}:${entry.name}`;
+}
+
 class SkillsRegion extends Component<
   { t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void; faces?: DiagnosisFaces },
   {
@@ -414,6 +439,9 @@ class SkillsRegion extends Component<
     updateError?: string;
     scenario: SkillScenarioId;
     scenarioRun: ScenarioRunState;
+    catalog: CatalogState;
+    catalogQuery: string;
+    catalogChoice?: string;
   }
 > {
   override state: {
@@ -423,7 +451,97 @@ class SkillsRegion extends Component<
     updateError?: string;
     scenario: SkillScenarioId;
     scenarioRun: ScenarioRunState;
-  } = { rows: {}, updatingAll: false, scenario: SKILL_SCENARIOS[0], scenarioRun: { phase: "idle" } };
+    catalog: CatalogState;
+    catalogQuery: string;
+    catalogChoice?: string;
+  } = {
+    rows: {},
+    updatingAll: false,
+    scenario: SKILL_SCENARIOS[0],
+    scenarioRun: { phase: "idle" },
+    catalog: { phase: "idle" },
+    catalogQuery: "",
+  };
+  #catalogController: AbortController | undefined;
+  #catalogRequest = 0;
+
+  override componentDidMount(): void {
+    // Opening the expanded card is the explicit discovery affordance. It uses
+    // a POST refresh action (which may invoke npx); the separate GET bridge is
+    // cache-only and is never called for every search/render.
+    void this.loadCatalog(false);
+  }
+
+  override componentWillUnmount(): void {
+    this.#catalogController?.abort();
+  }
+
+  private commitCatalog(view: SkillCatalogView, controller: AbortController, request: number): void {
+    if (controller.signal.aborted || request !== this.#catalogRequest) return;
+    const currentChoice = this.state.catalogChoice;
+    const choice = currentChoice !== undefined && view.entries.some(entry => catalogKey(entry) === currentChoice)
+      ? currentChoice
+      : catalogKey(view.entries[0]!);
+    this.setState(prev => ({ ...prev, catalog: { phase: "ready", view }, catalogChoice: choice }));
+  }
+
+  private async loadCatalog(force: boolean): Promise<void> {
+    this.#catalogController?.abort();
+    const controller = new AbortController();
+    const request = ++this.#catalogRequest;
+    this.#catalogController = controller;
+    this.setState(prev => ({ ...prev, catalog: { phase: "loading" } }));
+
+    // First consult the Host cache. This GET is intentionally side-effect
+    // free; a cache miss then performs the explicit POST refresh associated
+    // with opening the install area.
+    if (!force) {
+      try {
+        const response = await fetch(SKILL_CATALOG_URL, { signal: controller.signal, headers: { Accept: "application/json" } });
+        if (response.ok) {
+          const view = parseSkillCatalog(await response.json());
+          if (view !== null) {
+            this.commitCatalog(view, controller, request);
+            return;
+          }
+        }
+      } catch { /* cache miss/network failure: continue to explicit refresh */ }
+      if (controller.signal.aborted || request !== this.#catalogRequest) return;
+    }
+
+    const outcome = await postAction<SkillCatalogView>("skill-catalog-refresh", { force }, controller.signal);
+    if (controller.signal.aborted || request !== this.#catalogRequest) return;
+    if (!outcome.ok) {
+      this.setState(prev => ({ ...prev, catalog: { phase: "unavailable", message: `${outcome.error.code}: ${outcome.error.message}` } }));
+      return;
+    }
+    const view = parseSkillCatalog(outcome.result);
+    if (view === null) {
+      this.setState(prev => ({ ...prev, catalog: { phase: "unavailable", message: this.props.t("skillsCatalogUnavailable") } }));
+      return;
+    }
+    this.commitCatalog(view, controller, request);
+  }
+
+  private catalogDescription(entry: SkillCatalogEntryView, t: Translate): string {
+    if (entry.type !== "scenario") return entry.description;
+    const key = SCENARIO_DESCRIPTION_KEYS[entry.name as SkillScenarioId];
+    return key === undefined ? entry.description : t(key);
+  }
+
+  private filteredCatalog(view: SkillCatalogView, t: Translate): readonly SkillCatalogEntryView[] {
+    const query = this.state.catalogQuery.trim().toLocaleLowerCase();
+    if (query.length === 0) return view.entries;
+    return view.entries.filter(entry => {
+      const typeLabel = entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill");
+      return `${entry.name} ${this.catalogDescription(entry, t)} ${entry.type} ${typeLabel} ${entry.group ?? ""}`.toLocaleLowerCase().includes(query);
+    });
+  }
+
+  private selectedCatalog(view: SkillCatalogView, visible: readonly SkillCatalogEntryView[] = view.entries): SkillCatalogEntryView | undefined {
+    const selected = view.entries.find(entry => catalogKey(entry) === this.state.catalogChoice);
+    return selected !== undefined && visible.some(entry => catalogKey(entry) === catalogKey(selected)) ? selected : visible[0];
+  }
 
   override componentDidUpdate(): void {
     // Keep a successful optimistic value visible until silentReload delivers
@@ -449,7 +567,7 @@ class SkillsRegion extends Component<
   }
 
   get #busy(): boolean {
-    return this.state.updatingAll || this.state.scenarioRun.phase === "busy";
+    return this.state.updatingAll || this.state.scenarioRun.phase === "busy" || this.state.catalog.phase === "loading";
   }
 
   /** Last-write-wins (TASK-041): server commits on its own revision; no CAS storms. */
@@ -489,11 +607,18 @@ class SkillsRegion extends Component<
     }
   }
 
-  /** Explicit install/sync of the selected allowlisted scenario. */
-  private async syncScenario(): Promise<void> {
+  /** Explicit install/sync of the selected scenario or exact catalog Skill. */
+  private async syncSelected(): Promise<void> {
     if (this.#busy) return;
+    const catalog = this.state.catalog;
+    const selected = catalog.phase === "ready"
+      ? this.selectedCatalog(catalog.view, this.filteredCatalog(catalog.view, key => this.props.t(key)))
+      : undefined;
+    const payload = selected === undefined
+      ? { scenario: this.state.scenario }
+      : selected.type === "scenario" ? { scenario: selected.name } : { skill: selected.name };
     this.setState({ scenarioRun: { phase: "busy" } });
-    const outcome = await postAction<SkillActionResultView>("skill-install", { scenario: this.state.scenario });
+    const outcome = await postAction<SkillActionResultView>("skill-install", payload);
     if (outcome.ok) {
       const result = outcome.result;
       const diff = diffOf(result);
@@ -504,30 +629,91 @@ class SkillsRegion extends Component<
       });
       this.props.onChanged();
     } else {
+      const catalogFailure = outcome.error.code === "catalog-unavailable" || outcome.error.code === "catalog-selection-invalid";
       const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
-      this.setState({ scenarioRun: { phase: "failed", message } });
+      this.setState(prev => ({
+        ...prev,
+        ...(catalogFailure ? { catalog: { phase: "unavailable", message: this.props.t("skillsCatalogUnavailable") } } : {}),
+        scenarioRun: { phase: "failed", message },
+      }));
     }
   }
 
-  override render(): ReactNode {
-    const { t, skills } = this.props;
-    const entries = skills.entries ?? [];
-    const cold = skills.code === "fast-uncached";
-    const busy = this.#busy;
-    const run = this.state.scenarioRun;
+  private renderCatalogPicker(t: Translate, busy: boolean): ReactNode {
+    const catalog = this.state.catalog;
+    if (catalog.phase === "ready") {
+      const filtered = this.filteredCatalog(catalog.view, t);
+      const selected = this.selectedCatalog(catalog.view, filtered);
+      const selectedKey = selected === undefined ? undefined : catalogKey(selected);
+      return (
+        <div className={css.catalog}>
+          <div className={css.catalogTools}>
+            <label className={css.catalogSearch}>
+              <span className={css.meta}>{t("skillsCatalogSearch")}</span>{" "}
+              <input
+                type="search"
+                className={css.catalogInput}
+                value={this.state.catalogQuery}
+                placeholder={t("skillsCatalogSearchPlaceholder")}
+                aria-label={t("skillsCatalogSearch")}
+                onChange={event => this.setState({ catalogQuery: event.target.value.slice(0, 256) })}
+              />
+            </label>
+            <button
+              type="button"
+              className={css.action}
+              disabled={busy}
+              onClick={() => void this.loadCatalog(true)}
+              aria-label={t("skillsCatalogRefresh")}
+            >{t("skillsCatalogRefresh")}</button>
+          </div>
+          <div
+            className={css.catalogList}
+            role="listbox"
+            aria-label={t("skillsCatalogTitle")}
+            aria-multiselectable="false"
+          >
+            {filtered.map((entry, index) => {
+              const key = catalogKey(entry);
+              const isSelected = key === selectedKey;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="option"
+                  className={`${css.catalogOption}${isSelected ? ` ${css.catalogOptionSelected}` : ""}`}
+                  aria-selected={isSelected}
+                  aria-label={`${entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill")}: ${entry.name}`}
+                  data-catalog-entry={key}
+                  disabled={busy}
+                  onClick={() => this.setState({ catalogChoice: key, scenarioRun: { phase: "idle" } })}
+                  onKeyDown={event => {
+                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                    event.preventDefault();
+                    const nextIndex = event.key === "ArrowDown"
+                      ? Math.min(filtered.length - 1, index + 1)
+                      : Math.max(0, index - 1);
+                    const next = filtered[nextIndex];
+                    if (next !== undefined) this.setState({ catalogChoice: catalogKey(next) });
+                  }}
+                >
+                  <span className={css.catalogOptionTop}>
+                    <span className={css.meta}>{entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill")}</span>
+                    <code>{entry.name}</code>
+                  </span>
+                  <span className={css.catalogDescription}>{this.catalogDescription(entry, t)}</span>
+                </button>
+              );
+            })}
+          </div>
+          {catalog.view.status === "empty" ? <p className={css.hint} data-catalog-state="empty">{t("skillsCatalogEmpty")}</p> : null}
+          {filtered.length === 0 ? <p className={css.hint}>{t("skillsCatalogNoMatch")}</p> : null}
+        </div>
+      );
+    }
     return (
-      <div className={css.region}>
-        <h4>{t("skillsTitle")}</h4>
-        {skills.code === "scan-failed" || skills.code === "unavailable" ? (
-          <p role="alert" data-skills-scan="failed" className={css.error}>{t("skillsScanFailed")}</p>
-        ) : null}
-        {skills.diagnosticCount > 0 ? (
-          <p role="alert" data-skills-diagnostics="summary" className={css.error}>
-            {t("skillsDiagnosticsSummary")}: {t("skillsFormatInvalidCount")} {skills.formatInvalidCount} · {t("skillsPathIssueCount")} {skills.pathIssueCount}
-            {skills.diagnosticsTruncated ? ` · ${t("skillsDiagnosticsVisible")} ${skills.diagnosticCount}` : ""}
-          </p>
-        ) : null}
-        <div className={css.controls}>
+      <div className={css.catalog}>
+        <div className={css.catalogTools}>
           <label>
             <span className={css.meta}>{t("skillsScenarioLabel")}</span>{" "}
             <select
@@ -543,12 +729,63 @@ class SkillsRegion extends Component<
           <button
             type="button"
             className={css.action}
-            disabled={busy}
-            aria-busy={run.phase === "busy" || undefined}
-            onClick={() => void this.syncScenario()}
-            aria-label={`${t("skillsScenarioInstall")}: ${this.state.scenario}`}
+            disabled={catalog.phase === "loading" || busy}
+            aria-busy={catalog.phase === "loading" || undefined}
+            onClick={() => void this.loadCatalog(true)}
+            aria-label={catalog.phase === "loading" ? t("skillsCatalogLoading") : t("skillsCatalogRefresh")}
           >
-            {run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")}
+            {catalog.phase === "loading" ? t("skillsCatalogLoading") : t("skillsCatalogRefresh")}
+          </button>
+        </div>
+        {catalog.phase === "loading" ? <p className={css.hint} role="status" aria-busy="true">{t("skillsCatalogLoading")}</p> : null}
+        {catalog.phase === "unavailable" ? (
+          <p className={css.error} role="alert" data-catalog-state="unavailable">
+            {t("skillsCatalogUnavailable")}{catalog.message === undefined ? "" : ` · ${catalog.message}`}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  override render(): ReactNode {
+    const { t, skills } = this.props;
+    const entries = skills.entries ?? [];
+    const cold = skills.code === "fast-uncached";
+    const busy = this.#busy;
+    const run = this.state.scenarioRun;
+    const catalogView = this.state.catalog.phase === "ready" ? this.state.catalog.view : undefined;
+    const visibleCatalog = catalogView === undefined ? [] : this.filteredCatalog(catalogView, t);
+    const selected = catalogView === undefined ? undefined : this.selectedCatalog(catalogView, visibleCatalog);
+    const noCatalogMatch = catalogView !== undefined && visibleCatalog.length === 0;
+    const isSingleSelection = selected?.type === "skill";
+    const installingLabel = selected === undefined ? t("skillsScenarioInstall") : t("skillsCatalogInstall");
+    const installingBusyLabel = selected === undefined ? t("skillsScenarioInstalling") : t("skillsCatalogInstalling");
+    const installingDoneLabel = isSingleSelection ? t("skillsCatalogDone") : t("skillsScenarioDone");
+    const installingFailedLabel = isSingleSelection ? t("skillsCatalogFailed") : t("skillsScenarioFailed");
+    const installingName = selected?.name ?? this.state.scenario;
+    return (
+      <div className={css.region}>
+        <h4>{t("skillsTitle")}</h4>
+        {skills.code === "scan-failed" || skills.code === "unavailable" ? (
+          <p role="alert" data-skills-scan="failed" className={css.error}>{t("skillsScanFailed")}</p>
+        ) : null}
+        {skills.diagnosticCount > 0 ? (
+          <p role="alert" data-skills-diagnostics="summary" className={css.error}>
+            {t("skillsDiagnosticsSummary")}: {t("skillsFormatInvalidCount")} {skills.formatInvalidCount} · {t("skillsPathIssueCount")} {skills.pathIssueCount}
+            {skills.diagnosticsTruncated ? ` · ${t("skillsDiagnosticsVisible")} ${skills.diagnosticCount}` : ""}
+          </p>
+        ) : null}
+        {this.renderCatalogPicker(t, busy)}
+        <div className={css.controls}>
+          <button
+            type="button"
+            className={css.action}
+            disabled={busy || noCatalogMatch}
+            aria-busy={run.phase === "busy" || undefined}
+            onClick={() => void this.syncSelected()}
+            aria-label={`${installingLabel}: ${installingName}`}
+          >
+            {run.phase === "busy" ? installingBusyLabel : installingLabel}
           </button>
           <button
             type="button"
@@ -562,11 +799,11 @@ class SkillsRegion extends Component<
           </button>
         </div>
         {run.phase === "done" ? (
-          <p role="status" data-scenario="done">{t("skillsScenarioDone")}{run.diff === undefined ? "" : `: ${diffText(run.diff, t)}`}</p>
+          <p role="status" data-scenario="done">{installingDoneLabel}{run.diff === undefined ? "" : `: ${diffText(run.diff, t)}`}</p>
         ) : null}
         {run.phase === "failed" ? (
           <p role="alert" data-scenario="failed" className={css.error}>
-            {t("skillsScenarioFailed")}: {run.message}{run.diff === undefined ? "" : ` · ${diffText(run.diff, t)}`} · {t("skillsRetryHint")}
+            {installingFailedLabel}: {run.message}{run.diff === undefined ? "" : ` · ${diffText(run.diff, t)}`} · {t("skillsRetryHint")}
             <DiagnoseButton t={t} kind="skill" faces={this.props.faces} />
           </p>
         ) : null}

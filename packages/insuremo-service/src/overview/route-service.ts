@@ -2,6 +2,7 @@ import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { mountOverviewRoute } from "./route.ts";
+import { mountSkillCatalogRoute } from "./skill-catalog-route.ts";
 import { mountWriteRoutes } from "./write-routes.ts";
 import { mountWorkspacesStatusRoute } from "./workspaces-status.ts";
 
@@ -54,6 +55,7 @@ export class InsuremoRoutesService extends Service {
       }
     };
     safe(() => mountOverviewRoute(ctx));
+    safe(() => mountSkillCatalogRoute(ctx));
     safe(() => mountWriteRoutes(ctx));
     safe(() => mountWorkspacesStatusRoute(ctx));
     const firstRequestGuard = (_req: IncomingMessage, res: ServerResponse): void => {
