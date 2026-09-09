@@ -104,21 +104,21 @@ export class IcomposerVerifyService extends Service {
     const entry = await this.workspaceEntry(workspaceId, signal);
     if (!entry.ok) return entry;
     const { canonicalPath } = entry.value;
-    const active = await this.activeProfileAuth(signal);
+    const active = await this.activeProfileAuth(workspaceId, signal);
     if (!active.ok) return active;
     const { profileName } = active.value;
     if (!isValidAuthProfile(profileName)) return err("invalid-auth");
     const args = buildVerifyArgs(mode, profileName, payload);
 
     const auth = this.ctx.get("imoAuth" as never) as unknown as {
-      prepare(request: { profile?: string; env?: string }, signal?: AbortSignal): Promise<{
+      prepare(request: { profile?: string; env?: string; workspaceId?: string | null }, signal?: AbortSignal): Promise<{
         ok: boolean;
         value?: { use<T>(cb: (secret: { readonly accessToken: string }) => Promise<T> | T): Promise<T> };
         error?: { code?: string };
       }>;
     } | undefined;
     if (!auth) return err("cli-error");
-    const leaseResult = await auth.prepare({ profile: profileName }, signal);
+    const leaseResult = await auth.prepare({ profile: profileName, workspaceId }, signal);
     if (!leaseResult.ok) return this.mapAuthError(leaseResult.error);
     try {
       return await leaseResult.value!.use(async (secret) => {
@@ -146,14 +146,14 @@ export class IcomposerVerifyService extends Service {
     }
   }
 
-  private async activeProfileAuth(signal?: AbortSignal): Promise<Result<{ profileName: string }>> {
+  private async activeProfileAuth(workspaceId: string, signal?: AbortSignal): Promise<Result<{ profileName: string }>> {
     if (signal?.aborted) return err("cancelled");
     const active = this.ctx.get("imoActiveProfile" as never) as unknown as {
-      get(signal?: AbortSignal): Promise<{ ok: boolean; value?: { status: string; activeProfileName: string | null; profile?: { profileName: string; envId?: string } } }>;
+      get(signal?: AbortSignal, workspaceId?: string | null): Promise<{ ok: boolean; value?: { status: string; activeProfileName: string | null; profile?: { profileName: string; envId?: string } } }>;
     } | undefined;
     if (active === undefined || active === null) return err("invalid-auth", "active profile is unavailable");
     let result: { ok: boolean; value?: { status: string; activeProfileName: string | null; profile?: { profileName: string; envId?: string } } };
-    try { result = await active.get(signal); } catch { return err("invalid-auth", "active profile is unavailable"); }
+    try { result = await active.get(signal, workspaceId); } catch { return err("invalid-auth", "active profile is unavailable"); }
     if (!result.ok || result.value?.status !== "active" || result.value.profile === undefined) return err("invalid-auth", "active profile is unavailable");
     const profileName = result.value.activeProfileName ?? result.value.profile.profileName;
     if (typeof profileName !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(profileName)) return err("invalid-auth", "active profile is unavailable");

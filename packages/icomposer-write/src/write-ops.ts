@@ -143,7 +143,7 @@ export async function testExecuteOp(deps: WriteOpsDeps, operationId: string, sig
     deps.journal.markOutcomeUnknown(operationId);
     return failure("local-unpushed-changes", "local file has unpushed changes; re-run with overrideUnpushed or push first", operationId);
   }
-  const leaseRes = await resolveLease(deps.ctx, bound, signal);
+  const leaseRes = await resolveLease(deps.ctx, bound, signal, pending.workspaceId);
   if (!leaseRes.ok) { deps.journal.markOutcomeUnknown(operationId); return failure(leaseRes.error.code, leaseRes.error.message, operationId); }
   const startedAt = new Date().toISOString();
   try {
@@ -232,8 +232,8 @@ function validateReleaseInput(input: ReleaseApplyInput | ReleasePreviewInput): R
 
 const MESSAGE_MAX = 500;
 
-async function runLeasedCli(deps: WriteOpsDeps, canonicalPath: string, bound: { authProfile: string; environmentId: string }, args: readonly string[], signal?: AbortSignal): Promise<{ ok: true; exitCode: number | null; signal: string | null; stdout: string; stdoutDigest: string; stderrDigest: string } | { ok: false; code: PushErrorCode; message: string }> {
-  const leaseRes = await resolveLease(deps.ctx, bound, signal);
+async function runLeasedCli(deps: WriteOpsDeps, workspaceId: string, canonicalPath: string, bound: { authProfile: string; environmentId: string }, args: readonly string[], signal?: AbortSignal): Promise<{ ok: true; exitCode: number | null; signal: string | null; stdout: string; stdoutDigest: string; stderrDigest: string } | { ok: false; code: PushErrorCode; message: string }> {
+  const leaseRes = await resolveLease(deps.ctx, bound, signal, workspaceId);
   if (!leaseRes.ok) return { ok: false, code: leaseRes.error.code, message: leaseRes.error.message };
   try {
     return await leaseRes.value.use(async () => {
@@ -262,7 +262,7 @@ export async function releasePreviewOp(deps: WriteOpsDeps, input: ReleasePreview
   if (!binding.ok) return binding;
   const { canonicalPath, binding: bound } = binding.value;
   if (!bound) return { ok: false, error: { code: "workspace-not-bound", message: "workspace is not bound" } };
-  const ran = await runLeasedCli(deps, canonicalPath, bound, buildReleaseArgs(bound.authProfile, { ...validated.value, dryRun: true }), signal);
+  const ran = await runLeasedCli(deps, input.workspaceId, canonicalPath, bound, buildReleaseArgs(bound.authProfile, { ...validated.value, dryRun: true }), signal);
   if (!ran.ok) return { ok: false, error: { code: ran.code, message: ran.message } };
   const parsed = parseReleaseApply(ran.stdout, ran.exitCode ?? 1);
   if (!parsed.ok) return notJsonFailure(ran);
@@ -286,7 +286,7 @@ export async function releaseReposOp(deps: WriteOpsDeps, workspaceId: string, si
   if (!binding.ok) return binding;
   const { canonicalPath, binding: bound } = binding.value;
   if (!bound) return { ok: false, error: { code: "workspace-not-bound", message: "workspace is not bound" } };
-  const ran = await runLeasedCli(deps, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "repo"), signal);
+  const ran = await runLeasedCli(deps, workspaceId, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "repo"), signal);
   if (!ran.ok) return { ok: false, error: { code: ran.code, message: ran.message } };
   const parsed = parseReleaseRepos(ran.stdout);
   if (!parsed.ok) return notJsonFailure(ran);
@@ -300,7 +300,7 @@ export async function releaseBranchesOp(deps: WriteOpsDeps, workspaceId: string,
   if (!binding.ok) return binding;
   const { canonicalPath, binding: bound } = binding.value;
   if (!bound) return { ok: false, error: { code: "workspace-not-bound", message: "workspace is not bound" } };
-  const ran = await runLeasedCli(deps, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "branch", repo), signal);
+  const ran = await runLeasedCli(deps, workspaceId, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "branch", repo), signal);
   if (!ran.ok) return { ok: false, error: { code: ran.code, message: ran.message } };
   const parsed = parseReleaseBranches(ran.stdout);
   if (!parsed.ok) return notJsonFailure(ran);
@@ -363,7 +363,7 @@ export async function releaseExecuteOp(deps: WriteOpsDeps, operationId: string, 
   if (!bound) { deps.journal.markOutcomeUnknown(operationId); return failure("workspace-not-bound", "workspace is not bound", operationId); }
   const startedAt = new Date().toISOString();
   try {
-    return await resolveLease(deps.ctx, bound, signal).then(async leaseRes => {
+    return await resolveLease(deps.ctx, bound, signal, pending.workspaceId).then(async leaseRes => {
       if (!leaseRes.ok) { deps.journal.markOutcomeUnknown(operationId); return failure(leaseRes.error.code, leaseRes.error.message, operationId); }
       return leaseRes.value.use(async () => {
         const run = await capture(deps.ctx.subprocess, {

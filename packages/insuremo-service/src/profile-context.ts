@@ -49,14 +49,14 @@ export interface InsuremoProfile {
   readonly digest: string;
 }
 
-export type ProfileResolver = () => Promise<InsuremoProfile | undefined>;
+export type ProfileResolver = (sessionId?: string) => Promise<InsuremoProfile | undefined>;
 
 /** The event-handler surface we depend on (harness-shimmed). */
 export interface PreStepListeners {
   on(event: "agent/pre-step", listener: (payload: unknown, next: unknown) => Promise<unknown>, options?: { prepend?: boolean }): () => boolean;
 }
 export interface ProfilePreStepPayload {
-  agent: { session: { events: readonly unknown[] } };
+  agent: { id?: string; session: { events: readonly unknown[] } };
   turn: number;
   step: number;
   signal?: { aborted: boolean };
@@ -67,14 +67,33 @@ export interface ProfilePreStepDecision {
   readonly messages?: readonly unknown[];
 }
 
+/** Resolve the agent's session through the trusted workspace registry. */
+function workspaceForSession(ctx: Context, sessionId?: string): string | undefined | null {
+  if (sessionId === undefined) return undefined;
+  const registry = (ctx as unknown as { get(name: string): unknown }).get("workspaceRegistry") as {
+    list?: () => readonly { id: unknown; sessionIds: readonly unknown[] }[];
+  } | undefined;
+  if (registry?.list === undefined) return null;
+  try {
+    const workspace = registry.list().find(candidate => candidate.sessionIds.some(id => String(id) === sessionId));
+    return workspace === undefined ? undefined : typeof workspace.id === "string" ? workspace.id : String(workspace.id);
+  } catch {
+    return null;
+  }
+}
+
 /** Resolver reads only the Workbench-owned Active Profile face. */
 function defaultResolver(ctx: Context): ProfileResolver {
-  return async () => {
+  return async (sessionId?: string) => {
     const active = (ctx as unknown as { get(name: string): unknown }).get("imoActiveProfile") as {
-      get?: () => Promise<{ ok: boolean; value?: { activeProfileName: string | null; profile?: { env?: string } } }>;
+      get?: (signal?: AbortSignal, workspaceId?: string | null) => Promise<{ ok: boolean; value?: { activeProfileName: string | null; profile?: { env?: string } } }>;
     } | undefined;
     if (active?.get === undefined) return undefined;
-    const result = await active.get();
+    const workspaceId = workspaceForSession(ctx, sessionId);
+    // A registry fault is not the same as an ungrouped session: fail closed
+    // rather than borrowing the global identity in that case.
+    if (workspaceId === null) return undefined;
+    const result = await active.get(undefined, workspaceId);
     if (result.ok !== true || result.value === undefined) return undefined;
     const name = result.value.activeProfileName;
     return { name, ...(result.value.profile?.env === undefined ? {} : { env: result.value.profile.env }), digest: shortDigest(name ?? "<none>") };
@@ -229,7 +248,7 @@ export class ImoProfileContextService extends Service {
       // only inject on the first step of a turn
       if (p.step !== 1) return decision;
       const events = p.agent.session.events ?? [];
-      const profile = await this.resolver().catch(() => undefined);
+      const profile = await this.resolver(p.agent?.id).catch(() => undefined);
       if (profile === undefined) return decision;
       const plan = decideProfileContext(events, profile);
       if (!plan.inject) return decision;

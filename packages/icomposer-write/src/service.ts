@@ -315,7 +315,7 @@ export class IcomposerWriteService extends Service {
     if (!binding.ok) return binding;
     const { binding: bound, canonicalPath } = binding.value;
     if (!bound) return err("workspace-not-bound");
-    const leaseRes = await resolveLease(this.ctx, bound, signal);
+    const leaseRes = await resolveLease(this.ctx, bound, signal, workspaceId);
     if (!leaseRes.ok) return err(leaseRes.error.code);
     try {
       return await leaseRes.value.use(async () => {
@@ -387,7 +387,7 @@ export class IcomposerWriteService extends Service {
       this.#journal.markOutcomeUnknown(operationId);
       return execFailure("workspace-not-bound", "workspace is not bound", operationId);
     }
-    const leaseRes = await resolveLease(this.ctx, bound, signal);
+    const leaseRes = await resolveLease(this.ctx, bound, signal, pending.workspaceId);
     if (!leaseRes.ok) {
       this.#journal.markOutcomeUnknown(operationId);
       return execFailure(leaseRes.error.code, leaseRes.error.message, operationId);

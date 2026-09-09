@@ -302,9 +302,9 @@ export class IciEngineService extends Service {
       const { graph, canonicalPath, stale } = ctxLoad;
       const docs = await loadSearchDocs(canonicalPath, graph);
       const cachePath = join(graphBaseDir(canonicalPath, input.workspaceId), "search", "api_embeddings.jsonl");
-      const profile = await resolveActiveProfileAuth(this.ctx, signal);
+      const profile = await resolveActiveProfileAuth(this.ctx, signal, input.workspaceId);
       if (!profile.ok) return profile as Result<never>;
-      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), profile: profile.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
+      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), profile: profile.value, workspaceId: input.workspaceId, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
         indexEmbeddings({ rt, token, cachePath, docs, rebuild: input.rebuild === true, timeoutMs: this.#timeoutMs, signal, embeddingUrl: this.#embeddingUrl }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
@@ -339,9 +339,9 @@ export class IciEngineService extends Service {
       const cachePath = await searchCachePath(canonicalPath, input.workspaceId);
       const mode: EmbeddingMode = input.mode ?? "all";
       const top = clampInt(input.top, 10, 1, 50);
-      const profile = await resolveActiveProfileAuth(this.ctx, signal);
+      const profile = await resolveActiveProfileAuth(this.ctx, signal, input.workspaceId);
       if (!profile.ok) return profile as Result<never>;
-      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), profile: profile.value, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
+      const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), profile: profile.value, workspaceId: input.workspaceId, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
         searchEmbeddings({ rt, token, cachePath, query: input.query, mode, top, graph, timeoutMs: this.#timeoutMs, signal, embeddingUrl: this.#embeddingUrl }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };

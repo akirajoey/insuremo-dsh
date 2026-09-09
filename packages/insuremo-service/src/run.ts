@@ -114,6 +114,8 @@ export interface RunOptions {
 	readonly signal?: AbortSignal;
 	/** Explicit child environment overrides for deterministic read-only probes. */
 	readonly env?: NodeJS.ProcessEnv;
+	/** Child working directory; omitted callers retain the process cwd. */
+	readonly cwd?: string;
 }
 
 /** SHA-256 hex digest with a stable `sha256:` prefix. */
@@ -273,7 +275,7 @@ async function captureCore(
 	try {
 		const spawnSpec = {
 			argv: toSpawnArgv(executablePath, options.args, process.platform),
-			cwd: process.cwd(),
+			cwd: options.cwd ?? process.cwd(),
 			stdio: {
 				stdin: "ignore" as const,
 				stdout: { maxBytes: OUTPUT_LIMIT_BYTES } as const,

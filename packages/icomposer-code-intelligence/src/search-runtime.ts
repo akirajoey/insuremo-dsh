@@ -12,13 +12,15 @@ function err2(code: IciErrorCode, message: string = code): Result<never> {
 
 export interface EmbeddingLeaseDeps {
   readonly auth?: {
-    prepare(request: { profile?: string; env?: string }, signal?: AbortSignal): Promise<{
+    prepare(request: { profile?: string; env?: string; workspaceId?: string | null }, signal?: AbortSignal): Promise<{
       ok: boolean;
       value?: { use<T2>(cb: (secret: { readonly accessToken: string }) => Promise<T2> | T2): Promise<T2> };
       error?: { code?: string };
     }>;
   };
   readonly profile: { profileName: string };
+  /** Workspace id used to resolve the same project auth cwd as the picker. */
+  readonly workspaceId?: string | null;
   readonly subprocess: unknown;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
@@ -31,7 +33,7 @@ export async function embeddingLease<T>(
 ): Promise<Result<T>> {
   const auth = deps.auth;
   if (!auth) return err2("embedding-error");
-  const leaseResult = await auth.prepare({ profile: deps.profile.profileName }, deps.signal);
+  const leaseResult = await auth.prepare({ profile: deps.profile.profileName, workspaceId: deps.workspaceId }, deps.signal);
   if (!leaseResult.ok) {
     const code = (leaseResult.error as { code?: string } | undefined)?.code;
     if (code === "invalid-auth" || code === "forbidden" || code === "prepare-invalidated" || code === "lease-revoked") {

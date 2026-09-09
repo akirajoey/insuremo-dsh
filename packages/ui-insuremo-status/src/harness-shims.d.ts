@@ -1,8 +1,15 @@
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {}
 
+  type ProfileSessionState = { current?: string };
+  type ProfileWorkspaceState = {
+    items: ReadonlyArray<{ workspaceId: string; path: string; sessionIds: ReadonlyArray<string> }>;
+    phase: string;
+    baselinesReady: boolean;
+  };
+  type ProfileSelector<S> = <T>(selector: (state: S) => T) => T;
   type PropsRuntime<K extends string> = K extends "sidebar.footer.action"
-    ? { wide: boolean }
+    ? { wide: boolean; useSessions: ProfileSelector<ProfileSessionState>; useWorkspaces: ProfileSelector<ProfileWorkspaceState> }
     : { close: () => void };
 
   type PropsLocale<N extends keyof LocaleNamespaceMap & string> = {

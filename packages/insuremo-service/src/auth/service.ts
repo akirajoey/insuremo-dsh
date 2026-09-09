@@ -1,5 +1,9 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
+import { lstat, readdir, rmdir } from "node:fs/promises";
+import { lstatSync, mkdtempSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Config, resolveConfig, type Config as ImoConfig } from "../config.ts";
 import { runCapture, type RunFailure } from "../run.ts";
 import { AuthLease, type AuthCacheEntry } from "./lease.ts";
@@ -8,7 +12,6 @@ import {
   isRecord,
   parseDefaultProfile,
   profileView,
-  rawBoolean,
   rawString,
   safeAuthString,
   safeEndpoint,
@@ -18,7 +21,6 @@ import {
 } from "./sanitize.ts";
 import {
   AUTH_CACHE_INVALIDATED_EVENT,
-  AUTH_LEASE_REVOKED_CODE,
   AUTH_PREPARE_INVALIDATED_CODE,
   AUTH_SERVICE_DISPOSED_CODE,
   type ImoAuth,
@@ -38,7 +40,6 @@ import {
 } from "./types.ts";
 import {
   LIST_CACHE_TTL_MS,
-  authCancelled,
   authCacheKey,
   authCacheMatches,
   authLifecycleError,
@@ -47,6 +48,19 @@ import {
   authStatusError,
   type PendingAuthPrepare,
 } from "./service-helpers.ts";
+import { resolveWorkspace, workspaceScopeKey } from "./workspace.ts";
+
+interface AuthScope {
+  readonly workspaceId?: string;
+  /** Canonical cwd selected by the trusted registry or private global dir. */
+  readonly cwd: string;
+  /** Includes workspace identity and canonical cwd; never just profile/env. */
+  readonly key: string;
+}
+
+type ScopeResult =
+  | { readonly ok: true; readonly value: AuthScope }
+  | { readonly ok: false; readonly error: ImoAuthError };
 
 export class ImoAuthService extends Service implements ImoAuth {
   static inject = ["subprocess"];
@@ -54,13 +68,15 @@ export class ImoAuthService extends Service implements ImoAuth {
 
   private readonly config: ImoConfig;
   #cache = new Map<string, AuthCacheEntry>();
-  #listCache: { readonly at: number; readonly value: ImoAuthResult<ImoAuthProfileList> } | undefined;
-  #listInflight: Promise<ImoAuthResult<ImoAuthProfileList>> | undefined;
-  #defaultCache: { readonly at: number; readonly value: ImoAuthResult<ImoAuthDefaultProfile> } | undefined;
-  #defaultInflight: Promise<ImoAuthResult<ImoAuthDefaultProfile>> | undefined;
+  #listCache = new Map<string, { readonly at: number; readonly value: ImoAuthResult<ImoAuthProfileList> }>();
+  #listInflight = new Map<string, Promise<ImoAuthResult<ImoAuthProfileList>>>();
+  #defaultCache = new Map<string, { readonly at: number; readonly value: ImoAuthResult<ImoAuthDefaultProfile> }>();
+  #defaultInflight = new Map<string, Promise<ImoAuthResult<ImoAuthDefaultProfile>>>();
   #inflight = new Map<string, PendingAuthPrepare>();
   #pendingMeta = new Map<string, { profile: string | null; env: string | null }>();
   #generations = new Map<string, number>();
+  #globalCwd: string | undefined;
+  #fastCacheEpoch = 0;
   #disposed = false;
   #epoch = 0;
 
@@ -81,13 +97,16 @@ export class ImoAuthService extends Service implements ImoAuth {
     this.ctx.effect(() => () => this.clearCache(), "imoAuth.cache");
   }
 
-  async listProfiles(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>> {
+  async listProfiles(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthProfileList>> {
+    const scope = this.resolveScope(workspaceId);
+    if (!scope.ok) return scope;
     const args = ["auth", "profile", "list", "--format", "json"] as const;
     const run = await runCapture(this.ctx.subprocess, {
       command: this.config.command,
       args,
       timeoutMs: this.config.timeoutMs,
       signal,
+      cwd: scope.value.cwd,
     });
     if (!run.ok) return { ok: false, error: authRunError(run.error, this.config.command, "profile list") };
     let parsed: unknown;
@@ -99,84 +118,80 @@ export class ImoAuthService extends Service implements ImoAuth {
     if (!Array.isArray(parsed)) {
       return authParseError(this.config.command, "profile list", run.value.stdoutDigest, run.value.stderrDigest);
     }
-    const profiles = parsed.map(profileView).filter((profile): profile is ImoAuthProfileView => profile !== null);
+    const profiles = sanitizeProfiles(parsed);
     return { ok: true, value: { profiles, stdoutDigest: run.value.stdoutDigest } };
   }
 
-  async defaultProfile(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthDefaultProfile>> {
-    const args = ["auth", "default-profile", "get"] as const;
-    const run = await runCapture(this.ctx.subprocess, {
-      command: this.config.command,
-      args,
-      timeoutMs: this.config.timeoutMs,
-      signal,
-    });
-    if (!run.ok) return { ok: false, error: authRunError(run.error, this.config.command, "default profile") };
-    const profileName = parseDefaultProfile(run.value.stdout.text);
-    if (profileName === undefined) {
-      return authParseError(this.config.command, "default profile", run.value.stdoutDigest, run.value.stderrDigest);
-    }
-    return { ok: true, value: { profileName, stdoutDigest: run.value.stdoutDigest } };
+  async defaultProfile(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthDefaultProfile>> {
+    const scope = this.resolveScope(workspaceId);
+    if (!scope.ok) return scope;
+    return this.defaultProfileAt(scope.value, signal);
   }
 
   /**
    * Cached default-profile (TASK-043 fix-3): 60s TTL + in-flight coalescing,
-   * so `profilesFast` never spawns the CLI on a warm fast read.
+   * partitioned by the trusted workspace cwd.
    */
-  async defaultProfileCached(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthDefaultProfile>> {
+  async defaultProfileCached(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthDefaultProfile>> {
+    const scope = this.resolveScope(workspaceId);
+    if (!scope.ok) return scope;
+    return this.defaultProfileCachedAt(scope.value, signal);
+  }
+
+  private async defaultProfileCachedAt(scope: AuthScope, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthDefaultProfile>> {
+    const cached = this.#defaultCache.get(scope.key);
     const now = Date.now();
-    if (this.#defaultCache !== undefined && now - this.#defaultCache.at <= LIST_CACHE_TTL_MS) {
-      return this.#defaultCache.value;
-    }
-    if (this.#defaultInflight !== undefined) return this.#defaultInflight;
-    const inflight = this.defaultProfile(signal).then((result) => {
-      this.#defaultInflight = undefined;
-      if (result.ok) this.#defaultCache = { at: Date.now(), value: result };
+    if (cached !== undefined && now - cached.at <= LIST_CACHE_TTL_MS) return cached.value;
+    const existing = this.#defaultInflight.get(scope.key);
+    if (existing !== undefined) return existing;
+    const epoch = this.#fastCacheEpoch;
+    const inflight = this.defaultProfileAt(scope, signal).then((result) => {
+      if (this.#defaultInflight.get(scope.key) === inflight) this.#defaultInflight.delete(scope.key);
+      if (epoch === this.#fastCacheEpoch && result.ok) this.#defaultCache.set(scope.key, { at: Date.now(), value: result });
       return result;
     }, (error) => {
-      this.#defaultInflight = undefined;
+      if (this.#defaultInflight.get(scope.key) === inflight) this.#defaultInflight.delete(scope.key);
       throw error;
     });
-    this.#defaultInflight = inflight;
+    this.#defaultInflight.set(scope.key, inflight);
     return inflight;
   }
 
   /**
-   * Fast snapshot (TASK-043): sanitized CLI profile list with a 60s TTL
-   * in-memory cache — NO direct read of the imo credential store (that file
-   * holds `access_token`, so it must never enter this process's memory).
-   * A CLI failure serves the last good sanitized list (stale=true) instead
-   * of an empty result, so the UI never renders a misleading "None".
+   * Fast snapshot from the SANITIZED CLI cache only: no direct credential-store
+   * read. Each workspace has an independent list/default cache namespace.
    */
-  async listProfilesCached(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>> {
+  async listProfilesCached(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthProfileList>> {
+    const scope = this.resolveScope(workspaceId);
+    if (!scope.ok) return scope;
+    return this.listProfilesCachedAt(scope.value, signal);
+  }
+
+  private async listProfilesCachedAt(scope: AuthScope, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>> {
+    const cached = this.#listCache.get(scope.key);
     const now = Date.now();
-    if (this.#listCache !== undefined && now - this.#listCache.at <= LIST_CACHE_TTL_MS) {
-      return this.#listCache.value;
-    }
-    if (this.#listInflight !== undefined) return this.#listInflight;
-    const inflight = this.listProfiles(signal).then((result) => {
-      this.#listInflight = undefined;
-      if (result.ok) this.#listCache = { at: Date.now(), value: result };
+    if (cached !== undefined && now - cached.at <= LIST_CACHE_TTL_MS) return cached.value;
+    const existing = this.#listInflight.get(scope.key);
+    if (existing !== undefined) return existing;
+    const epoch = this.#fastCacheEpoch;
+    const inflight = this.listProfilesAt(scope, signal).then((result) => {
+      if (this.#listInflight.get(scope.key) === inflight) this.#listInflight.delete(scope.key);
+      if (epoch === this.#fastCacheEpoch && result.ok) this.#listCache.set(scope.key, { at: Date.now(), value: result });
       return result;
     }, (error) => {
-      this.#listInflight = undefined;
+      if (this.#listInflight.get(scope.key) === inflight) this.#listInflight.delete(scope.key);
       throw error;
     });
-    this.#listInflight = inflight;
+    this.#listInflight.set(scope.key, inflight);
     return inflight;
   }
 
-  /**
-   * Millisecond profile snapshot from the SANITIZED CLI cache only
-   * (TASK-043): never reads the credential store. First call triggers the
-   * CLI prep run; subsequent calls within the 60s TTL are cache hits. A CLI
-   * failure with no warm cache is an honest error (UI shows a skeleton +
-   * short retry, never a fake empty list).
-   */
-  async profilesFast(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfilesFast>> {
-    const cached = await this.listProfilesCached(signal);
+  async profilesFast(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthProfilesFast>> {
+    const scope = this.resolveScope(workspaceId);
+    if (!scope.ok) return scope;
+    const cached = await this.listProfilesCachedAt(scope.value, signal);
     if (!cached.ok) return cached;
-    const def = await this.defaultProfileCached(signal);
+    const def = await this.defaultProfileCachedAt(scope.value, signal);
     const profiles = cached.value.profiles.map((profile) => {
       const isDefault = def.ok ? def.value.profileName === profile.profileName : profile.isDefault === true;
       return isDefault === (profile.isDefault === true) ? profile : { ...profile, isDefault };
@@ -184,13 +199,16 @@ export class ImoAuthService extends Service implements ImoAuth {
     return { ok: true, value: { profiles, defaultProfile: def.ok ? def.value.profileName : null, stale: false } };
   }
 
-  async validate(profile?: string, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthValidation>> {
+  async validate(profile?: string, signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthValidation>> {
+    const scope = this.resolveScope(workspaceId);
+    if (!scope.ok) return scope;
     const args = ["auth", "profile", "validate", ...(profile === undefined ? [] : ["--profile", profile]), "--json"] as const;
     const run = await runCapture(this.ctx.subprocess, {
       command: this.config.command,
       args,
       timeoutMs: this.config.timeoutMs,
       signal,
+      cwd: scope.value.cwd,
     });
     if (!run.ok) {
       const error = authRunError(run.error, this.config.command, "profile validate", true);
@@ -239,9 +257,11 @@ export class ImoAuthService extends Service implements ImoAuth {
     signal?: AbortSignal,
   ): Promise<ImoAuthResult<ImoAuthLease>> {
     if (this.#disposed) return authLifecycleError(AUTH_SERVICE_DISPOSED_CODE, this.config.command);
+    const scope = this.resolveScope(request.workspaceId);
+    if (!scope.ok) return scope;
     const profile = request.profile ?? null;
     const env = request.env ?? null;
-    const key = authCacheKey(profile, env);
+    const key = authCacheKey(profile, env, scope.value.key);
     const cached = this.#cache.get(key);
     if (cached !== undefined) return { ok: true, value: new AuthLease(cached, true) };
     const existing = this.#inflight.get(key);
@@ -258,7 +278,7 @@ export class ImoAuthService extends Service implements ImoAuth {
       invalidated: false,
       promise: Promise.resolve(authLifecycleError(AUTH_PREPARE_INVALIDATED_CODE, this.config.command)),
     };
-    const raw = this.executePrepare(profile, env, signal);
+    const raw = this.executePrepare(profile, env, scope.value, signal);
     pending.promise = raw.then((result) => this.finalizePrepare(key, pending, result)).finally(() => {
       if (this.#inflight.get(key) === pending) this.#inflight.delete(key);
       this.#pendingMeta.delete(key);
@@ -288,13 +308,13 @@ export class ImoAuthService extends Service implements ImoAuth {
       if (pending !== undefined) pending.invalidated = true;
     }
     for (const key of keys) this.#generations.set(key, (this.#generations.get(key) ?? 0) + 1);
-    // TASK-043 fix-3: any invalidation drops the sanitized list/default fast
-    // caches too, so a profile switch is re-read on the next fast access
-    // (never a stale cached snapshot).
-    this.#listCache = undefined;
-    this.#listInflight = undefined;
-    this.#defaultCache = undefined;
-    this.#defaultInflight = undefined;
+    this.#fastCacheEpoch += 1;
+    this.#listCache.clear();
+    this.#defaultCache.clear();
+    // An in-flight read may still finish, but its old result is never reused:
+    // invalidate the map entries before releasing the next caller.
+    this.#listInflight.clear();
+    this.#defaultInflight.clear();
     this.ctx.emit(AUTH_CACHE_INVALIDATED_EVENT, {
       ...(request.profile === undefined ? {} : { profile: request.profile }),
       ...(request.env === undefined ? {} : { env: request.env }),
@@ -308,39 +328,84 @@ export class ImoAuthService extends Service implements ImoAuth {
     return { size: this.#cache.size };
   }
 
-  private clearCache(): void {
-    this.#disposed = true;
-    this.#epoch += 1;
-    for (const entry of this.#cache.values()) entry.cell.revoked = true;
-    for (const pending of this.#inflight.values()) pending.invalidated = true;
-    this.#cache.clear();
-    this.#inflight.clear();
-    this.#pendingMeta.clear();
-    this.#generations.clear();
-  }
-
-  private finalizePrepare(
-    key: string,
-    pending: PendingAuthPrepare,
-    result: ImoAuthResult<AuthCacheEntry>,
-  ): ImoAuthResult<AuthCacheEntry> {
-    if (this.#disposed || pending.epoch !== this.#epoch) {
-      return authLifecycleError(AUTH_SERVICE_DISPOSED_CODE, this.config.command);
+  private resolveScope(workspaceId?: string | null): ScopeResult {
+    if (this.#disposed) {
+      return { ok: false, error: { code: AUTH_SERVICE_DISPOSED_CODE, message: `IMO auth scope failed: ${AUTH_SERVICE_DISPOSED_CODE}`, command: this.config.command } };
     }
-    if (pending.invalidated || (this.#generations.get(key) ?? 0) !== pending.generation) {
-      return authLifecycleError(AUTH_PREPARE_INVALIDATED_CODE, this.config.command);
+    if (workspaceId !== undefined && workspaceId !== null) {
+      const resolved = resolveWorkspace(this.ctx, workspaceId);
+      if (!resolved.ok) {
+        return { ok: false, error: { code: resolved.code, message: `IMO auth workspace failed: ${resolved.code}`, command: this.config.command } };
+      }
+      return { ok: true, value: { workspaceId: resolved.workspaceId, cwd: resolved.cwd, key: workspaceScopeKey(resolved.workspaceId, resolved.cwd) } };
     }
-    if (result.ok) this.replaceCache(key, result.value);
-    return result;
+    let cwd: string;
+    try {
+      cwd = this.ensureGlobalCwd();
+      if (!this.isPrivateGlobalCwd(cwd)) throw new Error("global auth cwd is not private");
+    } catch {
+      return { ok: false, error: { code: "workspace-unavailable", message: "IMO auth global workspace is unavailable", command: this.config.command } };
+    }
+    return { ok: true, value: { cwd, key: JSON.stringify(["global", cwd]) } };
   }
 
-  private replaceCache(key: string, entry: AuthCacheEntry): void {
-    const previous = this.#cache.get(key);
-    if (previous !== undefined) previous.cell.revoked = true;
-    this.#cache.set(key, entry);
+  private ensureGlobalCwd(): string {
+    if (this.#globalCwd === undefined) {
+      // mkdtemp creates a fresh 0700 directory. The service owns this exact
+      // path and never points the CLI at the system temp parent itself.
+      this.#globalCwd = mkdtempSync(join(tmpdir(), "icomposer-auth-global-"));
+    }
+    return this.#globalCwd;
   }
 
-  private async executePrepare(profile: string | null, env: string | null, signal?: AbortSignal): Promise<ImoAuthResult<AuthCacheEntry>> {
+  private isPrivateGlobalCwd(cwd: string): boolean {
+    const stat = lstatSync(cwd);
+    if (!stat.isDirectory()) return false;
+    const entries = readdirSync(cwd, { withFileTypes: true });
+    return entries.every(entry => entry.name !== ".insuremo");
+  }
+
+  private async listProfilesAt(scope: AuthScope, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>> {
+    const args = ["auth", "profile", "list", "--format", "json"] as const;
+    const run = await runCapture(this.ctx.subprocess, {
+      command: this.config.command,
+      args,
+      timeoutMs: this.config.timeoutMs,
+      signal,
+      cwd: scope.cwd,
+    });
+    if (!run.ok) return { ok: false, error: authRunError(run.error, this.config.command, "profile list") };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(run.value.stdout.text);
+    } catch {
+      return authParseError(this.config.command, "profile list", run.value.stdoutDigest, run.value.stderrDigest);
+    }
+    if (!Array.isArray(parsed)) {
+      return authParseError(this.config.command, "profile list", run.value.stdoutDigest, run.value.stderrDigest);
+    }
+    const profiles = sanitizeProfiles(parsed);
+    return { ok: true, value: { profiles, stdoutDigest: run.value.stdoutDigest } };
+  }
+
+  private async defaultProfileAt(scope: AuthScope, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthDefaultProfile>> {
+    const args = ["auth", "default-profile", "get"] as const;
+    const run = await runCapture(this.ctx.subprocess, {
+      command: this.config.command,
+      args,
+      timeoutMs: this.config.timeoutMs,
+      signal,
+      cwd: scope.cwd,
+    });
+    if (!run.ok) return { ok: false, error: authRunError(run.error, this.config.command, "default profile") };
+    const profileName = parseDefaultProfile(run.value.stdout.text);
+    if (profileName === undefined) {
+      return authParseError(this.config.command, "default profile", run.value.stdoutDigest, run.value.stderrDigest);
+    }
+    return { ok: true, value: { profileName, stdoutDigest: run.value.stdoutDigest } };
+  }
+
+  private async executePrepare(profile: string | null, env: string | null, scope: AuthScope, signal?: AbortSignal): Promise<ImoAuthResult<AuthCacheEntry>> {
     const args = [
       "auth",
       "prepare",
@@ -353,6 +418,7 @@ export class ImoAuthService extends Service implements ImoAuth {
       args,
       timeoutMs: this.config.timeoutMs,
       signal,
+      cwd: scope.cwd,
     });
     if (!run.ok) return { ok: false, error: authRunError(run.error, this.config.command, "prepare") };
     let parsed: unknown;
@@ -377,7 +443,7 @@ export class ImoAuthService extends Service implements ImoAuth {
     const gateway = rawString(parsed, "gateway");
     const tenantDomain = rawString(parsed, "tenant_domain");
     const source = rawString(parsed, "source");
-    const scope = rawString(parsed, "scope");
+    const scopeName = rawString(parsed, "scope");
     const userSourceId = rawString(parsed, "user_source_id");
     const secret = Object.freeze({
       accessToken,
@@ -390,7 +456,7 @@ export class ImoAuthService extends Service implements ImoAuth {
       ...(gateway === undefined ? {} : { gateway }),
       ...(tenantDomain === undefined ? {} : { tenantDomain }),
       ...(source === undefined ? {} : { source }),
-      ...(scope === undefined ? {} : { scope }),
+      ...(scopeName === undefined ? {} : { scope: scopeName }),
       ...(userSourceId === undefined ? {} : { userSourceId }),
     }) as ImoAuthSecret;
     const view = Object.freeze({
@@ -403,13 +469,13 @@ export class ImoAuthService extends Service implements ImoAuth {
       gateway: safeEndpoint(gateway) ?? null,
       tenantDomain: safeTenantDomain(tenantDomain) ?? null,
       source: source ?? null,
-      scope: scope ?? null,
+      scope: scopeName ?? null,
       userSourceId: userSourceId ?? null,
     });
     return {
       ok: true,
       value: {
-        key: authCacheKey(profile, env),
+        key: authCacheKey(profile, env, scope.key),
         profile,
         env,
         secret,
@@ -418,5 +484,85 @@ export class ImoAuthService extends Service implements ImoAuth {
         cell: { revoked: false },
       },
     };
+  }
+
+  private clearCache(): Promise<void> {
+    this.#disposed = true;
+    this.#epoch += 1;
+    for (const entry of this.#cache.values()) entry.cell.revoked = true;
+    for (const pending of this.#inflight.values()) pending.invalidated = true;
+    this.#cache.clear();
+    this.#inflight.clear();
+    this.#pendingMeta.clear();
+    this.#generations.clear();
+    this.#fastCacheEpoch += 1;
+    this.#listCache.clear();
+    this.#listInflight.clear();
+    this.#defaultCache.clear();
+    this.#defaultInflight.clear();
+    const owned = this.#globalCwd;
+    this.#globalCwd = undefined;
+    return owned === undefined ? Promise.resolve() : removeOwnedEmptyDirectory(owned);
+  }
+
+  private finalizePrepare(
+    key: string,
+    pending: PendingAuthPrepare,
+    result: ImoAuthResult<AuthCacheEntry>,
+  ): ImoAuthResult<AuthCacheEntry> {
+    if (this.#disposed || pending.epoch !== this.#epoch) {
+      return authLifecycleError(AUTH_SERVICE_DISPOSED_CODE, this.config.command);
+    }
+    if (pending.invalidated || (this.#generations.get(key) ?? 0) !== pending.generation) {
+      return authLifecycleError(AUTH_PREPARE_INVALIDATED_CODE, this.config.command);
+    }
+    if (result.ok) this.replaceCache(key, result.value);
+    return result;
+  }
+
+  private replaceCache(key: string, entry: AuthCacheEntry): void {
+    const previous = this.#cache.get(key);
+    if (previous !== undefined) previous.cell.revoked = true;
+    this.#cache.set(key, entry);
+  }
+}
+
+function compareProfilePriority(left: ImoAuthProfileView, right: ImoAuthProfileView): number {
+  const leftRank = profileScopeRank(left);
+  const rightRank = profileScopeRank(right);
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  // Unknown scope metadata is intentionally left in the CLI's original order
+  // for backwards compatibility with old/mocked CLI output.
+  return leftRank === 2 ? 0 : left.profileName.localeCompare(right.profileName);
+}
+
+function profileScopeRank(profile: ImoAuthProfileView): number {
+  return profile.scope === "workspace" ? 0 : profile.scope === "global" ? 1 : 2;
+}
+
+/** Keep the CLI's project-over-global identity rule even for old CLI output. */
+function sanitizeProfiles(rows: readonly unknown[]): readonly ImoAuthProfileView[] {
+  const byName = new Map<string, ImoAuthProfileView>();
+  for (const row of rows) {
+    const profile = profileView(row);
+    if (profile === null) continue;
+    const previous = byName.get(profile.profileName);
+    if (previous === undefined || profileScopeRank(profile) < profileScopeRank(previous)) {
+      byName.set(profile.profileName, profile);
+    }
+  }
+  return [...byName.values()].sort(compareProfilePriority);
+}
+
+async function removeOwnedEmptyDirectory(cwd: string): Promise<void> {
+  try {
+    const stat = await lstat(cwd);
+    if (!stat.isDirectory()) return;
+    if ((await readdir(cwd)).length !== 0) return;
+    // rmdir is intentional: a tampered/non-empty directory is never removed
+    // by a Workbench disposer.
+    await rmdir(cwd);
+  } catch {
+    // Cleanup is best effort and must not mask service disposal.
   }
 }

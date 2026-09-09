@@ -80,6 +80,15 @@
   gap: 1px;
 }
 
+.groupLabel {
+  display: block;
+  padding: 4px 9px 1px 9px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
 .row {
   display: inline-flex;
   align-items: center;

@@ -67,14 +67,14 @@ export class IcomposerLifecycleService extends Service {
       const args = buildInitArgs(input, binding.authProfile);
 
       const auth = this.ctx.get("imoAuth" as never) as unknown as {
-        prepare(request: { profile?: string; env?: string }, signal?: AbortSignal): Promise<{
+        prepare(request: { profile?: string; env?: string; workspaceId?: string | null }, signal?: AbortSignal): Promise<{
           ok: boolean;
           value?: { use<T>(cb: (secret: { readonly accessToken: string }) => Promise<T> | T): Promise<T> };
           error?: { code?: string };
         }>;
       } | undefined;
       if (!auth) return err("cli-error");
-      const leaseResult = await auth.prepare({ profile: binding.authProfile, env: binding.environmentId }, signal);
+      const leaseResult = await auth.prepare({ profile: binding.authProfile, env: binding.environmentId, workspaceId: input.workspaceId }, signal);
       if (!leaseResult.ok) return this.mapAuthError(leaseResult.error);
       try {
         return await leaseResult.value!.use(async (secret) => {

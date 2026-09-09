@@ -152,10 +152,12 @@ single strict-allowlist view (`imo`, `auth`, `skills`, `operations`, and
 calls coalesce onto one in-flight build, and an optional TTL (≤5000 ms, `0`
 disables) caches completed views only for signal-free requests. The web-only
 `GET /api/icomposer-workbench/insuremo/overview` route serves it same-origin
-with `no-store`, `nosniff`, and no CORS; non-GET answers 405 with `Allow:
-GET`, and the route 404s once disposed. It is a read bridge only — the write
-transport (POST/approve/execute) with its CSRF/Origin design is a documented
-Phase 2 risk, not this package.
+with `no-store`, `nosniff`, and no CORS; an optional `workspaceId` is resolved
+by the trusted Workspace registry (the browser never supplies a cwd), and an
+unknown workspace fails closed rather than borrowing global auth. Non-GET
+answers 405 with `Allow: GET`, and the route 404s once disposed. It is a read
+bridge only — the write transport (POST/approve/execute) with its CSRF/Origin
+design is a documented Phase 2 risk, not this package.
 
 ## Skills write actions
 
@@ -212,16 +214,23 @@ selected is bounded to 560 bytes even at the 128-character profile-name and
 `ImoAuthService` provides `ctx.imoAuth` as the only authentication seam for
 future remote tools:
 
-- `listProfiles()` uses `imo auth profile list --format json` and constructs a
-  fixed allowlist view; unknown fields, including token-shaped fields, are
-  discarded;
-- `defaultProfile()` exposes only the sanitized profile name and a digest;
-- `validate(profile?)` exposes `{ profileName, valid, status?, reason?,
-  checkedAt, stdoutDigest }`. 401 is `invalid-auth` and invalidates the matching
-  cache key; 403 is `forbidden` and never retries or invalidates;
-- `prepare({ profile?, env? })` uses `imo auth prepare ... --json` only in the
-  Host process and returns an opaque lease. The access token is held in a
-  closure/private field and is available only to `lease.use(callback)`.
+- `listProfiles(signal?, workspaceId?)` uses `imo auth profile list --format
+  json` from a trusted workspace cwd. The CLI supplies its native project-first
+  merge (same-name project precedence, global fallback); the service keeps
+  project rows before global rows and discards unknown fields, including
+  token-shaped fields;
+- `defaultProfile(signal?, workspaceId?)` and `validate(profile?, signal?,
+  workspaceId?)` use the same resolved cwd;
+- `prepare({ profile?, env?, workspaceId? })` uses `imo auth prepare ... --json`
+  only in the Host process and returns an opaque lease. Its cache key includes
+  workspace identity and canonical cwd; the access token is held in a
+  closure/private field and is available only to `lease.use(callback)`;
+- omitted `workspaceId` uses a service-owned empty 0700 temporary cwd so a
+  project `.insuremo` in the Workbench process cwd can never leak into the
+  global-only view. The exact directory is reused for the service lifetime,
+  verified empty/no `.insuremo` before each call, and removed only when empty
+  during disposal. No auth profile file is read directly or written by this
+  service.
 
 Lease JSON, `Object.keys`, object spread, `util.inspect`, structured clone,
 events, logs, operation records, and error messages contain only sanitized view

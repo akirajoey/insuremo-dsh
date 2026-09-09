@@ -92,7 +92,7 @@ export type {
 } from "./run.ts";
 
 /** Services required by this Host-only package. */
-export const inject = ["subprocess", "operationLog", "skills", "storageDomain", "webServer", "agents"];
+export const inject = ["subprocess", "operationLog", "skills", "storageDomain", "workspaceRegistry", "webServer", "agents"];
 
 /** Loader-facing plugin name. */
 export const name = "@icomposer/insuremo-service";

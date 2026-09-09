@@ -1,4 +1,6 @@
 export { ImoAuthService } from "./service.ts";
+export { parseWorkspaceId, resolveWorkspace, workspaceScopeKey, WORKSPACE_ID_PATTERN } from "./workspace.ts";
+export type { AuthWorkspaceEntry, AuthWorkspaceRegistry, WorkspaceResolution } from "./workspace.ts";
 export { ImoAuthActionsService } from "./actions.ts";
 export {
   AUTH_ACTION_COMPLETED_EVENT,

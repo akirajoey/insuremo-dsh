@@ -15,6 +15,9 @@ export const zh = {
   "picker.loading": "加载中…",
   "picker.empty": "无可用 Profile",
   "picker.error": "无法连接",
+  "picker.workspaceUnavailable": "当前工作区不可用",
+  "picker.project": "项目 Profile",
+  "picker.global": "全局 Profile",
 } as const satisfies Record<string, string>;
 
 export type InsuremoStatusLocaleKey = keyof typeof zh;
@@ -35,4 +38,7 @@ export const en = {
   "picker.loading": "Loading…",
   "picker.empty": "No profiles available",
   "picker.error": "Cannot connect",
+  "picker.workspaceUnavailable": "Workspace unavailable",
+  "picker.project": "Project Profiles",
+  "picker.global": "Global Profiles",
 } as const satisfies Record<InsuremoStatusLocaleKey, string>;

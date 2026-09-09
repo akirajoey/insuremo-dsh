@@ -330,3 +330,147 @@ describe("TASK-044 A icon redesign", () => {
     expect(css).toContain("opacity: 0.32");
   });
 });
+
+describe("ProfilePicker workspace target (TASK-094)", () => {
+  let runtime: SlotTestRuntime;
+  let locale: LocaleRuntime;
+  let feature: Awaited<ReturnType<SlotTestRuntime["mount"]>>;
+
+  beforeEach(async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+      clear: () => { values.clear(); },
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() { return values.size; },
+    });
+    runtime = await SlotTestRuntime.create();
+    await runtime.declare({ "sidebar.footer.action": { kind: "list", scope: "root" } });
+    locale = new LocaleRuntime(runtime.ctx);
+    runtime.ctx.provide("locale", locale);
+    runtime.slots.installLocale(locale);
+    feature = await runtime.mount({ inject, apply });
+  });
+
+  afterEach(async () => {
+    await feature.dispose();
+    await runtime.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it("captures the current workspace on expansion and preserves it in selection", async () => {
+    await runtime.sessions.add({ id: "session-a", summary: { cwd: "/project-a" } });
+    await runtime.workspaces.update(draft => {
+      draft.items = [{ workspaceId: "workspace-a", title: "Project A", path: "/project-a", sessionIds: ["session-a"] }];
+    });
+    let switched = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/actions/active-profile")) {
+        switched = true;
+        expect(JSON.parse(String(init?.body))).toEqual({ profile: "portal:mo-re", workspaceId: "workspace-a" });
+        return jsonResponse({ ok: true, result: { status: "completed", profile: "portal:mo-re", workspaceId: "workspace-a" } });
+      }
+      const scoped = url.includes("workspaceId=workspace-a");
+      expect(scoped).toBe(true);
+      return jsonResponse({ auth: { profiles: [
+        { name: "portal:project", sourceScope: "workspace", isActive: !switched },
+        { name: "portal:mo-re", sourceScope: "global", isActive: switched },
+      ], activeProfileName: switched ? "portal:mo-re" : "portal:project" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
+    (await view.view.findByRole("button", { name: new RegExp(zh.label) })).click();
+    const row = await vi.waitFor(() => {
+      const options = view.view.getAllByRole("option");
+      const target = options.find(option => option.textContent?.includes("portal:mo-re"));
+      expect(target).toBeTruthy();
+      return target as HTMLElement;
+    });
+    row.click();
+    await vi.waitFor(() => expect(view.view.getByRole("button", { name: new RegExp("portal:mo-re") })).toBeTruthy());
+    const overviewUrls = fetchMock.mock.calls.map(call => String(call[0])).filter(url => url.includes("/overview?"));
+    expect(overviewUrls.length).toBeGreaterThan(0);
+    expect(overviewUrls.every(url => url.includes("workspaceId=workspace-a"))).toBe(true);
+  });
+
+  it("falls back to the global key for an ungrouped current session", async () => {
+    await runtime.sessions.add({ id: "session-u", summary: { cwd: "/ungrouped" } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toContain("/overview?fast=1");
+      expect(String(input)).not.toContain("workspaceId=");
+      return jsonResponse({ auth: { profiles: [{ name: "global-profile", sourceScope: "global", isActive: true }], activeProfileName: "global-profile" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
+    (await view.view.findByRole("button", { name: new RegExp(zh.label) })).click();
+    await vi.waitFor(() => expect(view.view.getByRole("option", { name: /global-profile/ })).toBeTruthy());
+  });
+});
+
+describe("ProfilePicker stale workspace responses (TASK-094)", () => {
+  let runtime: SlotTestRuntime;
+  let locale: LocaleRuntime;
+  let feature: Awaited<ReturnType<SlotTestRuntime["mount"]>>;
+
+  beforeEach(async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+      clear: () => { values.clear(); },
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() { return values.size; },
+    });
+    runtime = await SlotTestRuntime.create();
+    await runtime.declare({ "sidebar.footer.action": { kind: "list", scope: "root" } });
+    locale = new LocaleRuntime(runtime.ctx);
+    runtime.ctx.provide("locale", locale);
+    runtime.slots.installLocale(locale);
+    feature = await runtime.mount({ inject, apply });
+  });
+
+  afterEach(async () => {
+    await feature.dispose();
+    await runtime.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it("drops a late response captured for the previous workspace", async () => {
+    await runtime.sessions.add({ id: "session-a", summary: { cwd: "/project-a" } });
+    await runtime.sessions.add({ id: "session-b", summary: { cwd: "/project-b" } }, { current: false });
+    await runtime.workspaces.update(draft => {
+      draft.items = [
+        { workspaceId: "workspace-a", title: "Project A", path: "/project-a", sessionIds: ["session-a"] },
+        { workspaceId: "workspace-b", title: "Project B", path: "/project-b", sessionIds: ["session-b"] },
+      ];
+    });
+    const pendingA: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url.includes("workspaceId=workspace-a")) {
+        return new Promise(resolve => { pendingA.push(resolve); });
+      }
+      if (url.includes("workspaceId=workspace-b")) {
+        return Promise.resolve(jsonResponse({ auth: { profiles: [{ name: "profile-b", sourceScope: "workspace", isActive: true }], activeProfileName: "profile-b" } }));
+      }
+      return Promise.resolve(jsonResponse({ workspaces: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
+    (await view.view.findByRole("button", { name: new RegExp(zh.label) })).click();
+    await vi.waitFor(() => expect(pendingA.length).toBeGreaterThan(0));
+
+    await runtime.sessions.setCurrent("session-b");
+    await vi.waitFor(() => expect(view.view.getByRole("button", { name: /profile-b/ })).toBeTruthy());
+    for (const resolve of pendingA) {
+      resolve(jsonResponse({ auth: { profiles: [{ name: "stale-profile", sourceScope: "workspace", isActive: true }], activeProfileName: "stale-profile" } }));
+    }
+    await runtime.flush();
+    expect(view.view.getByRole("button", { name: /profile-b/ })).toBeTruthy();
+    expect(view.view.queryByRole("button", { name: /stale-profile/ })).toBeNull();
+  });
+});

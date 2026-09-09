@@ -3,7 +3,7 @@ import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
 import { WorkspaceHealth } from "./WorkspaceHealth.tsx";
-import { ProfilePicker } from "./ProfilePicker.tsx";
+import { WorkspaceAwareProfilePicker } from "./ProfilePicker.tsx";
 import { InsuremoBrandMark, InsuremoBrandName } from "./InsuremoBrand.tsx";
 import { en, zh, type InsuremoStatusLocaleKey } from "./locales.ts";
 
@@ -17,7 +17,8 @@ export {
 	WORKSPACES_STATUS_URL,
 	parseWorkspaceHealthRows,
 } from "./WorkspaceHealth.tsx";
-export { ProfilePicker } from "./ProfilePicker.tsx";
+export { ProfilePicker, ProfilePickerPanel, WorkspaceAwareProfilePicker, resolveProfileTarget } from "./ProfilePicker.tsx";
+export type { ProfilePickerTarget } from "./ProfilePicker.tsx";
 export type { InsuremoStatusLocaleKey } from "./locales.ts";
 
 /** Locale namespace contributed by the InsureMO sidebar status. */
@@ -72,7 +73,7 @@ export function apply(ctx: ClientContext): void {
 				locale: NS,
 				label: () => t("label"),
 			},
-			ProfilePicker,
+			WorkspaceAwareProfilePicker,
 		),
 	);
 

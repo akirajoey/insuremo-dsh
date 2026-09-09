@@ -13,7 +13,7 @@ export type BindingEntry = { binding: { authProfile: string; environmentId: stri
 
 export type Lease = { use<T>(cb: (s: { accessToken: string }) => Promise<T> | T): Promise<T> };
 export type AuthLease = {
-  prepare(request: { profile?: string; env?: string }, signal?: AbortSignal): Promise<{
+  prepare(request: { profile?: string; env?: string; workspaceId?: string | null }, signal?: AbortSignal): Promise<{
     ok: boolean; value?: Lease; error?: { code?: string };
   }>;
 };
@@ -38,13 +38,13 @@ export async function bindingEntry(ctx: Context, workspaceId: string, signal?: A
 }
 
 /** Resolve an imoAuth lease for a bound workspace (or a structured error). */
-export async function resolveLease(ctx: Context, binding: { authProfile: string; environmentId: string }, signal?: AbortSignal): Promise<Result<Lease>> {
+export async function resolveLease(ctx: Context, binding: { authProfile: string; environmentId: string }, signal?: AbortSignal, workspaceId?: string | null): Promise<Result<Lease>> {
   if (!isValidAuthProfile(binding.authProfile) || !isValidEnvironmentId(binding.environmentId)) {
     return { ok: false, error: { code: "cli-error", message: "invalid binding profile" } };
   }
   const auth = ctx.get("imoAuth" as never) as unknown as AuthLease | undefined;
   if (!auth) return { ok: false, error: { code: "cli-error", message: "auth service is unavailable" } };
-  const leaseResult = await auth.prepare({ profile: binding.authProfile, env: binding.environmentId }, signal);
+  const leaseResult = await auth.prepare({ profile: binding.authProfile, env: binding.environmentId, workspaceId }, signal);
   if (!leaseResult.ok) return { ok: false, error: { code: mapAuthError(leaseResult.error), message: mapAuthError(leaseResult.error) } };
   return { ok: true, value: leaseResult.value! };
 }

@@ -3,6 +3,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { Config, resolveConfig, type Config as ImoConfig } from "../config.ts";
 import type { ImoCli } from "../cli.ts";
 import type { ImoAuth } from "../auth/types.ts";
+import { resolveWorkspace, workspaceScopeKey } from "../auth/workspace.ts";
 import { ACTIVE_PROFILE_CHANGED_EVENT, type ImoActiveProfile } from "../active-profile.ts";
 import type { ImoSkills } from "../skills.ts";
 import type { ImoSkillActivation } from "../skill-activation.ts";
@@ -33,20 +34,16 @@ const FAST_UNCACHED_SKILLS = Object.freeze({
 
 type ImoOverviewAuthSection = ImoOverviewView["auth"];
 
+type OverviewCacheEntry<T> = { readonly at: number; readonly view: T };
+
 const MIN_TTL_MS = 0;
 const MAX_TTL_MS = 5_000;
 
-/** Public read-only overview face: `ctx.imoOverview.snapshot(signal?)`. */
+/** Public read-only overview face: `ctx.imoOverview.snapshot(signal?, workspaceId?)`. */
 export interface ImoOverview {
-  snapshot(signal?: AbortSignal): Promise<ImoOverviewView>;
-  /**
-   * Fast channel (TASK-041): millisecond auth from the profile store,
-   * last-known imo/skills projections, memory-only operations/ici. It does
-   * not invoke full snapshot or scan skills; auth may load its sanitized
-   * cache provider on a cold start. Cold sections degrade with
-   * `code:"fast-uncached"` (UI renders a skeleton, never a fake "None").
-   */
-  snapshotFast(signal?: AbortSignal): Promise<ImoOverviewView>;
+  snapshot(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoOverviewView>;
+  /** Fast channel (TASK-041), partitioned by the selected workspace cwd. */
+  snapshotFast(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoOverviewView>;
 }
 
 /** Read-only aggregate overview service with coalescing and an optional short TTL. */
@@ -56,11 +53,11 @@ export class ImoOverviewService extends Service implements ImoOverview {
 
   #dependencies: OverviewDependencies;
   #ttlMs: number;
-  #cached: { readonly at: number; readonly view: ImoOverviewView } | undefined;
-  #inflight: Promise<ImoOverviewView> | undefined;
-  #lastImo: ImoOverviewView["imo"] | undefined;
-  #lastSkills: ImoOverviewView["skills"] | undefined;
-  #lastAuth: ImoOverviewView["auth"] | undefined;
+  #cached = new Map<string, OverviewCacheEntry<ImoOverviewView>>();
+  #inflight = new Map<string, Promise<ImoOverviewView>>();
+  #lastImo = new Map<string, ImoOverviewView["imo"]>();
+  #lastSkills = new Map<string, ImoOverviewView["skills"]>();
+  #lastAuth = new Map<string, ImoOverviewView["auth"]>();
   #disposed = false;
   #cacheGeneration = 0;
 
@@ -86,93 +83,94 @@ export class ImoOverviewService extends Service implements ImoOverview {
     this.ctx.effect(() => {
       const off = this.ctx.on(ACTIVE_PROFILE_CHANGED_EVENT, () => {
         this.#cacheGeneration += 1;
-        this.#cached = undefined;
-        this.#lastAuth = undefined;
-        // Detach an older full read so the next caller starts from the new
-        // active selection. The old promise may finish, but cannot publish.
-        this.#inflight = undefined;
+        this.#cached.clear();
+        this.#lastAuth.clear();
+        // Detach older full reads so a subsequent caller starts from the new
+        // active selection. Old promises may finish, but cannot publish cache.
+        this.#inflight.clear();
       });
-      // TASK-076: an install completion flips imo availability; drop every
-      // cached projection and rebuild in the background so the fast channel
-      // (Desktop web windows included) reflects the new CLI promptly.
       const offInstallCompleted = this.ctx.on(IMO_INSTALL_COMPLETED_EVENT, () => {
         this.#cacheGeneration += 1;
-        this.#cached = undefined;
-        this.#lastImo = undefined;
-        this.#inflight = undefined;
+        this.#cached.clear();
+        this.#lastImo.clear();
+        this.#inflight.clear();
         void this.snapshot(undefined).catch(() => { /* best-effort rebuild */ });
       });
       const offInstallFailed = this.ctx.on(IMO_INSTALL_FAILED_EVENT, () => {
         this.#cacheGeneration += 1;
-        this.#cached = undefined;
-        this.#inflight = undefined;
+        this.#cached.clear();
+        this.#inflight.clear();
       });
       return () => {
         off?.();
         offInstallCompleted?.();
         offInstallFailed?.();
         this.#disposed = true;
-        this.#cached = undefined;
-        this.#inflight = undefined;
+        this.#cached.clear();
+        this.#inflight.clear();
+        this.#lastImo.clear();
+        this.#lastSkills.clear();
+        this.#lastAuth.clear();
       };
     }, "imoOverview.state");
   }
 
-  async snapshot(signal?: AbortSignal): Promise<ImoOverviewView> {
+  async snapshot(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoOverviewView> {
     if (this.#disposed || signal?.aborted) return this.cancelledView();
-    if (signal === undefined && this.#ttlMs > 0 && this.#cached !== undefined) {
-      if (Date.now() - this.#cached.at <= this.#ttlMs) return this.#cached.view;
+    const scopeKey = this.cacheScope(workspaceId);
+    if (signal === undefined && this.#ttlMs > 0 && scopeKey !== undefined) {
+      const cached = this.#cached.get(scopeKey);
+      if (cached !== undefined && Date.now() - cached.at <= this.#ttlMs) return cached.view;
     }
-    const existing = this.#inflight;
+    const existing = scopeKey === undefined ? undefined : this.#inflight.get(scopeKey);
     if (existing !== undefined) return existing;
     const generation = this.#cacheGeneration;
     let inflight: Promise<ImoOverviewView>;
-    inflight = buildOverview(this.#dependencies, signal).then(async (view) => {
+    inflight = buildOverview(this.#dependencies, signal, workspaceId).then(async (view) => {
       const statuses = await buildWorkspaceStatuses(this.ctx as never).catch(() => []);
       const enriched = Object.freeze({
         ...view,
         ici: Object.freeze({
-          status: "ok",
+          status: "ok" as const,
           embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
           graphWorkspaces: statuses.filter(entry => entry.graphReady).length,
           explainWorkspaces: statuses.filter(entry => entry.explainReady).length,
         }),
       });
-      if (generation === this.#cacheGeneration) {
-        this.#lastImo = view.imo;
-        this.#lastSkills = view.skills;
-        this.#lastAuth = view.auth;
-        this.#cached = { at: Date.now(), view: enriched };
+      if (generation === this.#cacheGeneration && scopeKey !== undefined) {
+        this.#lastImo.set(scopeKey, view.imo);
+        this.#lastSkills.set(scopeKey, view.skills);
+        this.#lastAuth.set(scopeKey, view.auth);
+        this.#cached.set(scopeKey, { at: Date.now(), view: enriched });
       }
-      if (this.#inflight === inflight) this.#inflight = undefined;
+      if (scopeKey !== undefined && this.#inflight.get(scopeKey) === inflight) this.#inflight.delete(scopeKey);
       return enriched;
     }, (error) => {
-      if (this.#inflight === inflight) this.#inflight = undefined;
+      if (scopeKey !== undefined && this.#inflight.get(scopeKey) === inflight) this.#inflight.delete(scopeKey);
       throw error;
     });
-    this.#inflight = inflight;
+    if (scopeKey !== undefined) this.#inflight.set(scopeKey, inflight);
     return inflight;
   }
 
-  async snapshotFast(signal?: AbortSignal): Promise<ImoOverviewView> {
+  async snapshotFast(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoOverviewView> {
     if (this.#disposed || signal?.aborted) return this.cancelledView();
-    // Fast is deliberately projection-only: it never starts a full snapshot
-    // or any CLI-backed work in the background.
-    const auth = await this.#fastAuth(signal);
-    const imo = this.#lastImo ?? FAST_UNCACHED_IMO;
-    const skills = this.#lastSkills ?? FAST_UNCACHED_SKILLS;
+    const scopeKey = this.cacheScope(workspaceId);
+    const auth = await this.#fastAuth(signal, workspaceId, scopeKey);
+    const imo = scopeKey === undefined ? FAST_UNCACHED_IMO : this.#lastImo.get(scopeKey) ?? FAST_UNCACHED_IMO;
+    const skills = scopeKey === undefined ? FAST_UNCACHED_SKILLS : this.#lastSkills.get(scopeKey) ?? FAST_UNCACHED_SKILLS;
     const operations = this.#fastOperations();
     const statuses = await buildWorkspaceStatuses(this.ctx as never).catch(() => [] as readonly { graphReady: boolean; explainReady: boolean }[]);
     return Object.freeze({
-      schemaVersion: "0",
+      schemaVersion: "0" as const,
       generatedAt: new Date().toISOString(),
       imo,
       auth,
       skills,
       operations,
-      diagnostics: Object.freeze({ status: "ok", diagnostics: [] }),
+      diagnostics: Object.freeze({ status: "ok" as const, diagnostics: [] }),
       ici: Object.freeze({
-        status: "ok",
+        status: "ok" as const,
         embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
         graphWorkspaces: statuses.filter(entry => entry.graphReady).length,
         explainWorkspaces: statuses.filter(entry => entry.explainReady).length,
@@ -180,15 +178,17 @@ export class ImoOverviewService extends Service implements ImoOverview {
     });
   }
 
-  async #fastAuth(signal?: AbortSignal): Promise<ImoOverviewAuthSection> {
-    // The fast overview must not call profilesFast: that face also resolves
-    // the CLI default pointer. Use only the sanitized cached inventory here;
-    // default fields are best-effort diagnostics from isDefault markers.
-    const listed = await this.#dependencies.imoAuth.listProfilesCached(signal).catch(() => undefined);
+  #fastAuth(signal?: AbortSignal, workspaceId?: string | null, scopeKey?: string): Promise<ImoOverviewAuthSection> {
+    return this.fastAuthImpl(signal, workspaceId, scopeKey);
+  }
+
+  private async fastAuthImpl(signal?: AbortSignal, workspaceId?: string | null, scopeKey?: string): Promise<ImoOverviewAuthSection> {
+    // Fast is deliberately projection-only: it never starts a full snapshot.
+    const listed = await this.#dependencies.imoAuth.listProfilesCached(signal, workspaceId).catch(() => undefined);
     if (listed !== undefined && listed.ok) {
       const active = this.#dependencies.imoActiveProfile === undefined
         ? undefined
-        : await this.#dependencies.imoActiveProfile.get(signal).catch(() => undefined);
+        : await this.#dependencies.imoActiveProfile.get(signal, workspaceId).catch(() => undefined);
       const activeView = active?.ok === true ? active.value : undefined;
       const activeName = activeView?.activeProfileName ?? null;
       const profiles = listed.value.profiles.slice(0, 100).map(profile => Object.freeze({
@@ -196,20 +196,33 @@ export class ImoOverviewService extends Service implements ImoOverview {
         ...(profile.env === undefined ? {} : { env: profile.env }),
         ...(profile.tenantCode === undefined ? {} : { tenantCode: profile.tenantCode }),
         ...(profile.accountName === undefined ? {} : { account: profile.accountName }),
+        ...(profile.scope === "workspace" || profile.scope === "global" ? { sourceScope: profile.scope } : {}),
         isDefault: profile.isDefault === true,
         isActive: activeName === profile.profileName,
       }));
       const diagnosticDefault = profiles.find(profile => profile.isDefault)?.name;
-      return Object.freeze({
-        status: activeView?.status === "active" || activeView?.status === "none" ? "ok" : "warning",
+      const result = Object.freeze({
+        status: activeView?.status === "active" || activeView?.status === "none" ? "ok" as const : "warning" as const,
         profiles,
         count: profiles.length,
         ...(diagnosticDefault === undefined ? {} : { defaultProfile: diagnosticDefault, defaultProfileName: diagnosticDefault }),
         activeProfileName: activeName,
         ...(activeView === undefined ? {} : { activeProfileRevision: activeView.revision, activeProfileStatus: activeView.status }),
       });
+      if (scopeKey !== undefined) this.#lastAuth.set(scopeKey, result);
+      return result;
     }
-    return this.#lastAuth ?? Object.freeze({ status: "warning", code: "fast-uncached", profiles: [], count: 0 });
+    // An explicit workspace failure must never borrow the global identity.
+    if (workspaceId !== undefined && workspaceId !== null) {
+      const code = listed !== undefined && !listed.ok
+        && (listed.error.code === "workspace-not-found" || listed.error.code === "workspace-unavailable" || listed.error.code === "invalid-workspace-id")
+        ? listed.error.code
+        : "unavailable";
+      return Object.freeze({ status: "warning" as const, code, profiles: [], count: 0 });
+    }
+    return scopeKey === undefined
+      ? Object.freeze({ status: "warning" as const, code: "fast-uncached", profiles: [], count: 0 })
+      : this.#lastAuth.get(scopeKey) ?? Object.freeze({ status: "warning" as const, code: "fast-uncached", profiles: [], count: 0 });
   }
 
   #fastOperations(): OverviewOperationsSection {
@@ -225,14 +238,20 @@ export class ImoOverviewService extends Service implements ImoOverview {
     }
   }
 
+  private cacheScope(workspaceId?: string | null): string | undefined {
+    if (workspaceId === undefined || workspaceId === null) return "global";
+    const resolved = resolveWorkspace(this.ctx, workspaceId);
+    return resolved.ok ? workspaceScopeKey(resolved.workspaceId, resolved.cwd) : undefined;
+  }
+
   private cancelledView(): ImoOverviewView {
     return Object.freeze({
-      schemaVersion: "0",
+      schemaVersion: "0" as const,
       generatedAt: new Date().toISOString(),
-      imo: Object.freeze({ status: "error", code: "cancelled", available: false, updateAvailable: false }),
-      auth: Object.freeze({ status: "error", code: "cancelled", profiles: [], count: 0 }),
+      imo: Object.freeze({ status: "error" as const, code: "cancelled", available: false, updateAvailable: false }),
+      auth: Object.freeze({ status: "error" as const, code: "cancelled", profiles: [], count: 0 }),
       skills: Object.freeze({
-        status: "error",
+        status: "error" as const,
         code: "cancelled",
         installed: 0,
         valid: 0,
@@ -247,9 +266,9 @@ export class ImoOverviewService extends Service implements ImoOverview {
         diagnostics: [],
         diagnosticsTruncated: false,
       }),
-      operations: Object.freeze({ status: "error", code: "cancelled", pending: 0, approved: 0, rejected: 0, recorded: 0, recent: [] }),
-      diagnostics: Object.freeze({ status: "error", diagnostics: [Object.freeze({ id: "overview-cancelled", severity: "error", messageKey: "overview.diagnostic.cancelled" })] }),
-      ici: Object.freeze({ status: "warning", embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT, graphWorkspaces: 0, explainWorkspaces: 0 }),
+      operations: Object.freeze({ status: "error" as const, code: "cancelled", pending: 0, approved: 0, rejected: 0, recorded: 0, recent: [] }),
+      diagnostics: Object.freeze({ status: "error" as const, diagnostics: [Object.freeze({ id: "overview-cancelled", severity: "error" as const, messageKey: "overview.diagnostic.cancelled" })] }),
+      ici: Object.freeze({ status: "warning" as const, embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT, graphWorkspaces: 0, explainWorkspaces: 0 }),
     });
   }
 }

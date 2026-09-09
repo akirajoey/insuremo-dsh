@@ -272,3 +272,32 @@ test("TASK-044 FIX: disposeProfileContext via ctx.get() proxy removes the real l
   assert.equal(await fire(), 0, "idempotent, still removed");
   await fiber.dispose();
 });
+
+test("workspace-scoped profile context resolves the agent session's trusted workspace", async () => {
+  const ctx = new Context();
+  let requestedWorkspace: string | null | undefined;
+  ctx.provide("imoAuth" as never, { profilesFast: async () => ({ ok: false, error: {} }) } as never);
+  ctx.provide("agents" as never, {} as never);
+  ctx.provide("workspaceRegistry" as never, {
+    list: () => [{ id: "workspace-a", sessionIds: ["agent-a"] }],
+  } as never);
+  ctx.provide("imoActiveProfile" as never, {
+    get: async (_signal?: AbortSignal, workspaceId?: string | null) => {
+      requestedWorkspace = workspaceId;
+      return { ok: true, value: { activeProfileName: "project-profile", profile: { env: "portal" } } };
+    },
+  } as never);
+  const fiber = ctx.plugin(ImoProfileContextService as never);
+  await fiber.await();
+  const service = ctx.get("imoProfileContext" as never) as unknown as ImoProfileContextService;
+  try {
+    const decision = await service.decide(
+      { agent: { id: "agent-a", session: { events: [] } }, turn: 1, step: 1, signal: { aborted: false } },
+      async () => ({ kind: "enter", messages: [] }),
+    );
+    assert.equal(decision.kind, "enter");
+    assert.equal(requestedWorkspace, "workspace-a");
+  } finally {
+    await fiber.dispose();
+  }
+});

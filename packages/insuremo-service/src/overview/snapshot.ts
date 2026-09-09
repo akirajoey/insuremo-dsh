@@ -36,9 +36,9 @@ export interface OverviewDependencies {
 }
 
 /** Build the read-only allowlist overview; every section is best-effort. */
-export async function buildOverview(deps: OverviewDependencies, signal?: AbortSignal): Promise<ImoOverviewView> {
+export async function buildOverview(deps: OverviewDependencies, signal?: AbortSignal, workspaceId?: string | null): Promise<ImoOverviewView> {
   const imo = await imoSection(deps, signal);
-  const auth = await authSection(deps, signal);
+  const auth = await authSection(deps, signal, workspaceId);
   const skills = await skillsSection(deps, signal);
   const operations = operationsSection(deps);
   const diagnostics = diagnosticsSection(imo, auth, skills, operations);
@@ -101,11 +101,11 @@ async function imoSection(deps: OverviewDependencies, signal?: AbortSignal): Pro
   return section;
 }
 
-async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Promise<OverviewAuthSection> {
+async function authSection(deps: OverviewDependencies, signal?: AbortSignal, workspaceId?: string | null): Promise<OverviewAuthSection> {
   let section: OverviewAuthSection = Object.freeze({ status: "error", code: "unavailable", profiles: [], count: 0 });
   try {
-    const list = await deps.imoAuth.listProfiles(signal);
-    const def = await deps.imoAuth.defaultProfile(signal);
+    const list = await deps.imoAuth.listProfiles(signal, workspaceId);
+    const def = await deps.imoAuth.defaultProfile(signal, workspaceId);
     if (!list.ok) {
       section = Object.freeze({
         status: "error",
@@ -115,7 +115,7 @@ async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Pr
       });
       return section;
     }
-    const active = deps.imoActiveProfile === undefined ? undefined : await deps.imoActiveProfile.get(signal);
+    const active = deps.imoActiveProfile === undefined ? undefined : await deps.imoActiveProfile.get(signal, workspaceId);
     const activeView = active?.ok === true ? active.value : undefined;
     const activeName = activeView?.activeProfileName ?? null;
     const profiles = list.value.profiles.slice(0, MAX_PROFILES).map(profile => Object.freeze({
@@ -123,6 +123,7 @@ async function authSection(deps: OverviewDependencies, signal?: AbortSignal): Pr
       ...(profile.env === undefined ? {} : { env: profile.env }),
       ...(profile.tenantCode === undefined ? {} : { tenantCode: profile.tenantCode }),
       ...(profile.accountName === undefined ? {} : { account: profile.accountName }),
+      ...(profile.scope === "workspace" || profile.scope === "global" ? { sourceScope: profile.scope } : {}),
       isDefault: profile.isDefault === true,
       ...(activeView === undefined ? {} : { isActive: activeName === profile.profileName }),
       ...(profile.valid === undefined ? {} : { valid: profile.valid }),

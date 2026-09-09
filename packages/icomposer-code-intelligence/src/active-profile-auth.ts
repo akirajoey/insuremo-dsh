@@ -10,10 +10,10 @@ function error(code: IciErrorCode, message: string): Result<never> {
 }
 
 /** Resolve only the Workbench-owned active profile for auth-dependent ICI work. */
-export async function resolveActiveProfileAuth(ctx: Context, signal?: AbortSignal): Promise<Result<ActiveProfileAuth>> {
+export async function resolveActiveProfileAuth(ctx: Context, signal?: AbortSignal, workspaceId?: string | null): Promise<Result<ActiveProfileAuth>> {
   if (signal?.aborted) return error("cancelled", "operation was cancelled");
   const active = ctx.get("imoActiveProfile" as never) as unknown as {
-    get(signal?: AbortSignal): Promise<{
+    get(signal?: AbortSignal, workspaceId?: string | null): Promise<{
       ok: boolean;
       value?: {
         status: string;
@@ -25,7 +25,7 @@ export async function resolveActiveProfileAuth(ctx: Context, signal?: AbortSigna
   if (active === undefined || active === null) return error("invalid-auth", "active profile is unavailable");
   let result: Awaited<ReturnType<NonNullable<typeof active>["get"]>>;
   try {
-    result = await active.get(signal);
+    result = await active.get(signal, workspaceId);
   } catch {
     return error("invalid-auth", "active profile is unavailable");
   }

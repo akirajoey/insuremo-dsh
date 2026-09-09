@@ -6,6 +6,7 @@ import { failureDiagnosis, diagnosisDirectory, type FailureKind } from "../diagn
 import { SKILL_SCENARIOS, type SkillActionResult, type SkillScenario } from "../skill-actions/types.ts";
 import { SKILLS_TOOL_SOURCE, type SkillCatalogSnapshot } from "../skill-actions/catalog.ts";
 import { OVERVIEW_PATH } from "./paths.ts";
+import { parseWorkspaceId, resolveWorkspace } from "../auth/workspace.ts";
 import { sanitizeSkillCatalogSnapshot } from "./skill-catalog-route.ts";
 
 const JSON_TYPE = "application/json; charset=utf-8";
@@ -139,6 +140,21 @@ function actionRoute(path: string, handler: Handler): { path: string; handle(req
 
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+type RequestedWorkspace =
+  | { readonly ok: true; readonly workspaceId?: string }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/** Resolve a body selector through the trusted registry; never accept a cwd. */
+function requestedWorkspace(ctx: Context, value: unknown): RequestedWorkspace {
+  if (value === undefined || value === null) return { ok: true };
+  const workspaceId = parseWorkspaceId(value);
+  if (workspaceId === undefined) return { ok: false, code: "invalid-workspace-id", message: "workspace id is invalid" };
+  const resolved = resolveWorkspace(ctx, workspaceId);
+  return resolved.ok
+    ? { ok: true, workspaceId: resolved.workspaceId }
+    : { ok: false, code: resolved.code, message: resolved.message };
 }
 
 function parseScenario(value: unknown): SkillScenario | undefined {
@@ -337,13 +353,15 @@ export function mountWriteRoutes(ctx: Context): () => void {
   // active-profile: Workbench-owned selection. It validates the fresh
   // sanitized inventory and never invokes the IMO default-profile command.
   register(actionRoute(`${ACTIONS_PREFIX}/active-profile`, async (body, signal) => {
-    const active = ctx.get("imoActiveProfile" as never) as { select(name: string, signal?: AbortSignal): Promise<{ ok: true; value: { activeProfileName: string | null; revision: number } } | { ok: false; error: { code?: string; message?: string } }> } | undefined;
+    const active = ctx.get("imoActiveProfile" as never) as { select(name: string, signal?: AbortSignal, workspaceId?: string | null): Promise<{ ok: true; value: { activeProfileName: string | null; revision: number } } | { ok: false; error: { code?: string; message?: string } }> } | undefined;
     if (active === undefined) return faceError(undefined, "service-unavailable");
     const profile = str(body.profile);
     if (profile === undefined) return faceError({ code: "invalid-input", message: "profile is required" }, "invalid-input");
-    const selected = await active.select(profile, signal);
+    const target = requestedWorkspace(ctx, body.workspaceId);
+    if (!target.ok) return faceError(target, target.code);
+    const selected = await active.select(profile, signal, target.workspaceId);
     if (!selected.ok) return faceError(selected.error, "action-failed");
-    return { ok: true, result: { status: selected.value.activeProfileName === profile ? "completed" : "none", profile, revision: selected.value.revision } };
+    return { ok: true, result: { status: selected.value.activeProfileName === profile ? "completed" : "none", profile, revision: selected.value.revision, ...(target.workspaceId === undefined ? {} : { workspaceId: target.workspaceId }) } };
   }));
 
   // default-profile: direct one-shot switch, no approval chain (legacy explicit workflow).

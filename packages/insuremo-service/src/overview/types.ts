@@ -26,6 +26,8 @@ export interface OverviewAuthProfile {
   readonly tenantCode?: string;
   /** Login account (fast channel tooltip). */
   readonly account?: string;
+  /** Auth source location, deliberately distinct from Workbench selection scope. */
+  readonly sourceScope?: "workspace" | "global";
   readonly isDefault: boolean;
   readonly isActive?: boolean;
   readonly valid?: boolean;

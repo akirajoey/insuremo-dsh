@@ -41,6 +41,9 @@ export type ImoAuthErrorCode =
   | "parse-error"
   | "invalid-auth"
   | "forbidden"
+  | "invalid-workspace-id"
+  | "workspace-not-found"
+  | "workspace-unavailable"
   | typeof AUTH_PREPARE_INVALIDATED_CODE
   | typeof AUTH_SERVICE_DISPOSED_CODE;
 
@@ -63,6 +66,8 @@ export type ImoAuthResult<T> =
 export interface ImoAuthPrepareRequest {
   readonly profile?: string;
   readonly env?: string;
+  /** Workspace identity; the Host resolves its canonical cwd from the registry. */
+  readonly workspaceId?: string | null;
 }
 
 /** Secret shape visible only as the callback argument of {@link ImoAuthLease.use}. */
@@ -141,9 +146,8 @@ export class ImoAuthLeaseRevokedError extends Error {
   }
 }
 
-/** Fast snapshot derived from the imo CLI's plaintext profile store
- * (TASK-041): millisecond file read, no subprocess, no token material —
- * only the allowlisted descriptive fields. */
+/** Fast snapshot derived from the sanitized `imo auth` CLI projection;
+ * no credential-store material crosses this type. */
 export interface ImoAuthProfilesFast {
   readonly profiles: readonly ImoAuthProfileView[];
   readonly defaultProfile: string | null;
@@ -152,15 +156,14 @@ export interface ImoAuthProfilesFast {
 
 /** The sole authentication surface for later remote tools. */
 export interface ImoAuth {
-  listProfiles(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>>;
-  /** 60s-TTL cached listProfiles; on CLI failure serves the last good list
-   * with stale=true instead of an empty error. */
-  listProfilesCached(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfileList>>;
-  /** Direct read of the imo profile store (no subprocess). Degrades to the
-   * cached CLI list (stale=true) when the file is missing/unreadable. */
-  profilesFast(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthProfilesFast>>;
-  defaultProfile(signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthDefaultProfile>>;
-  validate(profile?: string, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthValidation>>;
+  /** The optional workspace id selects the CLI's project + global auth view. */
+  listProfiles(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthProfileList>>;
+  /** 60s TTL cached listProfiles; cache identity includes workspace and cwd. */
+  listProfilesCached(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthProfileList>>;
+  /** Sanitized profile/default projection; no credential-store read occurs here. */
+  profilesFast(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthProfilesFast>>;
+  defaultProfile(signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthDefaultProfile>>;
+  validate(profile?: string, signal?: AbortSignal, workspaceId?: string | null): Promise<ImoAuthResult<ImoAuthValidation>>;
   prepare(request?: ImoAuthPrepareRequest, signal?: AbortSignal): Promise<ImoAuthResult<ImoAuthLease>>;
   invalidate(request: ImoAuthInvalidateRequest): ImoAuthInvalidation;
   cacheStatus(): ImoAuthCacheStatus;

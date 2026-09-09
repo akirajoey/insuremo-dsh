@@ -93,8 +93,8 @@ export function authLifecycleError(
   };
 }
 
-export function authCacheKey(profile: string | null, env: string | null): string {
-  return JSON.stringify([profile, env]);
+export function authCacheKey(profile: string | null, env: string | null, scope = "global"): string {
+  return JSON.stringify([scope, profile, env]);
 }
 
 export function authCacheMatches(

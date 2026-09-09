@@ -58,8 +58,8 @@ async function runCli(rt: SubprocessRuntime, command: string, args: readonly str
 
 type CliOutcome = { readonly ok: true; readonly exitCode: number | null; readonly signal: string | null; readonly stdout: string; readonly stdoutDigest: string; readonly stderrDigest: string } | { readonly ok: false; readonly code: PushErrorCode; readonly message: string };
 
-async function leasedCli(deps: WriteOpsDeps, canonicalPath: string, bound: { authProfile: string; environmentId: string }, args: readonly string[], signal?: AbortSignal): Promise<CliOutcome> {
-  const leaseRes = await resolveLease(deps.ctx, bound, signal);
+async function leasedCli(deps: WriteOpsDeps, workspaceId: string, canonicalPath: string, bound: { authProfile: string; environmentId: string }, args: readonly string[], signal?: AbortSignal): Promise<CliOutcome> {
+  const leaseRes = await resolveLease(deps.ctx, bound, signal, workspaceId);
   if (!leaseRes.ok) return { ok: false, code: leaseRes.error.code, message: leaseRes.error.message };
   try {
     return await leaseRes.value.use(async () => runCli(deps.ctx.subprocess, deps.command, args, canonicalPath, deps.timeoutMs, signal));
@@ -82,7 +82,7 @@ export async function createOptionsOp(deps: WriteOpsDeps, workspaceId: string, k
   if (!binding.ok) return binding;
   const { canonicalPath, binding: bound } = binding.value;
   if (!bound) return { ok: false, error: { code: "workspace-not-bound", message: "workspace is not bound" } };
-  const ran = await leasedCli(deps, canonicalPath, bound, buildCreateOptionsArgs(bound.authProfile, kind), signal);
+  const ran = await leasedCli(deps, workspaceId, canonicalPath, bound, buildCreateOptionsArgs(bound.authProfile, kind), signal);
   if (!ran.ok) return { ok: false, error: { code: ran.code, message: ran.message } };
   const parsed = parseCreateOptions(ran.stdout);
   if (!parsed.ok) return notJsonFailure(ran);
@@ -130,7 +130,7 @@ export async function createPreviewOp(deps: WriteOpsDeps, input: CreatePreviewIn
   if (!binding.ok) return binding;
   const { canonicalPath, binding: bound } = binding.value;
   if (!bound) return { ok: false, error: { code: "workspace-not-bound", message: "workspace is not bound" } };
-  const ran = await leasedCli(deps, canonicalPath, bound, buildCreateArgs(bound.authProfile, shape, true), signal);
+  const ran = await leasedCli(deps, input.workspaceId, canonicalPath, bound, buildCreateArgs(bound.authProfile, shape, true), signal);
   if (!ran.ok) return { ok: false, error: { code: ran.code, message: ran.message } };
   const parsed = parseReleaseApply(ran.stdout, ran.exitCode ?? 1);
   if (!parsed.ok) return notJsonFailure(ran);
@@ -198,7 +198,7 @@ export async function createExecuteOp(deps: WriteOpsDeps, operationId: string, s
   if (!bound) { deps.journal.markOutcomeUnknown(operationId); return failure("workspace-not-bound", "workspace is not bound", operationId); }
   const startedAt = new Date().toISOString();
   try {
-    return await resolveLease(deps.ctx, bound, signal).then(async leaseRes => {
+    return await resolveLease(deps.ctx, bound, signal, pending.workspaceId).then(async leaseRes => {
       if (!leaseRes.ok) { deps.journal.markOutcomeUnknown(operationId); return failure(leaseRes.error.code, leaseRes.error.message, operationId); }
       return leaseRes.value.use(async () => {
         const ran = await runCli(deps.ctx.subprocess, deps.command, buildCreateArgs(bound.authProfile, pending.shape, false), canonicalPath, deps.timeoutMs, signal);
@@ -270,7 +270,7 @@ export async function metadataPreviewOp(deps: WriteOpsDeps, input: MetadataPrevi
   if (!binding.ok) return binding;
   const { canonicalPath, binding: bound } = binding.value;
   if (!bound) return { ok: false, error: { code: "workspace-not-bound", message: "workspace is not bound" } };
-  const ran = await leasedCli(deps, canonicalPath, bound, buildMetadataArgs(bound.authProfile, validated.value.file, validated.value.fields, true), signal);
+  const ran = await leasedCli(deps, input.workspaceId, canonicalPath, bound, buildMetadataArgs(bound.authProfile, validated.value.file, validated.value.fields, true), signal);
   if (!ran.ok) return { ok: false, error: { code: ran.code, message: ran.message } };
   const parsed = parseReleaseApply(ran.stdout, ran.exitCode ?? 1);
   if (!parsed.ok) return notJsonFailure(ran);
@@ -336,7 +336,7 @@ export async function metadataExecuteOp(deps: WriteOpsDeps, operationId: string,
   if (!bound) { deps.journal.markOutcomeUnknown(operationId); return failure("workspace-not-bound", "workspace is not bound", operationId); }
   const startedAt = new Date().toISOString();
   try {
-    return await resolveLease(deps.ctx, bound, signal).then(async leaseRes => {
+    return await resolveLease(deps.ctx, bound, signal, pending.workspaceId).then(async leaseRes => {
       if (!leaseRes.ok) { deps.journal.markOutcomeUnknown(operationId); return failure(leaseRes.error.code, leaseRes.error.message, operationId); }
       return leaseRes.value.use(async () => {
         const ran = await runCli(deps.ctx.subprocess, deps.command, buildMetadataArgs(bound.authProfile, pending.file, pending.fields, false), canonicalPath, deps.timeoutMs, signal);
