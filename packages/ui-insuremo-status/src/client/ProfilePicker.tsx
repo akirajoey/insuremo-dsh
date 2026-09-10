@@ -46,11 +46,17 @@ export function resolveProfileTarget(
   workspaces: {
     readonly items: ReadonlyArray<{ readonly workspaceId: string; readonly path: string; readonly sessionIds: ReadonlyArray<string> }>;
     readonly phase: string;
-    readonly baselinesReady: boolean;
+    /**
+     * rc.7 client-runtime Workspace snapshot field: both the Workspace and
+     * Session lists reached their baseline. The 0.1.5 client-runtime rewrite
+     * dropped it, where the Sessions half is already implied by
+     * `sessions.current` above, so an absent field counts as ready.
+     */
+    readonly baselinesReady?: boolean;
   },
 ): ProfilePickerTarget {
   if (sessions.current === undefined) return { kind: "global" };
-  if (workspaces.phase !== "ready" || workspaces.baselinesReady !== true) return { kind: "unavailable" };
+  if (workspaces.phase !== "ready" || (workspaces.baselinesReady !== undefined && workspaces.baselinesReady !== true)) return { kind: "unavailable" };
   const workspace = workspaces.items.find(item => item.sessionIds.includes(sessions.current!));
   if (workspace === undefined) return { kind: "global" };
   return { kind: "workspace", workspaceId: String(workspace.workspaceId), canonicalPath: workspace.path };

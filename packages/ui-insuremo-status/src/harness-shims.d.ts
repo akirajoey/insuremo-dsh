@@ -5,7 +5,8 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
   type ProfileWorkspaceState = {
     items: ReadonlyArray<{ workspaceId: string; path: string; sessionIds: ReadonlyArray<string> }>;
     phase: string;
-    baselinesReady: boolean;
+    /** rc.7 client-runtime field: absent in 0.1.5, where readiness is implied. */
+    baselinesReady?: boolean;
   };
   type ProfileSelector<S> = <T>(selector: (state: S) => T) => T;
   type PropsRuntime<K extends string> = K extends "sidebar.footer.action"
