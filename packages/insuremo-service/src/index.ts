@@ -165,10 +165,16 @@ export function apply(ctx: Context, config: Partial<ImoConfig> = {}): void {
   // TASK-044 C: mount the provider via a PERSISTENT SERVICE so the
   // rank-0 mask/enabled catalog survives the loader-effect sweep window and
   // controls the real aggregated model-facing catalog.
-  ctx.plugin(InsuremoSkillProviderService, {});
+  ctx.plugin(InsuremoSkillProviderService, {
+    skillOverlayEnabled: merged.skillOverlayEnabled,
+    skillOverlayNames: merged.skillOverlayNames,
+  });
   // TASK-045 B: exact-agent rank-0 masks must be mounted through each
   // agent.ctx.skills layer, not merged into the global provider layer.
-  ctx.plugin(InsuremoAgentSkillMaskService, {});
+  ctx.plugin(InsuremoAgentSkillMaskService, {
+    skillOverlayEnabled: merged.skillOverlayEnabled,
+    skillOverlayNames: merged.skillOverlayNames,
+  });
   // TASK-044 B: independent per-lifecycle profile runtime-context.
   ctx.plugin(ImoProfileContextService, {});
 }

@@ -15,6 +15,7 @@ import { SKILL_ACTIVATION_CHANGED_EVENT, type ImoSkillActivation } from "./skill
 import { SkillActivationGate, sameActivation, type SkillActivationInput } from "./skill-activation-adapter.ts";
 import { SKILLS_INVENTORY_UPDATED_EVENT, type ImoSkillScope, type ImoSkills } from "./skills.ts";
 import { resolveAllowedSkillRoot, resolveSkillPath } from "./skill-path.ts";
+import { applySkillOverlay, resolveSkillOverlayConfig, type SkillOverlayConfig } from "./skill-overlay.ts";
 import { readFrontmatterPrefix, readSkillDocument } from "./skill-document.ts";
 
 /** IMO entries sit above generic user-agent skills, but below project/custom roots. */
@@ -117,6 +118,7 @@ export class InsuremoSkillProvider implements SkillProvider {
   #activation: SkillActivationGate;
   #listenerDispose: (() => void) | undefined;
   readonly #issued = new WeakSet<object>();
+  #overlay: SkillOverlayConfig;
 
   private readonly inventoryResolver: () => ImoSkills | undefined;
   private readonly mode: InsuremoSkillProviderMode;
@@ -128,8 +130,10 @@ export class InsuremoSkillProvider implements SkillProvider {
     private readonly scope: ImoSkillScope = "global",
     activation?: SkillActivationInput,
     mode: InsuremoSkillProviderMode = "full",
+    overlay?: SkillOverlayConfig,
   ) {
     this.mode = mode;
+    this.#overlay = overlay ?? resolveSkillOverlayConfig();
     this.#control = control;
     this.#activation = new SkillActivationGate(ctx, control, activation);
     this.inventoryResolver = typeof inventory === "function" ? inventory : () => inventory;
@@ -347,7 +351,11 @@ export class InsuremoSkillProvider implements SkillProvider {
       resourceBase: { kind: "directory", path: locator.directory },
       path: locator.manifestPath,
       ...(parsed.metadata === undefined ? {} : { metadata: parsed.metadata }),
-      content: parsed.content,
+      // TASK-100: the Workbench policy overlay is appended at the FINAL body
+      // return only — upstream files/bytes, frontmatter parsing, catalog rows,
+      // and diagnostics never see it. Exact-name allowlist; everything else is
+      // returned byte-identical.
+      content: applySkillOverlay(candidate.name, parsed.content, this.#overlay),
     };
   }
 
@@ -392,6 +400,7 @@ export function invalidateInsuremoSkillCatalog(ctx: Context, scope: ImoSkillScop
 export function mountInsuremoSkillProvider(
   ctx: Context,
   scope: ImoSkillScope = "global",
+  overlay?: SkillOverlayConfig,
 ): () => void {
   const registry = ctx.get<SkillRegistry>("skills");
   if (registry === undefined || typeof registry.registerProvider !== "function") return () => {};
@@ -401,6 +410,8 @@ export function mountInsuremoSkillProvider(
     () => ctx.get<ImoSkills>("imoSkills"),
     scope,
     () => ctx.get<ImoSkillActivation>("imoSkillActivation"),
+    "full",
+    overlay,
   ));
 }
 
@@ -409,6 +420,7 @@ export function mountInsuremoSkillMaskProvider(
   ctx: Context,
   agentCtx: Context,
   scope: ImoSkillScope = "global",
+  overlay?: SkillOverlayConfig,
 ): () => void {
   let registry: SkillRegistry | undefined;
   try {
@@ -427,6 +439,7 @@ export function mountInsuremoSkillMaskProvider(
     scope,
     () => ctx.get<ImoSkillActivation>("imoSkillActivation"),
     "disabled-mask",
+    overlay,
   ));
 }
 

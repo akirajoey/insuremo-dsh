@@ -7,6 +7,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { InsuremoAgentSkillMaskService } from "../src/skill-agent-mask-service.ts";
 import { InsuremoSkillProvider } from "../src/skill-provider.ts";
 import { readFrontmatterPrefix } from "../src/skill-document.ts";
+import { SKILL_OVERLAY_TEXT } from "../src/skill-overlay.ts";
 
 interface ProviderControl { readonly signal: AbortSignal; invalidate(): void }
 interface Candidate { readonly name: string; readonly rank: number; readonly invocation: { modelInvocable?: boolean; userInvocable?: boolean } }
@@ -90,6 +91,65 @@ test("TASK-048 canonical disable-model-invocation is overridden only in exact ma
     const globalCandidates = Array.isArray(globalListed) ? globalListed : globalListed.candidates;
     assert.equal(globalCandidates.find(item => item.name === "malformed")?.invocation.modelInvocable, false);
     assert.equal(globalCandidates.find(item => item.name === "insuremo-design-with-tony")?.invocation.modelInvocable, false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("TASK-100 FIX: mask-service managed-override get honors the overlay switch and allowlist", async () => {
+  const root = await mkdtemp(join(tmpdir(), "imo-mask-overlay-"));
+  try {
+    const auth = join(root, "insuremo-auth-cli");
+    const other = join(root, "imo-other");
+    await mkdir(auth, { recursive: true });
+    await mkdir(other, { recursive: true });
+    await writeFile(join(auth, "SKILL.md"), "---\ndescription: Auth\ndisable-model-invocation: true\n---\n# Auth body\n");
+    await writeFile(join(other, "SKILL.md"), "---\ndescription: Other\ndisable-model-invocation: true\n---\n# Other body\n");
+    const skills = { skillsAllowedRoot: root, validate: async () => ({ ok: true, value: { scope: "global", inventoryComplete: true, checkedAt: "now", items: [
+      { name: "insuremo-auth-cli", description: "Auth", path: auth, valid: true, reasons: [] },
+      { name: "imo-other", description: "Other", path: other, valid: true, reasons: [] },
+    ] } }) };
+    const run = async (config: { skillOverlayEnabled?: boolean; skillOverlayNames?: readonly string[] }) => {
+      const ctx = new Context();
+      ctx.provide("imoSkills" as never, skills as never);
+      ctx.provide("imoSkillActivation" as never, { ensureInitialized: async () => ({ initialized: true, installed: ["insuremo-auth-cli", "imo-other"], enabled: ["insuremo-auth-cli", "imo-other"], disabled: [], stale: [], revision: 1 }), snapshot: async () => ({ initialized: true, installed: ["insuremo-auth-cli", "imo-other"], enabled: ["insuremo-auth-cli", "imo-other"], disabled: [], stale: [], revision: 1 }) } as never);
+      let factory: ((control: ProviderControl) => InsuremoSkillProvider) | undefined;
+      const registry = {
+        registerProvider(create: (control: ProviderControl) => InsuremoSkillProvider): () => void {
+          factory = create;
+          return () => undefined;
+        },
+      };
+      const agentCtx = { get: (name: string) => name === "skills" ? registry : undefined } as unknown as Context;
+      const service = new InsuremoAgentSkillMaskService(ctx, config);
+      service.ensureAgent({ ctx: agentCtx });
+      assert.ok(factory, "mask service must register through the agent registry");
+      const provider = factory!({ signal: new AbortController().signal, invalidate() {} });
+      const listed = await provider.list();
+      const candidates = (Array.isArray(listed) ? listed : listed.candidates) as Array<Candidate & { name: string }>;
+      return { candidates, provider };
+    };
+    const managed = (candidates: Array<Candidate & { name: string }>, name: string) =>
+      candidates.find(candidate => candidate.name === name && candidate.invocation.modelInvocable === true);
+
+    // Default: the allowlisted managed override is appended; a non-listed one stays clean.
+    const def = await run({});
+    assert.ok(managed(def.candidates, "insuremo-auth-cli"));
+    assert.ok(managed(def.candidates, "imo-other"));
+    const authDef = await def.provider.get(managed(def.candidates, "insuremo-auth-cli") as never);
+    assert.equal(authDef?.content, `# Auth body\n${SKILL_OVERLAY_TEXT}`);
+    const otherDef = await def.provider.get(managed(def.candidates, "imo-other") as never);
+    assert.equal(otherDef?.content, "# Other body\n");
+
+    // Disabled: both managed-override bodies stay clean.
+    const off = await run({ skillOverlayEnabled: false });
+    const authOff = await off.provider.get(managed(off.candidates, "insuremo-auth-cli") as never);
+    assert.equal(authOff?.content, "# Auth body\n");
+
+    // Custom allowlist: only the listed managed override is appended.
+    const custom = await run({ skillOverlayNames: ["imo-other"] });
+    const authCustom = await custom.provider.get(managed(custom.candidates, "insuremo-auth-cli") as never);
+    assert.equal(authCustom?.content, "# Auth body\n");
+    const otherCustom = await custom.provider.get(managed(custom.candidates, "imo-other") as never);
+    assert.equal(otherCustom?.content, `# Other body\n${SKILL_OVERLAY_TEXT}`);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

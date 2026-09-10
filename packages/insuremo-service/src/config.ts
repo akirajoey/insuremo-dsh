@@ -16,6 +16,10 @@ export interface Config {
   allowedGitHosts: readonly string[];
   /** Optional read-only overview snapshot TTL in milliseconds (0 disables; capped at 5000). */
   overviewTtlMs: number;
+  /** Append the fixed Workbench policy overlay to allowlisted skills' returned body (TASK-100). */
+  skillOverlayEnabled: boolean;
+  /** Exact skill names (Harness kebab grammar) that receive the overlay; validated fail-loud at mount. */
+  skillOverlayNames: readonly string[];
 }
 
 /** Default read-only post-upgrade smoke battery (02 doc 3.2; none writes remote). */
@@ -38,6 +42,8 @@ export const Config: z<Config> = z.object({
   smokeCommands: z.array(z.array(z.string())).default(DEFAULT_SMOKE_COMMANDS),
   allowedGitHosts: z.array(z.string()).default(["github.com"]),
   overviewTtlMs: z.natural().min(0).default(0),
+  skillOverlayEnabled: z.boolean().default(true),
+  skillOverlayNames: z.array(z.string()).default(["insuremo-auth-cli"]),
 });
 
 /** Apply schema-mirrored defaults for a partial (loader-supplied) config. */
@@ -50,5 +56,7 @@ export function resolveConfig(config: Partial<Config> = {}): Config {
     smokeCommands: config.smokeCommands ?? DEFAULT_SMOKE_COMMANDS,
     allowedGitHosts: config.allowedGitHosts ?? ["github.com"],
     overviewTtlMs: Math.max(0, Math.min(5000, config.overviewTtlMs ?? 0)),
+    skillOverlayEnabled: config.skillOverlayEnabled ?? true,
+    skillOverlayNames: config.skillOverlayNames ?? ["insuremo-auth-cli"],
   };
 }

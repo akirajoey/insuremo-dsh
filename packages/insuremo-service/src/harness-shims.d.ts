@@ -44,6 +44,7 @@ declare module "@deepseek-ai/schemastery" {
     static object<T extends object>(shape: Record<string, unknown>): z<T>;
     static string(): z<string>;
     static natural(): z<number>;
+    static boolean(): z<boolean>;
     static array<T = unknown>(item: z<T>): z<readonly T[]>;
   }
 

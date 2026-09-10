@@ -1,5 +1,6 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
+import { resolveSkillOverlayConfig, type SkillOverlayConfig } from "./skill-overlay.ts";
 import { mountInsuremoSkillMaskProvider } from "./skill-provider.ts";
 
 interface AgentLike {
@@ -24,11 +25,21 @@ interface PreStepPayload {
 export class InsuremoAgentSkillMaskService extends Service {
   static inject = ["agents", "skills", "imoSkills", "imoSkillActivation"] as const;
 
+  /** Overlay settings (TASK-100); validated fail-loud so the mask chain shares one config. */
+  readonly skillOverlay: SkillOverlayConfig;
+
   #seen = new WeakSet<object>();
   #listenerDispose: (() => void) | undefined;
 
-  constructor(ctx: Context) {
+  constructor(
+    ctx: Context,
+    config: { skillOverlayEnabled?: boolean; skillOverlayNames?: readonly string[] } = {},
+  ) {
     super(ctx, "insuremoAgentSkillMask" as never);
+    this.skillOverlay = resolveSkillOverlayConfig({
+      enabled: config.skillOverlayEnabled,
+      names: config.skillOverlayNames,
+    });
     this.ensureAgent = this.ensureAgent.bind(this);
     this.disposeMasks = this.disposeMasks.bind(this);
   }
@@ -62,8 +73,10 @@ export class InsuremoAgentSkillMaskService extends Service {
     // preset-scope leak this service exists to prevent.
     if (registry === undefined || typeof (registry as { registerProvider?: unknown }).registerProvider !== "function") return;
     // mount helper resolves agentCtx.get("skills"), preserving the scope
-    // carrier and the agent-owned effect disposer.
-    const disposer = mountInsuremoSkillMaskProvider(this.ctx, agentCtx);
+    // carrier and the agent-owned effect disposer. The managed-override get()
+    // path shares the SAME overlay config as the global provider (TASK-100
+    // FIX): the disabled switch and custom allowlist must govern both chains.
+    const disposer = mountInsuremoSkillMaskProvider(this.ctx, agentCtx, "global", this.skillOverlay);
     // Dual ownership: the exact registration is primarily owned by agent.ctx,
     // and this service fiber also owns an idempotent cleanup. This prevents a
     // service reload from leaving a stale provider in a still-live agent.

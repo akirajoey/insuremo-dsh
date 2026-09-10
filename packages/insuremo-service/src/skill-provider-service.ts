@@ -1,5 +1,6 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
+import { resolveSkillOverlayConfig, type SkillOverlayConfig } from "./skill-overlay.ts";
 import { mountInsuremoSkillProvider } from "./skill-provider.ts";
 
 /**
@@ -16,10 +17,23 @@ import { mountInsuremoSkillProvider } from "./skill-provider.ts";
 export class InsuremoSkillProviderService extends Service {
   static inject = ["skills", "imoSkills", "imoSkillActivation"] as const;
 
+  /** Overlay settings (TASK-100); raw/optional — validated fail-loud in the constructor. */
+  readonly skillOverlay: SkillOverlayConfig;
+
   #disposer: (() => void) | undefined;
 
-  constructor(ctx: Context) {
+  constructor(
+    ctx: Context,
+    config: { skillOverlayEnabled?: boolean; skillOverlayNames?: readonly string[] } = {},
+  ) {
     super(ctx, "insuremoSkillProvider" as never);
+    // Validation (Harness kebab grammar, duplicates, count, byte bound) fails
+    // service construction on a misconfigured allowlist instead of silently
+    // degrading the overlay.
+    this.skillOverlay = resolveSkillOverlayConfig({
+      enabled: config.skillOverlayEnabled,
+      names: config.skillOverlayNames,
+    });
     // TASK-036-2b: cordis hands callers a proxy receiver where native
     // `#private` fields are invisible — bind public methods so `this` is the
     // original instance.
@@ -28,7 +42,7 @@ export class InsuremoSkillProviderService extends Service {
 
   protected [Service.init](): void {
     if (this.#disposer === undefined) {
-      this.#disposer = mountInsuremoSkillProvider(this.ctx);
+      this.#disposer = mountInsuremoSkillProvider(this.ctx, "global", this.skillOverlay);
     }
   }
 
