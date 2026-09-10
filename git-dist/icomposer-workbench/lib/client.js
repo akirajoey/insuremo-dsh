@@ -56,6 +56,8 @@ function ChevronIcon(props) {
 //#endregion
 //#region ../ui-insuremo-settings/src/client/overview.ts
 const OVERVIEW_URL$1 = "/api/icomposer-workbench/insuremo/overview";
+const SKILL_CATALOG_URL = `${OVERVIEW_URL$1}/skill-catalog`;
+const MAX_CATALOG_ENTRIES = 133;
 /** Rebuild a fresh view from only the allowlisted fields; `null` on garbage. */
 function parseOverview(value) {
 	const root = obj(value);
@@ -115,12 +117,19 @@ function parseOverview(value) {
 			names: arr(skills.names).filter((name) => typeof name === "string").slice(0, 512),
 			...arr(skills.entries).length > 0 ? { entries: arr(skills.entries).slice(0, 100).map((item) => {
 				const e = obj(item);
+				const diagnostic = parseSkillDiagnostic(e?.diagnostic);
 				return {
-					name: str(e?.name, ""),
-					description: str(e?.description, ""),
-					enabled: bool(e?.enabled)
+					name: boundedSkillName(e?.name),
+					description: boundedText(e?.description, 200),
+					enabled: bool(e?.enabled),
+					...diagnostic === void 0 ? {} : { diagnostic }
 				};
 			}).filter((e) => e.name.length > 0) } : {},
+			formatInvalidCount: boundedCount(skills.formatInvalidCount),
+			pathIssueCount: boundedCount(skills.pathIssueCount),
+			diagnosticCount: boundedCount(skills.diagnosticCount),
+			diagnostics: arr(skills.diagnostics).slice(0, 100).map(parseSkillDiagnostic).filter((item) => item !== void 0),
+			diagnosticsTruncated: bool(skills.diagnosticsTruncated),
 			...typeof skills.activationRevision === "number" && Number.isFinite(skills.activationRevision) ? { activationRevision: Math.trunc(skills.activationRevision) } : {}
 		},
 		operations: {
@@ -154,6 +163,112 @@ function parseOverview(value) {
 		},
 		...ici === void 0 ? {} : { ici }
 	};
+}
+/** Parse the explicit catalog-refresh response; unknown rows fail closed. */
+function parseSkillCatalog(value) {
+	const root = obj(value);
+	if (root === null) return null;
+	const candidate = obj(root.result) ?? root;
+	if (candidate.status !== "ready" && candidate.status !== "empty" || candidate.schemaVersion !== "1" || candidate.source !== "insuremo-skills") return null;
+	const status = candidate.status === "empty" ? "empty" : "ready";
+	const fetchedAt = candidate.fetchedAt;
+	const expiresAt = candidate.expiresAt;
+	if (typeof fetchedAt !== "string" || fetchedAt.length > 64 || typeof expiresAt !== "string" || expiresAt.length > 64) return null;
+	const expiresAtMs = Date.parse(expiresAt);
+	if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) return null;
+	const rawEntries = arr(candidate.entries);
+	if (rawEntries.length === 0 || rawEntries.length > MAX_CATALOG_ENTRIES) return null;
+	const entries = [];
+	const seen = /* @__PURE__ */ new Set();
+	for (const raw of rawEntries) {
+		const item = obj(raw);
+		if (item === null || item.type !== "skill" && item.type !== "scenario") return null;
+		const name = catalogName(item.name, item.type === "scenario");
+		const description = catalogDescription(item.description);
+		if (name === void 0 || description === void 0) return null;
+		const key = `${item.type}:${name}`;
+		if (seen.has(key)) return null;
+		seen.add(key);
+		const group = item.group === void 0 ? void 0 : boundedGroup(item.group);
+		if (item.group !== void 0 && group === void 0) return null;
+		entries.push({
+			type: item.type,
+			name,
+			description,
+			...group === void 0 ? {} : { group }
+		});
+	}
+	const skillCount = entries.filter((entry) => entry.type === "skill").length;
+	if (status === "empty" !== (skillCount === 0)) return null;
+	return {
+		schemaVersion: "1",
+		status,
+		source: "insuremo-skills",
+		fetchedAt,
+		expiresAt,
+		entries
+	};
+}
+function catalogDescription(value) {
+	return typeof value === "string" && value.length > 0 && value.length <= 500 && !/[\u0000-\u001F\u007F]/u.test(value) ? value : void 0;
+}
+function catalogName(value, scenario) {
+	if (typeof value !== "string" || value.length === 0 || value.length > 128) return void 0;
+	if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value)) return void 0;
+	if (scenario && ![
+		"icomposer-full-stack",
+		"icomposer-coding-lite",
+		"icomposer-api-design",
+		"uic-developer",
+		"ask-insuremo"
+	].includes(value)) return void 0;
+	return value;
+}
+function boundedGroup(value) {
+	if (typeof value !== "string" || value.length === 0 || value.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9 ._&'()\\-]*$/u.test(value)) return void 0;
+	return value;
+}
+function parseSkillDiagnostic(value) {
+	const diagnostic = obj(value);
+	const code = safeDiagnosticToken(diagnostic?.code);
+	const skill = boundedSkillName(diagnostic?.skill);
+	const source = safeSource(diagnostic?.source);
+	const reason = safeDiagnosticToken(diagnostic?.reason);
+	const contextImpact = diagnostic?.contextImpact;
+	if (code === void 0 || skill.length === 0 || source === void 0 || reason === void 0 || contextImpact !== "source-unavailable" && contextImpact !== "source-may-be-unavailable" && contextImpact !== "disabled") return void 0;
+	const line = safeLine(diagnostic?.line);
+	return {
+		code,
+		skill,
+		source,
+		reason,
+		...line === void 0 ? {} : { line },
+		contextImpact
+	};
+}
+function boundedSkillName(value) {
+	if (typeof value !== "string") return "";
+	const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+	return text.length > 0 && text.length <= 128 && !text.includes("/") && !text.includes("\\") ? text : "";
+}
+function boundedText(value, max) {
+	if (typeof value !== "string") return "";
+	const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+	return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+function safeSource(value) {
+	const text = boundedText(value, 32);
+	return text.length > 0 && !text.includes("/") && !text.includes("\\") && !text.startsWith("~") ? text : void 0;
+}
+function safeDiagnosticToken(value) {
+	if (typeof value !== "string" || value.length === 0 || value.length > 96 || !/^[a-z0-9][a-z0-9-]*$/.test(value)) return void 0;
+	return value;
+}
+function safeLine(value) {
+	return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 1e5 ? value : void 0;
+}
+function boundedCount(value) {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(Math.trunc(value), 1e6) : 0;
 }
 function obj(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -444,7 +559,7 @@ async function handOffDiagnosis(text, diagnosisCwd, faces, workspaceTitle) {
 
 //#endregion
 //#region \0dsh-css:asset
-const css$5 = ".wbf3683280_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.wbf3683280_card:hover{border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.wbf3683280_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.wbf3683280_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.wbf3683280_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.wbf3683280_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.wbf3683280_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.wbf3683280_chevronOpen{transform:rotate(180deg)}.wbf3683280_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.wbf3683280_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.wbf3683280_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.wbf3683280_refresh,.wbf3683280_action{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.wbf3683280_refresh:hover,.wbf3683280_action:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.wbf3683280_refresh:focus-visible,.wbf3683280_action:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wbf3683280_action:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_controls{flex-wrap:wrap;align-items:center;gap:8px;margin:0;display:flex}.wbf3683280_select{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:220px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 10px;font-size:13px}.wbf3683280_select:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.wbf3683280_select:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_region{flex-direction:column;gap:6px;display:flex}.wbf3683280_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.wbf3683280_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.wbf3683280_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wbf3683280_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.wbf3683280_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.wbf3683280_toggle:disabled{cursor:not-allowed;opacity:.55}.wbf3683280_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.wbf3683280_toggle[aria-checked=true] .wbf3683280_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.wbf3683280_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.wbf3683280_toggle[aria-checked=true] .wbf3683280_controlThumb{transform:translate(12px)}.wbf3683280_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.wbf3683280_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.wbf3683280_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.wbf3683280_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.wbf3683280_small:hover{color:var(--dsw-alias-state-error-primary)}";
+const css$5 = ".wba9e5d119_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.wba9e5d119_card:hover{border-color:var(--dsw-alias-label-dimmed)}.wba9e5d119_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.wba9e5d119_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.wba9e5d119_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.wba9e5d119_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.wba9e5d119_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.wba9e5d119_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.wba9e5d119_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.wba9e5d119_chevronOpen{transform:rotate(180deg)}.wba9e5d119_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.wba9e5d119_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.wba9e5d119_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.wba9e5d119_refresh,.wba9e5d119_action{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.wba9e5d119_refresh:hover,.wba9e5d119_action:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.wba9e5d119_refresh:focus-visible,.wba9e5d119_action:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wba9e5d119_action:disabled{cursor:not-allowed;opacity:.55}.wba9e5d119_controls{flex-wrap:wrap;align-items:center;gap:8px;margin:0;display:flex}.wba9e5d119_catalog{flex-direction:column;gap:6px;display:flex}.wba9e5d119_catalogTools{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wba9e5d119_catalogSearch{align-items:center;gap:4px;min-width:min(100%,340px);display:inline-flex}.wba9e5d119_catalogInput{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:150px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;flex:220px;padding:0 10px;font-size:13px}.wba9e5d119_catalogInput:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.wba9e5d119_catalogList{flex-direction:column;gap:4px;max-height:300px;margin:0;padding:0;display:flex;overflow-y:auto}.wba9e5d119_catalogOption{appearance:none;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;font:inherit;color:var(--dsw-alias-label-primary);text-align:left;cursor:pointer;border-radius:8px;flex-direction:column;align-items:stretch;gap:2px;padding:7px 10px;display:flex}.wba9e5d119_catalogOption:hover,.wba9e5d119_catalogOptionSelected{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}.wba9e5d119_catalogOption:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.wba9e5d119_catalogOption:disabled{cursor:not-allowed;opacity:.55}.wba9e5d119_catalogOptionTop{align-items:baseline;gap:8px;display:flex}.wba9e5d119_catalogDescription{color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;font-size:12px;line-height:1.45}.wba9e5d119_select{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:220px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 10px;font-size:13px}.wba9e5d119_select:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.wba9e5d119_select:disabled{cursor:not-allowed;opacity:.55}.wba9e5d119_region{flex-direction:column;gap:6px;display:flex}.wba9e5d119_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.wba9e5d119_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.wba9e5d119_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.wba9e5d119_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.wba9e5d119_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.wba9e5d119_toggle:disabled{cursor:not-allowed;opacity:.55}.wba9e5d119_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.wba9e5d119_toggle[aria-checked=true] .wba9e5d119_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.wba9e5d119_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.wba9e5d119_toggle[aria-checked=true] .wba9e5d119_controlThumb{transform:translate(12px)}.wba9e5d119_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.wba9e5d119_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.wba9e5d119_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.wba9e5d119_diagnostic{color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere;flex:100%;font-size:12px;line-height:1.45}.wba9e5d119_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.wba9e5d119_small:hover{color:var(--dsw-alias-state-error-primary)}";
 const tagId$5 = "@icomposer/workbench/InsuremoCard.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$5) + "]") === null) {
 	const tag = document.createElement("style");
@@ -454,30 +569,40 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"meta": "wbf3683280_meta",
-	"hint": "wbf3683280_hint",
-	"chevron": "wbf3683280_chevron",
-	"header": "wbf3683280_header",
-	"pending": "wbf3683280_pending",
-	"refresh": "wbf3683280_refresh",
-	"action": "wbf3683280_action",
-	"headText": "wbf3683280_headText",
-	"cardOpen": "wbf3683280_cardOpen",
-	"footer": "wbf3683280_footer",
-	"error": "wbf3683280_error",
-	"controlThumb": "wbf3683280_controlThumb",
-	"small": "wbf3683280_small",
-	"select": "wbf3683280_select",
-	"list": "wbf3683280_list",
-	"name": "wbf3683280_name",
-	"chevronOpen": "wbf3683280_chevronOpen",
-	"toggle": "wbf3683280_toggle",
-	"region": "wbf3683280_region",
-	"card": "wbf3683280_card",
-	"controlTrack": "wbf3683280_controlTrack",
-	"controls": "wbf3683280_controls",
-	"body": "wbf3683280_body",
-	"description": "wbf3683280_description"
+	"meta": "wba9e5d119_meta",
+	"select": "wba9e5d119_select",
+	"cardOpen": "wba9e5d119_cardOpen",
+	"catalogInput": "wba9e5d119_catalogInput",
+	"region": "wba9e5d119_region",
+	"chevronOpen": "wba9e5d119_chevronOpen",
+	"controlThumb": "wba9e5d119_controlThumb",
+	"footer": "wba9e5d119_footer",
+	"small": "wba9e5d119_small",
+	"controls": "wba9e5d119_controls",
+	"header": "wba9e5d119_header",
+	"list": "wba9e5d119_list",
+	"catalogSearch": "wba9e5d119_catalogSearch",
+	"headText": "wba9e5d119_headText",
+	"refresh": "wba9e5d119_refresh",
+	"body": "wba9e5d119_body",
+	"catalogOptionTop": "wba9e5d119_catalogOptionTop",
+	"catalogDescription": "wba9e5d119_catalogDescription",
+	"catalogOptionSelected": "wba9e5d119_catalogOptionSelected",
+	"pending": "wba9e5d119_pending",
+	"toggle": "wba9e5d119_toggle",
+	"name": "wba9e5d119_name",
+	"catalogTools": "wba9e5d119_catalogTools",
+	"action": "wba9e5d119_action",
+	"chevron": "wba9e5d119_chevron",
+	"catalogOption": "wba9e5d119_catalogOption",
+	"catalog": "wba9e5d119_catalog",
+	"card": "wba9e5d119_card",
+	"controlTrack": "wba9e5d119_controlTrack",
+	"hint": "wba9e5d119_hint",
+	"diagnostic": "wba9e5d119_diagnostic",
+	"description": "wba9e5d119_description",
+	"error": "wba9e5d119_error",
+	"catalogList": "wba9e5d119_catalogList"
 };
 
 //#endregion
@@ -958,6 +1083,13 @@ const SKILL_SCENARIOS = [
 	"uic-developer",
 	"ask-insuremo"
 ];
+const SCENARIO_DESCRIPTION_KEYS = {
+	"icomposer-full-stack": "skillsCatalogDescriptionFullStack",
+	"icomposer-coding-lite": "skillsCatalogDescriptionCodingLite",
+	"icomposer-api-design": "skillsCatalogDescriptionApiDesign",
+	"uic-developer": "skillsCatalogDescriptionUic",
+	"ask-insuremo": "skillsCatalogDescriptionAsk"
+};
 function diffOf(result) {
 	return {
 		added: result.added ?? [],
@@ -972,13 +1104,106 @@ function diffText(diff, t) {
 	if (diff.removed.length > 0) parts.push(`${t("skillsRemoved")} ${diff.removed.length}: ${diff.removed.join(", ")}`);
 	return parts.join(" · ");
 }
+function catalogKey(entry) {
+	return `${entry.type}:${entry.name}`;
+}
 var SkillsRegion = class extends react.Component {
 	state = {
 		rows: {},
 		updatingAll: false,
 		scenario: SKILL_SCENARIOS[0],
-		scenarioRun: { phase: "idle" }
+		scenarioRun: { phase: "idle" },
+		catalog: { phase: "idle" },
+		catalogQuery: ""
 	};
+	#catalogController;
+	#catalogRequest = 0;
+	componentDidMount() {
+		this.loadCatalog(false);
+	}
+	componentWillUnmount() {
+		this.#catalogController?.abort();
+	}
+	commitCatalog(view, controller, request) {
+		if (controller.signal.aborted || request !== this.#catalogRequest) return;
+		const currentChoice = this.state.catalogChoice;
+		const choice = currentChoice !== void 0 && view.entries.some((entry) => catalogKey(entry) === currentChoice) ? currentChoice : catalogKey(view.entries[0]);
+		this.setState((prev) => ({
+			...prev,
+			catalog: {
+				phase: "ready",
+				view
+			},
+			catalogChoice: choice
+		}));
+	}
+	async loadCatalog(force) {
+		this.#catalogController?.abort();
+		const controller = new AbortController();
+		const request = ++this.#catalogRequest;
+		this.#catalogController = controller;
+		this.setState((prev) => ({
+			...prev,
+			catalog: { phase: "loading" }
+		}));
+		if (!force) {
+			try {
+				const response = await fetch(SKILL_CATALOG_URL, {
+					signal: controller.signal,
+					headers: { Accept: "application/json" }
+				});
+				if (response.ok) {
+					const view$1 = parseSkillCatalog(await response.json());
+					if (view$1 !== null) {
+						this.commitCatalog(view$1, controller, request);
+						return;
+					}
+				}
+			} catch {}
+			if (controller.signal.aborted || request !== this.#catalogRequest) return;
+		}
+		const outcome = await postAction$1("skill-catalog-refresh", { force }, controller.signal);
+		if (controller.signal.aborted || request !== this.#catalogRequest) return;
+		if (!outcome.ok) {
+			this.setState((prev) => ({
+				...prev,
+				catalog: {
+					phase: "unavailable",
+					message: `${outcome.error.code}: ${outcome.error.message}`
+				}
+			}));
+			return;
+		}
+		const view = parseSkillCatalog(outcome.result);
+		if (view === null) {
+			this.setState((prev) => ({
+				...prev,
+				catalog: {
+					phase: "unavailable",
+					message: this.props.t("skillsCatalogUnavailable")
+				}
+			}));
+			return;
+		}
+		this.commitCatalog(view, controller, request);
+	}
+	catalogDescription(entry, t) {
+		if (entry.type !== "scenario") return entry.description;
+		const key = SCENARIO_DESCRIPTION_KEYS[entry.name];
+		return key === void 0 ? entry.description : t(key);
+	}
+	filteredCatalog(view, t) {
+		const query = this.state.catalogQuery.trim().toLocaleLowerCase();
+		if (query.length === 0) return view.entries;
+		return view.entries.filter((entry) => {
+			const typeLabel = entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill");
+			return `${entry.name} ${this.catalogDescription(entry, t)} ${entry.type} ${typeLabel} ${entry.group ?? ""}`.toLocaleLowerCase().includes(query);
+		});
+	}
+	selectedCatalog(view, visible = view.entries) {
+		const selected = view.entries.find((entry) => catalogKey(entry) === this.state.catalogChoice);
+		return selected !== void 0 && visible.some((entry) => catalogKey(entry) === catalogKey(selected)) ? selected : visible[0];
+	}
 	componentDidUpdate() {
 		const confirmed = new Set((this.props.skills.entries ?? []).filter((entry) => {
 			const row = this.state.rows[entry.name];
@@ -1000,7 +1225,7 @@ var SkillsRegion = class extends react.Component {
 		});
 	}
 	get #busy() {
-		return this.state.updatingAll || this.state.scenarioRun.phase === "busy";
+		return this.state.updatingAll || this.state.scenarioRun.phase === "busy" || this.state.catalog.phase === "loading";
 	}
 	/** Last-write-wins (TASK-041): server commits on its own revision; no CAS storms. */
 	async toggle(name, next, previous) {
@@ -1064,11 +1289,14 @@ var SkillsRegion = class extends react.Component {
 			});
 		}
 	}
-	/** Explicit install/sync of the selected allowlisted scenario. */
-	async syncScenario() {
+	/** Explicit install/sync of the selected scenario or exact catalog Skill. */
+	async syncSelected() {
 		if (this.#busy) return;
+		const catalog = this.state.catalog;
+		const selected = catalog.phase === "ready" ? this.selectedCatalog(catalog.view, this.filteredCatalog(catalog.view, (key) => this.props.t(key))) : void 0;
+		const payload = selected === void 0 ? { scenario: this.state.scenario } : selected.type === "scenario" ? { scenario: selected.name } : { skill: selected.name };
 		this.setState({ scenarioRun: { phase: "busy" } });
-		const outcome = await postAction$1("skill-install", { scenario: this.state.scenario });
+		const outcome = await postAction$1("skill-install", payload);
 		if (outcome.ok) {
 			const result = outcome.result;
 			const diff = diffOf(result);
@@ -1082,12 +1310,159 @@ var SkillsRegion = class extends react.Component {
 			} });
 			this.props.onChanged();
 		} else {
+			const catalogFailure = outcome.error.code === "catalog-unavailable" || outcome.error.code === "catalog-selection-invalid";
 			const message = outcome.error.code === "network" ? this.props.t("errorNetwork") : `${outcome.error.code}: ${outcome.error.message}`;
-			this.setState({ scenarioRun: {
-				phase: "failed",
-				message
-			} });
+			this.setState((prev) => ({
+				...prev,
+				...catalogFailure ? { catalog: {
+					phase: "unavailable",
+					message: this.props.t("skillsCatalogUnavailable")
+				} } : {},
+				scenarioRun: {
+					phase: "failed",
+					message
+				}
+			}));
 		}
+	}
+	renderCatalogPicker(t, busy) {
+		const catalog = this.state.catalog;
+		if (catalog.phase === "ready") {
+			const filtered = this.filteredCatalog(catalog.view, t);
+			const selected = this.selectedCatalog(catalog.view, filtered);
+			const selectedKey = selected === void 0 ? void 0 : catalogKey(selected);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: InsuremoCard_module_css_default.catalog,
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: InsuremoCard_module_css_default.catalogTools,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							className: InsuremoCard_module_css_default.catalogSearch,
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: InsuremoCard_module_css_default.meta,
+									children: t("skillsCatalogSearch")
+								}),
+								" ",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									type: "search",
+									className: InsuremoCard_module_css_default.catalogInput,
+									value: this.state.catalogQuery,
+									placeholder: t("skillsCatalogSearchPlaceholder"),
+									"aria-label": t("skillsCatalogSearch"),
+									onChange: (event) => this.setState({ catalogQuery: event.target.value.slice(0, 256) })
+								})
+							]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: InsuremoCard_module_css_default.action,
+							disabled: busy,
+							onClick: () => void this.loadCatalog(true),
+							"aria-label": t("skillsCatalogRefresh"),
+							children: t("skillsCatalogRefresh")
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: InsuremoCard_module_css_default.catalogList,
+						role: "listbox",
+						"aria-label": t("skillsCatalogTitle"),
+						"aria-multiselectable": "false",
+						children: filtered.map((entry, index) => {
+							const key = catalogKey(entry);
+							const isSelected = key === selectedKey;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								type: "button",
+								role: "option",
+								className: `${InsuremoCard_module_css_default.catalogOption}${isSelected ? ` ${InsuremoCard_module_css_default.catalogOptionSelected}` : ""}`,
+								"aria-selected": isSelected,
+								"aria-label": `${entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill")}: ${entry.name}`,
+								"data-catalog-entry": key,
+								disabled: busy,
+								onClick: () => this.setState({
+									catalogChoice: key,
+									scenarioRun: { phase: "idle" }
+								}),
+								onKeyDown: (event) => {
+									if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+									event.preventDefault();
+									const nextIndex = event.key === "ArrowDown" ? Math.min(filtered.length - 1, index + 1) : Math.max(0, index - 1);
+									const next = filtered[nextIndex];
+									if (next !== void 0) this.setState({ catalogChoice: catalogKey(next) });
+								},
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: InsuremoCard_module_css_default.catalogOptionTop,
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: InsuremoCard_module_css_default.meta,
+										children: entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill")
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: entry.name })]
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: InsuremoCard_module_css_default.catalogDescription,
+									children: this.catalogDescription(entry, t)
+								})]
+							}, key);
+						})
+					}),
+					catalog.view.status === "empty" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: InsuremoCard_module_css_default.hint,
+						"data-catalog-state": "empty",
+						children: t("skillsCatalogEmpty")
+					}) : null,
+					filtered.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: InsuremoCard_module_css_default.hint,
+						children: t("skillsCatalogNoMatch")
+					}) : null
+				]
+			});
+		}
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: InsuremoCard_module_css_default.catalog,
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: InsuremoCard_module_css_default.catalogTools,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: InsuremoCard_module_css_default.meta,
+							children: t("skillsScenarioLabel")
+						}),
+						" ",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+							className: InsuremoCard_module_css_default.select,
+							value: this.state.scenario,
+							disabled: busy,
+							"aria-label": t("skillsScenarioLabel"),
+							onChange: (event) => this.setState({
+								scenario: event.target.value,
+								scenarioRun: { phase: "idle" }
+							}),
+							children: SKILL_SCENARIOS.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+								value: id,
+								children: id
+							}, id))
+						})
+					] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: InsuremoCard_module_css_default.action,
+						disabled: catalog.phase === "loading" || busy,
+						"aria-busy": catalog.phase === "loading" || void 0,
+						onClick: () => void this.loadCatalog(true),
+						"aria-label": catalog.phase === "loading" ? t("skillsCatalogLoading") : t("skillsCatalogRefresh"),
+						children: catalog.phase === "loading" ? t("skillsCatalogLoading") : t("skillsCatalogRefresh")
+					})]
+				}),
+				catalog.phase === "loading" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+					className: InsuremoCard_module_css_default.hint,
+					role: "status",
+					"aria-busy": "true",
+					children: t("skillsCatalogLoading")
+				}) : null,
+				catalog.phase === "unavailable" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					className: InsuremoCard_module_css_default.error,
+					role: "alert",
+					"data-catalog-state": "unavailable",
+					children: [t("skillsCatalogUnavailable"), catalog.message === void 0 ? "" : ` · ${catalog.message}`]
+				}) : null
+			]
+		});
 	}
 	render() {
 		const { t, skills } = this.props;
@@ -1095,65 +1470,75 @@ var SkillsRegion = class extends react.Component {
 		const cold = skills.code === "fast-uncached";
 		const busy = this.#busy;
 		const run = this.state.scenarioRun;
+		const catalogView = this.state.catalog.phase === "ready" ? this.state.catalog.view : void 0;
+		const visibleCatalog = catalogView === void 0 ? [] : this.filteredCatalog(catalogView, t);
+		const selected = catalogView === void 0 ? void 0 : this.selectedCatalog(catalogView, visibleCatalog);
+		const noCatalogMatch = catalogView !== void 0 && visibleCatalog.length === 0;
+		const isSingleSelection = selected?.type === "skill";
+		const installingLabel = selected === void 0 ? t("skillsScenarioInstall") : t("skillsCatalogInstall");
+		const installingBusyLabel = selected === void 0 ? t("skillsScenarioInstalling") : t("skillsCatalogInstalling");
+		const installingDoneLabel = isSingleSelection ? t("skillsCatalogDone") : t("skillsScenarioDone");
+		const installingFailedLabel = isSingleSelection ? t("skillsCatalogFailed") : t("skillsScenarioFailed");
+		const installingName = selected?.name ?? this.state.scenario;
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: InsuremoCard_module_css_default.region,
 			children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", { children: t("skillsTitle") }),
+				skills.code === "scan-failed" || skills.code === "unavailable" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+					role: "alert",
+					"data-skills-scan": "failed",
+					className: InsuremoCard_module_css_default.error,
+					children: t("skillsScanFailed")
+				}) : null,
+				skills.diagnosticCount > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					role: "alert",
+					"data-skills-diagnostics": "summary",
+					className: InsuremoCard_module_css_default.error,
+					children: [
+						t("skillsDiagnosticsSummary"),
+						": ",
+						t("skillsFormatInvalidCount"),
+						" ",
+						skills.formatInvalidCount,
+						" · ",
+						t("skillsPathIssueCount"),
+						" ",
+						skills.pathIssueCount,
+						skills.diagnosticsTruncated ? ` · ${t("skillsDiagnosticsVisible")} ${skills.diagnosticCount}` : ""
+					]
+				}) : null,
+				this.renderCatalogPicker(t, busy),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: InsuremoCard_module_css_default.controls,
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: InsuremoCard_module_css_default.meta,
-								children: t("skillsScenarioLabel")
-							}),
-							" ",
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-								className: InsuremoCard_module_css_default.select,
-								value: this.state.scenario,
-								disabled: busy,
-								"aria-label": t("skillsScenarioLabel"),
-								onChange: (event) => this.setState({
-									scenario: event.target.value,
-									scenarioRun: { phase: "idle" }
-								}),
-								children: SKILL_SCENARIOS.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-									value: id,
-									children: id
-								}, id))
-							})
-						] }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							className: InsuremoCard_module_css_default.action,
-							disabled: busy,
-							"aria-busy": run.phase === "busy" || void 0,
-							onClick: () => void this.syncScenario(),
-							"aria-label": `${t("skillsScenarioInstall")}: ${this.state.scenario}`,
-							children: run.phase === "busy" ? t("skillsScenarioInstalling") : t("skillsScenarioInstall")
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							className: InsuremoCard_module_css_default.action,
-							disabled: busy,
-							"aria-busy": this.state.updatingAll || void 0,
-							onClick: () => void this.updateAll(),
-							"aria-label": `${t("skillsUpdateAll")} · ${t("skillsScopeHint")}`,
-							children: this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")
-						})
-					]
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: InsuremoCard_module_css_default.action,
+						disabled: busy || noCatalogMatch,
+						"aria-busy": run.phase === "busy" || void 0,
+						onClick: () => void this.syncSelected(),
+						"aria-label": `${installingLabel}: ${installingName}`,
+						children: run.phase === "busy" ? installingBusyLabel : installingLabel
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: InsuremoCard_module_css_default.action,
+						disabled: busy,
+						"aria-busy": this.state.updatingAll || void 0,
+						onClick: () => void this.updateAll(),
+						"aria-label": `${t("skillsUpdateAll")} · ${t("skillsScopeHint")}`,
+						children: this.state.updatingAll ? t("skillsUpdatingAll") : t("skillsUpdateAll")
+					})]
 				}),
 				run.phase === "done" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
 					role: "status",
 					"data-scenario": "done",
-					children: [t("skillsScenarioDone"), run.diff === void 0 ? "" : `: ${diffText(run.diff, t)}`]
+					children: [installingDoneLabel, run.diff === void 0 ? "" : `: ${diffText(run.diff, t)}`]
 				}) : null,
 				run.phase === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
 					role: "alert",
 					"data-scenario": "failed",
 					className: InsuremoCard_module_css_default.error,
 					children: [
-						t("skillsScenarioFailed"),
+						installingFailedLabel,
 						": ",
 						run.message,
 						run.diff === void 0 ? "" : ` · ${diffText(run.diff, t)}`,
@@ -1225,6 +1610,15 @@ var SkillsRegion = class extends react.Component {
 								})
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: entry.name }),
+							!enabled ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: InsuremoCard_module_css_default.meta,
+								"data-skill-state": "disabled",
+								children: t("skillsDisabledState")
+							}) : null,
+							entry.diagnostic !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillDiagnosticView, {
+								t,
+								diagnostic: entry.diagnostic
+							}) : null,
 							row.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 								role: "alert",
 								className: InsuremoCard_module_css_default.error,
@@ -1241,6 +1635,55 @@ var SkillsRegion = class extends react.Component {
 		});
 	}
 };
+function SkillDiagnosticView(props) {
+	const { t, diagnostic } = props;
+	const format = isFormatDiagnostic(diagnostic.reason);
+	const reason = skillReasonLabel(diagnostic.reason, t);
+	const impact = diagnostic.contextImpact === "disabled" ? t("skillsDiagnosticImpactDisabled") : diagnostic.contextImpact === "source-unavailable" ? t("skillsDiagnosticImpactUnavailable") : t("skillsDiagnosticImpactMaybe");
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+		role: "alert",
+		className: InsuremoCard_module_css_default.diagnostic,
+		"data-skill-diagnostic": diagnostic.skill,
+		"data-skill-diagnostic-code": diagnostic.code,
+		children: [
+			format ? t("skillsDiagnosticFormat") : t("skillsDiagnosticPath"),
+			" · ",
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: diagnostic.code }),
+			" · ",
+			t("skillsDiagnosticSource"),
+			": ",
+			diagnostic.source,
+			" · ",
+			t("skillsDiagnosticReason"),
+			": ",
+			reason,
+			diagnostic.line === void 0 ? "" : ` · ${t("skillsDiagnosticLine")} ${diagnostic.line}`,
+			" · ",
+			impact
+		]
+	});
+}
+function isFormatDiagnostic(reason) {
+	return reason.startsWith("frontmatter-") || reason === "skill-file-too-large";
+}
+function skillReasonLabel(reason, t) {
+	const labels = {
+		"frontmatter-unclosed": "skillsReasonFrontmatterUnclosed",
+		"frontmatter-too-large": "skillsReasonFrontmatterTooLarge",
+		"frontmatter-yaml-invalid": "skillsReasonFrontmatterYaml",
+		"frontmatter-root-invalid": "skillsReasonFrontmatterRoot",
+		"frontmatter-field-type-invalid": "skillsReasonFieldType",
+		"frontmatter-field-too-large": "skillsReasonFieldTooLarge",
+		"skill-file-too-large": "skillsReasonFileTooLarge",
+		"outside-allowed-root": "skillsReasonPathOutside",
+		"missing-directory": "skillsReasonMissingDirectory",
+		"path-unreadable": "skillsReasonPathUnreadable",
+		"not-directory": "skillsReasonNotDirectory",
+		"missing-skill-md": "skillsReasonManifestMissing",
+		"skill-md-unreadable": "skillsReasonManifestUnreadable"
+	};
+	return t(labels[reason] ?? "skillsReasonUnknown");
+}
 function IciRegion(props) {
 	const { t, ici } = props;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -1342,6 +1785,34 @@ const zh$2 = {
 	skillsNames: "列表",
 	skillsNone: "未安装",
 	skillsLoadingSlow: "正在扫描 Skills 清单…",
+	skillsDiagnosticsSummary: "Skills 异常",
+	skillsFormatInvalidCount: "格式异常",
+	skillsPathIssueCount: "路径异常",
+	skillsDiagnosticsVisible: "仅显示当前可见诊断；总数",
+	skillsScanFailed: "Skills 扫描失败，无法判断单个 Skill 状态",
+	skillsDiagnosticFormat: "格式问题：此来源的 Skill 无法加载，无法提供上下文",
+	skillsDiagnosticPath: "路径问题：此来源的 Skill 无法加载，无法提供上下文",
+	skillsDiagnosticSource: "来源",
+	skillsDiagnosticReason: "原因",
+	skillsDiagnosticLine: "行",
+	skillsDiagnosticImpactUnavailable: "上下文影响：此来源的 Skill 无法加载/无法提供上下文",
+	skillsDiagnosticImpactMaybe: "上下文影响：此来源的 Skill 可能无法加载/提供上下文",
+	skillsDiagnosticImpactDisabled: "上下文影响：当前已禁用，未进入新的上下文",
+	skillsDisabledState: "已禁用",
+	skillsReasonFrontmatterUnclosed: "frontmatter 未闭合",
+	skillsReasonFrontmatterTooLarge: "frontmatter 超出大小限制",
+	skillsReasonFrontmatterYaml: "frontmatter YAML 无效",
+	skillsReasonFrontmatterRoot: "frontmatter 顶层类型无效",
+	skillsReasonFieldType: "canonical 字段类型无效",
+	skillsReasonFieldTooLarge: "canonical 字段超出大小限制",
+	skillsReasonFileTooLarge: "SKILL.md 超出大小限制",
+	skillsReasonPathOutside: "路径不在允许范围内",
+	skillsReasonMissingDirectory: "Skill 目录不存在",
+	skillsReasonPathUnreadable: "Skill 路径不可读",
+	skillsReasonNotDirectory: "Skill 路径不是目录",
+	skillsReasonManifestMissing: "SKILL.md 不存在",
+	skillsReasonManifestUnreadable: "SKILL.md 不可读",
+	skillsReasonUnknown: "无法分类的加载问题",
 	operationsTitle: "操作记录",
 	operationsPending: "待审批",
 	operationsApproved: "已批准",
@@ -1357,6 +1828,7 @@ const zh$2 = {
 	"overview.diagnostic.authUnavailable": "认证信息不可用",
 	"overview.diagnostic.authNoDefault": "尚无默认认证配置",
 	"overview.diagnostic.skillsUnavailable": "Skills 信息不可用",
+	"overview.diagnostic.skillsScanFailed": "Skills 扫描失败",
 	"overview.diagnostic.skillsIncomplete": "Skills 清单不完整",
 	"overview.diagnostic.operationsPending": "存在待审批操作",
 	"overview.diagnostic.unknown": "诊断信息",
@@ -1378,6 +1850,25 @@ const zh$2 = {
 	authSetDefault: "设为默认",
 	authCliHint: "新增或登录 profile 请使用 imo auth login CLI",
 	skillsToggle: "启用/停用",
+	skillsCatalogTitle: "可安装 Skills",
+	skillsCatalogSearch: "搜索",
+	skillsCatalogSearchPlaceholder: "按名称、说明或类型筛选",
+	skillsCatalogRefresh: "可用 Skills：刷新",
+	skillsCatalogLoading: "正在读取可用 Skills…",
+	skillsCatalogUnavailable: "单个 Skill 清单暂不可用；请点击“可用 Skills：刷新”后重试。",
+	skillsCatalogEmpty: "当前没有可安装的单个 Skill；仍可选择场景。",
+	skillsCatalogDescriptionFullStack: "完整 iComposer 开发工具包（设计、编码、部署、搜索与配置）",
+	skillsCatalogDescriptionCodingLite: "轻量 iComposer 开发工具包（编码与部署）",
+	skillsCatalogDescriptionApiDesign: "API 设计与研究工具包",
+	skillsCatalogDescriptionUic: "UI Connector 开发工具包",
+	skillsCatalogDescriptionAsk: "InsureMO 知识搜索工具包",
+	skillsCatalogNoMatch: "没有匹配的 Skill 或场景。",
+	skillsCatalogScenario: "场景",
+	skillsCatalogSkill: "单个 Skill",
+	skillsCatalogInstall: "安装",
+	skillsCatalogInstalling: "安装中…",
+	skillsCatalogDone: "Skill 已安装",
+	skillsCatalogFailed: "Skill 安装失败",
 	skillsScenarioLabel: "场景",
 	skillsScenarioInstall: "Install",
 	skillsScenarioInstalling: "Installing…",
@@ -1464,6 +1955,34 @@ const en$2 = {
 	skillsNames: "Names",
 	skillsNone: "None installed",
 	skillsLoadingSlow: "Scanning skills inventory…",
+	skillsDiagnosticsSummary: "Skills issues",
+	skillsFormatInvalidCount: "Format issues",
+	skillsPathIssueCount: "Path issues",
+	skillsDiagnosticsVisible: "Only visible diagnostics are shown; total",
+	skillsScanFailed: "Skills scan failed; individual Skill status is unavailable",
+	skillsDiagnosticFormat: "Format issue: this source's Skill cannot load or provide context",
+	skillsDiagnosticPath: "Path issue: this source's Skill cannot load or provide context",
+	skillsDiagnosticSource: "Source",
+	skillsDiagnosticReason: "Reason",
+	skillsDiagnosticLine: "Line",
+	skillsDiagnosticImpactUnavailable: "Context impact: this source's Skill cannot load or provide context",
+	skillsDiagnosticImpactMaybe: "Context impact: this source's Skill may not load or provide context",
+	skillsDiagnosticImpactDisabled: "Context impact: disabled; it is not entering a new context",
+	skillsDisabledState: "Disabled",
+	skillsReasonFrontmatterUnclosed: "Frontmatter is not closed",
+	skillsReasonFrontmatterTooLarge: "Frontmatter exceeds the size limit",
+	skillsReasonFrontmatterYaml: "Frontmatter YAML is invalid",
+	skillsReasonFrontmatterRoot: "Frontmatter root type is invalid",
+	skillsReasonFieldType: "A canonical field has an invalid type",
+	skillsReasonFieldTooLarge: "A canonical field exceeds the size limit",
+	skillsReasonFileTooLarge: "SKILL.md exceeds the size limit",
+	skillsReasonPathOutside: "The path is outside the allowed root",
+	skillsReasonMissingDirectory: "The Skill directory is missing",
+	skillsReasonPathUnreadable: "The Skill path is unreadable",
+	skillsReasonNotDirectory: "The Skill path is not a directory",
+	skillsReasonManifestMissing: "SKILL.md is missing",
+	skillsReasonManifestUnreadable: "SKILL.md is unreadable",
+	skillsReasonUnknown: "An unclassified loading issue",
 	operationsTitle: "Operations",
 	operationsPending: "Pending approval",
 	operationsApproved: "Approved",
@@ -1479,6 +1998,7 @@ const en$2 = {
 	"overview.diagnostic.authUnavailable": "Authentication information is unavailable",
 	"overview.diagnostic.authNoDefault": "No default authentication profile",
 	"overview.diagnostic.skillsUnavailable": "Skills information is unavailable",
+	"overview.diagnostic.skillsScanFailed": "Skills scan failed",
 	"overview.diagnostic.skillsIncomplete": "The Skills inventory is incomplete",
 	"overview.diagnostic.operationsPending": "Operations are pending approval",
 	"overview.diagnostic.unknown": "Diagnostic information",
@@ -1500,6 +2020,25 @@ const en$2 = {
 	authSetDefault: "Set default",
 	authCliHint: "Add or log in to profiles via the imo auth login CLI",
 	skillsToggle: "Enable/disable",
+	skillsCatalogTitle: "Available Skills",
+	skillsCatalogSearch: "Search",
+	skillsCatalogSearchPlaceholder: "Filter by name, description, or type",
+	skillsCatalogRefresh: "Available Skills: refresh",
+	skillsCatalogLoading: "Loading available Skills…",
+	skillsCatalogUnavailable: "Individual Skill catalog unavailable; click “Available Skills: refresh” to retry.",
+	skillsCatalogEmpty: "No individual Skills are currently available; scenarios remain selectable.",
+	skillsCatalogDescriptionFullStack: "Complete iComposer toolkit for design, coding, deployment, search, and configuration",
+	skillsCatalogDescriptionCodingLite: "Lightweight iComposer toolkit for coding and deployment",
+	skillsCatalogDescriptionApiDesign: "API design and research toolkit",
+	skillsCatalogDescriptionUic: "UI Connector development toolkit",
+	skillsCatalogDescriptionAsk: "InsureMO knowledge-search toolkit",
+	skillsCatalogNoMatch: "No matching Skill or scenario.",
+	skillsCatalogScenario: "Scenario",
+	skillsCatalogSkill: "Single Skill",
+	skillsCatalogInstall: "Install",
+	skillsCatalogInstalling: "Installing…",
+	skillsCatalogDone: "Skill installed",
+	skillsCatalogFailed: "Skill install failed",
 	skillsScenarioLabel: "Scenario",
 	skillsScenarioInstall: "Install",
 	skillsScenarioInstalling: "Installing…",
@@ -1620,17 +2159,17 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"wordmarkLight": "wb06155adc_wordmarkLight",
-	"wordmarkInner": "wb06155adc_wordmarkInner",
-	"wordmarkDark": "wb06155adc_wordmarkDark",
+	"heroHost": "wb06155adc_heroHost",
 	"heroMark": "wb06155adc_heroMark",
-	"dsh": "wb06155adc_dsh",
+	"wordmarkDark": "wb06155adc_wordmarkDark",
 	"wordmarkHost": "wb06155adc_wordmarkHost",
-	"wordmark": "wb06155adc_wordmark",
 	"driver": "wb06155adc_driver",
-	"railMark": "wb06155adc_railMark",
+	"wordmark": "wb06155adc_wordmark",
+	"wordmarkLight": "wb06155adc_wordmarkLight",
 	"railHost": "wb06155adc_railHost",
-	"heroHost": "wb06155adc_heroHost"
+	"wordmarkInner": "wb06155adc_wordmarkInner",
+	"dsh": "wb06155adc_dsh",
+	"railMark": "wb06155adc_railMark"
 };
 
 //#endregion
@@ -2192,7 +2731,7 @@ async function postAction(action, body, signal) {
 
 //#endregion
 //#region \0dsh-css:asset
-const css$2 = ".wba94a6eca_trigger{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_trigger:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.wba94a6eca_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_picker{flex-direction:column;gap:2px;padding:2px 0;display:flex}.wba94a6eca_pickerHeader{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wba94a6eca_closeMark{color:var(--dsw-alias-label-tertiary);margin-left:auto}.wba94a6eca_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.wba94a6eca_row{box-sizing:border-box;width:100%;min-height:26px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:6px;padding:3px 9px 3px 22px;font-size:12px;line-height:17px;display:inline-flex;overflow:hidden}.wba94a6eca_row:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wba94a6eca_row[data-default=\"1\"]{color:var(--dsw-alias-label-primary)}.wba94a6eca_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wba94a6eca_rowMark{color:var(--dsw-alias-state-success-primary);flex:none}.wba94a6eca_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:2px 9px;font-size:11px}.wba94a6eca_error{color:var(--dsw-alias-state-error-primary);padding:2px 9px;font-size:11px}";
+const css$2 = ".wb972d6c20_trigger{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wb972d6c20_trigger:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wb972d6c20_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.wb972d6c20_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wb972d6c20_picker{flex-direction:column;gap:2px;padding:2px 0;display:flex}.wb972d6c20_pickerHeader{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.wb972d6c20_closeMark{color:var(--dsw-alias-label-tertiary);margin-left:auto}.wb972d6c20_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.wb972d6c20_groupLabel{color:var(--dsw-alias-label-tertiary);text-transform:uppercase;padding:4px 9px 1px;font-size:10px;line-height:14px;display:block}.wb972d6c20_row{box-sizing:border-box;width:100%;min-height:26px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:6px;padding:3px 9px 3px 22px;font-size:12px;line-height:17px;display:inline-flex;overflow:hidden}.wb972d6c20_row:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.wb972d6c20_row[data-default=\"1\"]{color:var(--dsw-alias-label-primary)}.wb972d6c20_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.wb972d6c20_rowMark{color:var(--dsw-alias-state-success-primary);flex:none}.wb972d6c20_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:2px 9px;font-size:11px}.wb972d6c20_error{color:var(--dsw-alias-state-error-primary);padding:2px 9px;font-size:11px}";
 const tagId$2 = "@icomposer/workbench/ProfilePicker.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
 	const tag = document.createElement("style");
@@ -2202,18 +2741,19 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"error": "wba94a6eca_error",
-	"picker": "wba94a6eca_picker",
-	"row": "wba94a6eca_row",
-	"label": "wba94a6eca_label",
-	"pickerHeader": "wba94a6eca_pickerHeader",
-	"hint": "wba94a6eca_hint",
-	"dot": "wba94a6eca_dot",
-	"rowMark": "wba94a6eca_rowMark",
-	"list": "wba94a6eca_list",
-	"closeMark": "wba94a6eca_closeMark",
-	"rowName": "wba94a6eca_rowName",
-	"trigger": "wba94a6eca_trigger"
+	"closeMark": "wb972d6c20_closeMark",
+	"groupLabel": "wb972d6c20_groupLabel",
+	"error": "wb972d6c20_error",
+	"list": "wb972d6c20_list",
+	"rowName": "wb972d6c20_rowName",
+	"trigger": "wb972d6c20_trigger",
+	"pickerHeader": "wb972d6c20_pickerHeader",
+	"rowMark": "wb972d6c20_rowMark",
+	"picker": "wb972d6c20_picker",
+	"dot": "wb972d6c20_dot",
+	"label": "wb972d6c20_label",
+	"hint": "wb972d6c20_hint",
+	"row": "wb972d6c20_row"
 };
 
 //#endregion
@@ -2227,43 +2767,158 @@ function tooltipOf(profile, fallback) {
 	return parts.length > 0 ? parts.join(" · ") : fallback;
 }
 /**
-* Sidebar Active Profile selector (TASK-047): rendered as plain text rows
-* matching the session rows — collapsed shows the current active profile
-* name; expanded lists profile names with env/account/tenant on hover.
-* Data comes from the fast overview channel (sanitized overview read, no CLI
-* subprocess); the switch still goes through the write bridge.
+* Derive the current auth target from the renderer's authoritative session and
+* workspace feeds. Workspace path is retained only to invalidate a stale
+* response if a registry row is replaced; the browser sends the id only.
 */
+function resolveProfileTarget(sessions, workspaces) {
+	if (sessions.current === void 0) return { kind: "global" };
+	if (workspaces.phase !== "ready" || workspaces.baselinesReady !== true) return { kind: "unavailable" };
+	const workspace = workspaces.items.find((item) => item.sessionIds.includes(sessions.current));
+	if (workspace === void 0) return { kind: "global" };
+	return {
+		kind: "workspace",
+		workspaceId: String(workspace.workspaceId),
+		canonicalPath: workspace.path
+	};
+}
+function targetKey(target) {
+	if (target.kind === "workspace") return `workspace:${target.workspaceId ?? ""}:${target.canonicalPath ?? ""}`;
+	return target.kind;
+}
+function targetQuery(target) {
+	if (target.kind !== "workspace" || target.workspaceId === void 0) return "";
+	return `&workspaceId=${encodeURIComponent(target.workspaceId)}`;
+}
+function sourceRank(scope) {
+	return scope === "workspace" ? 0 : scope === "global" ? 1 : 2;
+}
+function sourceScopeOf(item) {
+	if (item.sourceScope === "workspace" || item.sourceScope === "global") return item.sourceScope;
+	if (item.scope === "workspace" || item.scope === "global") return item.scope;
+	return void 0;
+}
+function mergeProfileRows(rows) {
+	const byName = /* @__PURE__ */ new Map();
+	for (const row of rows) {
+		const previous = byName.get(row.name);
+		if (previous === void 0 || sourceRank(row.sourceScope) < sourceRank(previous.sourceScope)) byName.set(row.name, row);
+	}
+	return [...byName.values()].sort((left, right) => sourceRank(left.sourceScope) - sourceRank(right.sourceScope) || left.name.localeCompare(right.name));
+}
+/**
+* Global slot wrapper: hooks are consumed here, while the stateful panel below
+* remains a class so the existing picker interaction and DOM stay stable.
+*/
+function WorkspaceAwareProfilePicker(props) {
+	const sessions = props.useSessions((state) => state);
+	const workspaces = props.useWorkspaces((state) => state);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProfilePicker, {
+		...props,
+		target: resolveProfileTarget(sessions, workspaces)
+	});
+}
+/** Sidebar Active Profile selector with workspace-scoped reads and selection. */
 var ProfilePicker = class extends react.Component {
-	state = { phase: "collapsed" };
-	/** Fetch the current Active Profile once on mount so the collapsed row
-	* shows the selected profile name, not a placeholder. */
+	state = {
+		phase: "collapsed",
+		targetKey: targetKey(this.props.target ?? { kind: "global" })
+	};
+	#generation = 0;
+	#controller;
+	currentTarget() {
+		return this.props.target ?? { kind: "global" };
+	}
 	componentDidMount() {
-		this.warmActive();
+		this.warmActive(this.currentTarget());
 	}
-	async warmActive() {
-		if (this.state.phase !== "collapsed" || this.state.activeName !== void 0) return;
-		try {
-			const response = await fetch(`${OVERVIEW_URL}?fast=1`, { headers: { Accept: "application/json" } });
-			if (!response.ok) return;
-			const parsed = this.parseProfiles(await response.json());
-			if (this.state.phase === "collapsed" && this.state.activeName === void 0) this.setState({
-				phase: "collapsed",
-				profiles: parsed.profiles,
-				activeName: parsed.activeName
-			});
-		} catch {}
+	componentDidUpdate(previousProps) {
+		const previousKey = targetKey(previousProps.target ?? { kind: "global" });
+		const nextKey = targetKey(this.currentTarget());
+		if (previousKey === nextKey) return;
+		this.cancelRequest();
+		this.setState({
+			phase: "collapsed",
+			targetKey: nextKey
+		});
+		this.warmActive(this.currentTarget());
 	}
-	/** One retry after a short delay: a Host restart / plugin reinstall window
-	* answers transiently and should not immediately show "cannot connect". */
-	async fetchFastRetry() {
-		const url = `${OVERVIEW_URL}?fast=1`;
-		const first = await fetch(url, { headers: { Accept: "application/json" } }).catch(() => void 0);
+	componentWillUnmount() {
+		this.cancelRequest();
+	}
+	cancelRequest() {
+		this.#generation += 1;
+		this.#controller?.abort();
+		this.#controller = void 0;
+	}
+	beginRequest() {
+		this.cancelRequest();
+		const controller = new AbortController();
+		this.#controller = controller;
+		return {
+			generation: this.#generation,
+			signal: controller.signal,
+			targetKey: targetKey(this.currentTarget())
+		};
+	}
+	isCurrent(generation, key, signal) {
+		return !signal.aborted && generation === this.#generation && key === targetKey(this.currentTarget()) && this.#controller?.signal === signal;
+	}
+	overviewUrl(target) {
+		return `${OVERVIEW_URL}?fast=1${targetQuery(target)}`;
+	}
+	async waitBeforeRetry(signal) {
+		await new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				signal.removeEventListener("abort", abort);
+				resolve();
+			}, 300);
+			const abort = () => {
+				clearTimeout(timer);
+				reject(new Error("cancelled"));
+			};
+			signal.addEventListener("abort", abort, { once: true });
+		});
+	}
+	/** One retry after a short delay; aborts cleanly when target changes. */
+	async fetchFastRetry(target, signal) {
+		const first = await fetch(this.overviewUrl(target), {
+			headers: { Accept: "application/json" },
+			signal
+		}).catch((error) => {
+			if (signal.aborted) throw error;
+			return void 0;
+		});
 		if (first !== void 0 && first.ok) return first;
-		await new Promise((resolve) => setTimeout(resolve, 300));
-		const second = await fetch(url, { headers: { Accept: "application/json" } }).catch(() => void 0);
+		await this.waitBeforeRetry(signal);
+		const second = await fetch(this.overviewUrl(target), {
+			headers: { Accept: "application/json" },
+			signal
+		}).catch((error) => {
+			if (signal.aborted) throw error;
+			return void 0;
+		});
 		if (second !== void 0) return second;
 		if (first !== void 0) return first;
 		throw new Error("overview");
+	}
+	async warmActive(target) {
+		if (target.kind === "unavailable") return;
+		const request = this.beginRequest();
+		try {
+			const response = await this.fetchFastRetry(target, request.signal);
+			if (!response.ok) return;
+			const parsed = this.parseProfiles(await response.json());
+			if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
+			if (this.state.phase === "collapsed" && this.state.targetKey === request.targetKey) this.setState({
+				phase: "collapsed",
+				targetKey: request.targetKey,
+				profiles: parsed.profiles,
+				activeName: parsed.activeName
+			});
+		} catch {} finally {
+			if (this.#controller?.signal === request.signal) this.#controller = void 0;
+		}
 	}
 	parseProfiles(payload) {
 		if (typeof payload !== "object" || payload === null) throw new Error("shape");
@@ -2271,13 +2926,14 @@ var ProfilePicker = class extends react.Component {
 		if (typeof auth !== "object" || auth === null) throw new Error("shape");
 		const raw = auth.profiles;
 		if (!Array.isArray(raw)) throw new Error("shape");
-		const profiles = raw.map((item) => typeof item === "object" && item !== null ? item : null).filter((item) => item !== null && typeof item.name === "string").slice(0, 100).map((item) => ({
+		const profiles = mergeProfileRows(raw.map((item) => typeof item === "object" && item !== null ? item : null).filter((item) => item !== null && typeof item.name === "string").slice(0, 100).map((item) => ({
 			name: String(item.name),
 			env: typeof item.env === "string" ? item.env : void 0,
 			tenantCode: typeof item.tenantCode === "string" ? item.tenantCode : void 0,
 			account: typeof item.account === "string" ? item.account : void 0,
+			sourceScope: sourceScopeOf(item),
 			isActive: item.isActive === true
-		}));
+		})));
 		const authRecord = auth;
 		const activeName = typeof authRecord.activeProfileName === "string" ? authRecord.activeProfileName : void 0;
 		return {
@@ -2287,67 +2943,116 @@ var ProfilePicker = class extends react.Component {
 	}
 	async open() {
 		if (this.state.phase === "open") return;
-		const previous = "activeName" in this.state ? this.state.activeName : void 0;
+		const target = this.currentTarget();
+		const key = targetKey(target);
+		const previous = this.state.activeName;
+		if (target.kind === "unavailable") {
+			this.setState({
+				phase: "open",
+				targetKey: key,
+				profiles: [],
+				activeName: previous,
+				busy: false,
+				error: "workspace"
+			});
+			return;
+		}
+		const request = this.beginRequest();
 		this.setState({
 			phase: "open",
+			targetKey: key,
 			profiles: [],
 			activeName: previous,
 			busy: true
 		});
 		try {
-			const response = await this.fetchFastRetry();
+			const response = await this.fetchFastRetry(target, request.signal);
 			if (!response.ok) throw new Error("overview");
 			const parsed = this.parseProfiles(await response.json());
+			if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
 			this.setState({
 				phase: "open",
+				targetKey: request.targetKey,
 				profiles: parsed.profiles,
 				activeName: parsed.activeName,
 				busy: false
 			});
 		} catch {
+			if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
 			this.setState((prev) => prev.phase === "open" ? {
 				...prev,
 				busy: false,
 				error: "network"
 			} : prev);
+		} finally {
+			if (this.#controller?.signal === request.signal) this.#controller = void 0;
 		}
 	}
 	async pick(name) {
 		if (this.state.phase !== "open" || this.state.busy) return;
+		const target = this.currentTarget();
+		const key = targetKey(target);
+		if (this.state.targetKey !== key || target.kind === "unavailable") return;
+		const request = this.beginRequest();
 		this.setState((prev) => prev.phase === "open" ? {
 			...prev,
-			busy: true
+			busy: true,
+			error: void 0
 		} : prev);
-		const outcome = await postAction("active-profile", { profile: name });
-		if (outcome.ok) {
-			const refreshed = await fetch(`${OVERVIEW_URL}?fast=1`, { headers: { Accept: "application/json" } }).then((r) => r.ok ? r.json() : null).catch(() => null);
-			let nextActive = name;
-			let nextProfiles;
-			try {
-				const parsed = this.parseProfiles(refreshed);
-				nextActive = parsed.activeName ?? name;
-				nextProfiles = parsed.profiles;
-			} catch {}
-			this.setState((prev) => prev.phase === "open" ? {
-				phase: "collapsed",
-				profiles: nextProfiles ?? prev.profiles,
-				activeName: nextActive
-			} : prev);
-		} else {
-			const error = outcome.error.code === "network" ? "network" : outcome.error.code;
+		const body = target.kind === "workspace" && target.workspaceId !== void 0 ? {
+			profile: name,
+			workspaceId: target.workspaceId
+		} : { profile: name };
+		try {
+			const outcome = await postAction("active-profile", body, request.signal);
+			if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
+			if (outcome.ok) {
+				let nextActive = name;
+				let nextProfiles;
+				try {
+					const refreshed = await this.fetchFastRetry(target, request.signal);
+					if (refreshed.ok) {
+						const parsed = this.parseProfiles(await refreshed.json());
+						if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
+						nextActive = parsed.activeName ?? name;
+						nextProfiles = parsed.profiles;
+					}
+				} catch {}
+				if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
+				this.setState((prev) => prev.phase === "open" ? {
+					phase: "collapsed",
+					targetKey: request.targetKey,
+					profiles: nextProfiles ?? prev.profiles,
+					activeName: nextActive
+				} : prev);
+			} else {
+				const error = outcome.error.code === "network" ? "network" : outcome.error.code;
+				this.setState((prev) => prev.phase === "open" ? {
+					...prev,
+					busy: false,
+					error
+				} : prev);
+			}
+		} catch {
+			if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
 			this.setState((prev) => prev.phase === "open" ? {
 				...prev,
 				busy: false,
-				error
+				error: "network"
 			} : prev);
+		} finally {
+			if (this.#controller?.signal === request.signal) this.#controller = void 0;
 		}
+	}
+	errorText(error) {
+		return error === "workspace" ? this.props.t("picker.workspaceUnavailable") : this.props.t("picker.error");
 	}
 	render() {
 		const { t } = this.props;
 		const state = this.state;
 		if (state.phase === "collapsed") {
-			const current = "activeName" in state && state.activeName !== void 0 ? state.activeName : "";
-			const currentRow = "profiles" in state ? state.profiles?.find((profile) => profile.name === current) : void 0;
+			const current = state.activeName ?? "";
+			const currentRow = state.profiles?.find((profile) => profile.name === current);
 			const title = currentRow !== void 0 ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",
@@ -2367,6 +3072,7 @@ var ProfilePicker = class extends react.Component {
 				})]
 			});
 		}
+		let lastScope;
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: ProfilePicker_module_css_default.picker,
 			role: "group",
@@ -2375,7 +3081,15 @@ var ProfilePicker = class extends react.Component {
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 					type: "button",
 					className: ProfilePicker_module_css_default.pickerHeader,
-					onClick: () => this.setState({ phase: "collapsed" }),
+					onClick: () => {
+						this.cancelRequest();
+						this.setState({
+							phase: "collapsed",
+							targetKey: targetKey(this.currentTarget()),
+							profiles: state.profiles,
+							activeName: state.activeName
+						});
+					},
 					"aria-label": t("picker.close"),
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -2397,7 +3111,7 @@ var ProfilePicker = class extends react.Component {
 					className: ProfilePicker_module_css_default.hint,
 					children: t("picker.loading")
 				}) : null,
-				state.profiles.length === 0 && !state.busy ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+				state.profiles.length === 0 && !state.busy && state.error === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 					className: ProfilePicker_module_css_default.hint,
 					children: t("picker.empty")
 				}) : null,
@@ -2405,29 +3119,39 @@ var ProfilePicker = class extends react.Component {
 					className: ProfilePicker_module_css_default.list,
 					role: "listbox",
 					"aria-label": t("picker.label"),
-					children: state.profiles.map((profile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("li", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-						type: "button",
-						role: "option",
-						"aria-selected": profile.isActive === true,
-						disabled: state.busy,
-						title: tooltipOf(profile, profile.name),
-						"data-active": profile.isActive === true ? "1" : void 0,
-						onClick: () => void this.pick(profile.name),
-						className: ProfilePicker_module_css_default.row,
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: ProfilePicker_module_css_default.rowName,
-							children: profile.name
-						}), profile.isActive === true ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: ProfilePicker_module_css_default.rowMark,
-							"aria-hidden": "true",
-							children: "✓"
-						}) : null]
-					}) }, profile.name))
+					children: state.profiles.map((profile) => {
+						const heading = profile.sourceScope !== void 0 && profile.sourceScope !== lastScope;
+						lastScope = profile.sourceScope;
+						const selected = profile.name === state.activeName || state.activeName === void 0 && profile.isActive === true;
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [heading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							role: "presentation",
+							className: ProfilePicker_module_css_default.groupLabel,
+							children: profile.sourceScope === "workspace" ? t("picker.project") : t("picker.global")
+						}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							role: "option",
+							"aria-selected": selected,
+							disabled: state.busy,
+							title: tooltipOf(profile, profile.name),
+							"data-active": selected ? "1" : void 0,
+							"data-source-scope": profile.sourceScope,
+							onClick: () => void this.pick(profile.name),
+							className: ProfilePicker_module_css_default.row,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: ProfilePicker_module_css_default.rowName,
+								children: profile.name
+							}), selected ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: ProfilePicker_module_css_default.rowMark,
+								"aria-hidden": "true",
+								children: "✓"
+							}) : null]
+						})] }, profile.name);
+					})
 				}),
-				"error" in state && state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					role: "alert",
 					className: ProfilePicker_module_css_default.error,
-					children: t("picker.error")
+					children: this.errorText(state.error)
 				}) : null
 			]
 		});
@@ -2507,7 +3231,10 @@ const zh$1 = {
 	"picker.close": "收起",
 	"picker.loading": "加载中…",
 	"picker.empty": "无可用 Profile",
-	"picker.error": "无法连接"
+	"picker.error": "无法连接",
+	"picker.workspaceUnavailable": "当前工作区不可用",
+	"picker.project": "项目 Profile",
+	"picker.global": "全局 Profile"
 };
 const en$1 = {
 	label: "InsureMO · Not configured",
@@ -2524,7 +3251,10 @@ const en$1 = {
 	"picker.close": "Collapse",
 	"picker.loading": "Loading…",
 	"picker.empty": "No profiles available",
-	"picker.error": "Cannot connect"
+	"picker.error": "Cannot connect",
+	"picker.workspaceUnavailable": "Workspace unavailable",
+	"picker.project": "Project Profiles",
+	"picker.global": "Global Profiles"
 };
 
 //#endregion
@@ -2560,7 +3290,7 @@ function apply$2(ctx) {
 		order: 10,
 		locale: NS$1,
 		label: () => t("label")
-	}, ProfilePicker));
+	}, WorkspaceAwareProfilePicker));
 	ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
 		name: "sidebar.footer.action",
 		id: "insuremo-workspace-health",
@@ -2582,11 +3312,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"status": "wb6cd975b4_status",
-	"kind": "wb6cd975b4_kind",
 	"icon": "wb6cd975b4_icon",
+	"status": "wb6cd975b4_status",
 	"row": "wb6cd975b4_row",
-	"digest": "wb6cd975b4_digest"
+	"digest": "wb6cd975b4_digest",
+	"kind": "wb6cd975b4_kind"
 };
 
 //#endregion
@@ -2643,24 +3373,24 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"status": "wb13b81332_status",
-	"error": "wb13b81332_error",
-	"errorText": "wb13b81332_errorText",
-	"summary": "wb13b81332_summary",
-	"card": "wb13b81332_card",
-	"header": "wb13b81332_header",
-	"hint": "wb13b81332_hint",
-	"selectedReference": "wb13b81332_selectedReference",
-	"field": "wb13b81332_field",
-	"fieldset": "wb13b81332_fieldset",
 	"progress": "wb13b81332_progress",
-	"referenceActions": "wb13b81332_referenceActions",
-	"actions": "wb13b81332_actions",
-	"session": "wb13b81332_session",
-	"done": "wb13b81332_done",
-	"consent": "wb13b81332_consent",
+	"status": "wb13b81332_status",
+	"fieldset": "wb13b81332_fieldset",
+	"errorText": "wb13b81332_errorText",
+	"selectedReference": "wb13b81332_selectedReference",
+	"hint": "wb13b81332_hint",
+	"field": "wb13b81332_field",
+	"card": "wb13b81332_card",
 	"batchJobRow": "wb13b81332_batchJobRow",
-	"runMeta": "wb13b81332_runMeta"
+	"done": "wb13b81332_done",
+	"summary": "wb13b81332_summary",
+	"header": "wb13b81332_header",
+	"error": "wb13b81332_error",
+	"actions": "wb13b81332_actions",
+	"referenceActions": "wb13b81332_referenceActions",
+	"runMeta": "wb13b81332_runMeta",
+	"session": "wb13b81332_session",
+	"consent": "wb13b81332_consent"
 };
 
 //#endregion

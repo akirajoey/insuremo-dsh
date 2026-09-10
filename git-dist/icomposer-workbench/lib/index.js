@@ -3,12 +3,12 @@ import { createRequire } from "node:module";
 import { Service } from "@deepseek-ai/cordis";
 import { createHash, randomUUID } from "node:crypto";
 import { defineDomain, domainTable } from "@deepseek-ai/dsh-storage-domain";
-import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { access, chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve, sep, win32 } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { createUserMessage, createUserMessage as createUserMessage$1 } from "@deepseek-ai/dsh-llm";
-import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { constants, lstatSync, mkdtempSync, readdirSync, realpathSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import z from "@deepseek-ai/schemastery";
 import { isSkillName } from "@deepseek-ai/dsh-skill";
 
@@ -6521,7 +6521,8 @@ var IcomposerLifecycleService = class extends Service {
 			if (!auth) return err$6("cli-error");
 			const leaseResult = await auth.prepare({
 				profile: binding.authProfile,
-				env: binding.environmentId
+				env: binding.environmentId,
+				workspaceId: input.workspaceId
 			}, signal);
 			if (!leaseResult.ok) return this.mapAuthError(leaseResult.error);
 			try {
@@ -7095,14 +7096,17 @@ var IcomposerVerifyService = class extends Service {
 		const entry = await this.workspaceEntry(workspaceId, signal);
 		if (!entry.ok) return entry;
 		const { canonicalPath } = entry.value;
-		const active = await this.activeProfileAuth(signal);
+		const active = await this.activeProfileAuth(workspaceId, signal);
 		if (!active.ok) return active;
 		const { profileName } = active.value;
 		if (!isValidAuthProfile$1(profileName)) return err$5("invalid-auth");
 		const args = buildVerifyArgs(mode, profileName, payload);
 		const auth = this.ctx.get("imoAuth");
 		if (!auth) return err$5("cli-error");
-		const leaseResult = await auth.prepare({ profile: profileName }, signal);
+		const leaseResult = await auth.prepare({
+			profile: profileName,
+			workspaceId
+		}, signal);
 		if (!leaseResult.ok) return this.mapAuthError(leaseResult.error);
 		try {
 			return await leaseResult.value.use(async (secret) => {
@@ -7130,13 +7134,13 @@ var IcomposerVerifyService = class extends Service {
 			return err$5("lease-revoked");
 		}
 	}
-	async activeProfileAuth(signal) {
+	async activeProfileAuth(workspaceId, signal) {
 		if (signal?.aborted) return err$5("cancelled");
 		const active = this.ctx.get("imoActiveProfile");
 		if (active === void 0 || active === null) return err$5("invalid-auth", "active profile is unavailable");
 		let result;
 		try {
-			result = await active.get(signal);
+			result = await active.get(signal, workspaceId);
 		} catch {
 			return err$5("invalid-auth", "active profile is unavailable");
 		}
@@ -11609,7 +11613,10 @@ function err2(code, message = code) {
 async function embeddingLease(deps, run) {
 	const auth = deps.auth;
 	if (!auth) return err2("embedding-error");
-	const leaseResult = await auth.prepare({ profile: deps.profile.profileName }, deps.signal);
+	const leaseResult = await auth.prepare({
+		profile: deps.profile.profileName,
+		workspaceId: deps.workspaceId
+	}, deps.signal);
 	if (!leaseResult.ok) {
 		const code = leaseResult.error?.code;
 		if (code === "invalid-auth" || code === "forbidden" || code === "prepare-invalidated" || code === "lease-revoked") return err2(code);
@@ -11707,13 +11714,13 @@ function error$1(code, message) {
 	};
 }
 /** Resolve only the Workbench-owned active profile for auth-dependent ICI work. */
-async function resolveActiveProfileAuth(ctx, signal) {
+async function resolveActiveProfileAuth(ctx, signal, workspaceId) {
 	if (signal?.aborted) return error$1("cancelled", "operation was cancelled");
 	const active = ctx.get("imoActiveProfile");
 	if (active === void 0 || active === null) return error$1("invalid-auth", "active profile is unavailable");
 	let result;
 	try {
-		result = await active.get(signal);
+		result = await active.get(signal, workspaceId);
 	} catch {
 		return error$1("invalid-auth", "active profile is unavailable");
 	}
@@ -12113,11 +12120,12 @@ var IciEngineService = class extends Service {
 			const { graph, canonicalPath, stale } = ctxLoad;
 			const docs = await loadSearchDocs(canonicalPath, graph);
 			const cachePath = join(graphBaseDir(canonicalPath, input.workspaceId), "search", "api_embeddings.jsonl");
-			const profile = await resolveActiveProfileAuth(this.ctx, signal);
+			const profile = await resolveActiveProfileAuth(this.ctx, signal, input.workspaceId);
 			if (!profile.ok) return profile;
 			const outcome = await embeddingLease({
 				auth: this.ctx.get("imoAuth"),
 				profile: profile.value,
+				workspaceId: input.workspaceId,
 				subprocess: this.ctx.subprocess,
 				timeoutMs: this.#timeoutMs,
 				signal
@@ -12169,11 +12177,12 @@ var IciEngineService = class extends Service {
 			const cachePath = await searchCachePath(canonicalPath, input.workspaceId);
 			const mode = input.mode ?? "all";
 			const top = clampInt(input.top, 10, 1, 50);
-			const profile = await resolveActiveProfileAuth(this.ctx, signal);
+			const profile = await resolveActiveProfileAuth(this.ctx, signal, input.workspaceId);
 			if (!profile.ok) return profile;
 			const outcome = await embeddingLease({
 				auth: this.ctx.get("imoAuth"),
 				profile: profile.value,
+				workspaceId: input.workspaceId,
 				subprocess: this.ctx.subprocess,
 				timeoutMs: this.#timeoutMs,
 				signal
@@ -13274,14 +13283,14 @@ async function pickNativeFile(signal, internals = {}) {
 //#endregion
 //#region ../icomposer-code-intelligence/src/explain-routes.ts
 const EXPLAIN_ROUTES_PREFIX = "/api/icomposer-workbench/ici/explain";
-const JSON_TYPE$3 = "application/json; charset=utf-8";
+const JSON_TYPE$4 = "application/json; charset=utf-8";
 const MAX_BODY_BYTES$1 = 64 * 1024;
 const ABSOLUTE_PATH_PATTERN = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
 const SECRET_PATTERN = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
 function response(res, status, body) {
 	if (res.destroyed || res.writableEnded) return;
 	res.writeHead(status, {
-		"Content-Type": JSON_TYPE$3,
+		"Content-Type": JSON_TYPE$4,
 		"Cache-Control": "no-store",
 		"X-Content-Type-Options": "nosniff"
 	});
@@ -14760,7 +14769,7 @@ async function bindingEntry(ctx, workspaceId, signal) {
 	};
 }
 /** Resolve an imoAuth lease for a bound workspace (or a structured error). */
-async function resolveLease(ctx, binding, signal) {
+async function resolveLease(ctx, binding, signal, workspaceId) {
 	if (!isValidAuthProfile(binding.authProfile) || !isValidEnvironmentId(binding.environmentId)) return {
 		ok: false,
 		error: {
@@ -14778,7 +14787,8 @@ async function resolveLease(ctx, binding, signal) {
 	};
 	const leaseResult = await auth.prepare({
 		profile: binding.authProfile,
-		env: binding.environmentId
+		env: binding.environmentId,
+		workspaceId
 	}, signal);
 	if (!leaseResult.ok) return {
 		ok: false,
@@ -15117,7 +15127,7 @@ async function testExecuteOp(deps, operationId$1, signal) {
 		deps.journal.markOutcomeUnknown(operationId$1);
 		return failure$6("local-unpushed-changes", "local file has unpushed changes; re-run with overrideUnpushed or push first", operationId$1);
 	}
-	const leaseRes = await resolveLease(deps.ctx, bound, signal);
+	const leaseRes = await resolveLease(deps.ctx, bound, signal, pending.workspaceId);
 	if (!leaseRes.ok) {
 		deps.journal.markOutcomeUnknown(operationId$1);
 		return failure$6(leaseRes.error.code, leaseRes.error.message, operationId$1);
@@ -15279,8 +15289,8 @@ function validateReleaseInput(input) {
 	};
 }
 const MESSAGE_MAX = 500;
-async function runLeasedCli(deps, canonicalPath, bound, args, signal) {
-	const leaseRes = await resolveLease(deps.ctx, bound, signal);
+async function runLeasedCli(deps, workspaceId, canonicalPath, bound, args, signal) {
+	const leaseRes = await resolveLease(deps.ctx, bound, signal, workspaceId);
 	if (!leaseRes.ok) return {
 		ok: false,
 		code: leaseRes.error.code,
@@ -15354,7 +15364,7 @@ async function releasePreviewOp(deps, input, signal) {
 			message: "workspace is not bound"
 		}
 	};
-	const ran = await runLeasedCli(deps, canonicalPath, bound, buildReleaseArgs(bound.authProfile, {
+	const ran = await runLeasedCli(deps, input.workspaceId, canonicalPath, bound, buildReleaseArgs(bound.authProfile, {
 		...validated.value,
 		dryRun: true
 	}), signal);
@@ -15398,7 +15408,7 @@ async function releaseReposOp(deps, workspaceId, signal) {
 			message: "workspace is not bound"
 		}
 	};
-	const ran = await runLeasedCli(deps, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "repo"), signal);
+	const ran = await runLeasedCli(deps, workspaceId, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "repo"), signal);
 	if (!ran.ok) return {
 		ok: false,
 		error: {
@@ -15444,7 +15454,7 @@ async function releaseBranchesOp(deps, workspaceId, repo, signal) {
 			message: "workspace is not bound"
 		}
 	};
-	const ran = await runLeasedCli(deps, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "branch", repo), signal);
+	const ran = await runLeasedCli(deps, workspaceId, canonicalPath, bound, buildReleaseListArgs(bound.authProfile, "branch", repo), signal);
 	if (!ran.ok) return {
 		ok: false,
 		error: {
@@ -15568,7 +15578,7 @@ async function releaseExecuteOp(deps, operationId$1, signal) {
 	}
 	const startedAt = (/* @__PURE__ */ new Date()).toISOString();
 	try {
-		return await resolveLease(deps.ctx, bound, signal).then(async (leaseRes) => {
+		return await resolveLease(deps.ctx, bound, signal, pending.workspaceId).then(async (leaseRes) => {
 			if (!leaseRes.ok) {
 				deps.journal.markOutcomeUnknown(operationId$1);
 				return failure$6(leaseRes.error.code, leaseRes.error.message, operationId$1);
@@ -15684,8 +15694,8 @@ async function runCli(rt, command, args, cwd, timeoutMs, signal) {
 		stderrDigest: run.value.stderrDigest
 	};
 }
-async function leasedCli(deps, canonicalPath, bound, args, signal) {
-	const leaseRes = await resolveLease(deps.ctx, bound, signal);
+async function leasedCli(deps, workspaceId, canonicalPath, bound, args, signal) {
+	const leaseRes = await resolveLease(deps.ctx, bound, signal, workspaceId);
 	if (!leaseRes.ok) return {
 		ok: false,
 		code: leaseRes.error.code,
@@ -15734,7 +15744,7 @@ async function createOptionsOp(deps, workspaceId, kind, signal) {
 			message: "workspace is not bound"
 		}
 	};
-	const ran = await leasedCli(deps, canonicalPath, bound, buildCreateOptionsArgs(bound.authProfile, kind), signal);
+	const ran = await leasedCli(deps, workspaceId, canonicalPath, bound, buildCreateOptionsArgs(bound.authProfile, kind), signal);
 	if (!ran.ok) return {
 		ok: false,
 		error: {
@@ -15812,7 +15822,7 @@ async function createPreviewOp(deps, input, signal) {
 			message: "workspace is not bound"
 		}
 	};
-	const ran = await leasedCli(deps, canonicalPath, bound, buildCreateArgs(bound.authProfile, shape, true), signal);
+	const ran = await leasedCli(deps, input.workspaceId, canonicalPath, bound, buildCreateArgs(bound.authProfile, shape, true), signal);
 	if (!ran.ok) return {
 		ok: false,
 		error: {
@@ -15926,7 +15936,7 @@ async function createExecuteOp(deps, operationId$1, signal) {
 	}
 	const startedAt = (/* @__PURE__ */ new Date()).toISOString();
 	try {
-		return await resolveLease(deps.ctx, bound, signal).then(async (leaseRes) => {
+		return await resolveLease(deps.ctx, bound, signal, pending.workspaceId).then(async (leaseRes) => {
 			if (!leaseRes.ok) {
 				deps.journal.markOutcomeUnknown(operationId$1);
 				return failure$5(leaseRes.error.code, leaseRes.error.message, operationId$1);
@@ -16045,7 +16055,7 @@ async function metadataPreviewOp(deps, input, signal) {
 			message: "workspace is not bound"
 		}
 	};
-	const ran = await leasedCli(deps, canonicalPath, bound, buildMetadataArgs(bound.authProfile, validated.value.file, validated.value.fields, true), signal);
+	const ran = await leasedCli(deps, input.workspaceId, canonicalPath, bound, buildMetadataArgs(bound.authProfile, validated.value.file, validated.value.fields, true), signal);
 	if (!ran.ok) return {
 		ok: false,
 		error: {
@@ -16157,7 +16167,7 @@ async function metadataExecuteOp(deps, operationId$1, signal) {
 	}
 	const startedAt = (/* @__PURE__ */ new Date()).toISOString();
 	try {
-		return await resolveLease(deps.ctx, bound, signal).then(async (leaseRes) => {
+		return await resolveLease(deps.ctx, bound, signal, pending.workspaceId).then(async (leaseRes) => {
 			if (!leaseRes.ok) {
 				deps.journal.markOutcomeUnknown(operationId$1);
 				return failure$5(leaseRes.error.code, leaseRes.error.message, operationId$1);
@@ -16646,7 +16656,7 @@ var IcomposerWriteService = class extends Service {
 		if (!binding.ok) return binding;
 		const { binding: bound, canonicalPath } = binding.value;
 		if (!bound) return err("workspace-not-bound");
-		const leaseRes = await resolveLease(this.ctx, bound, signal);
+		const leaseRes = await resolveLease(this.ctx, bound, signal, workspaceId);
 		if (!leaseRes.ok) return err(leaseRes.error.code);
 		try {
 			return await leaseRes.value.use(async () => {
@@ -16784,7 +16794,7 @@ var IcomposerWriteService = class extends Service {
 			this.#journal.markOutcomeUnknown(operationId$1);
 			return execFailure("workspace-not-bound", "workspace is not bound", operationId$1);
 		}
-		const leaseRes = await resolveLease(this.ctx, bound, signal);
+		const leaseRes = await resolveLease(this.ctx, bound, signal, pending.workspaceId);
 		if (!leaseRes.ok) {
 			this.#journal.markOutcomeUnknown(operationId$1);
 			return execFailure(leaseRes.error.code, leaseRes.error.message, operationId$1);
@@ -16937,7 +16947,9 @@ const Config = z.object({
 	upgradeTimeoutMs: z.natural().min(1).default(18e4),
 	smokeCommands: z.array(z.array(z.string())).default(DEFAULT_SMOKE_COMMANDS),
 	allowedGitHosts: z.array(z.string()).default(["github.com"]),
-	overviewTtlMs: z.natural().min(0).default(0)
+	overviewTtlMs: z.natural().min(0).default(0),
+	skillOverlayEnabled: z.boolean().default(true),
+	skillOverlayNames: z.array(z.string()).default(["insuremo-auth-cli"])
 });
 /** Apply schema-mirrored defaults for a partial (loader-supplied) config. */
 function resolveConfig(config$1 = {}) {
@@ -16948,7 +16960,9 @@ function resolveConfig(config$1 = {}) {
 		upgradeTimeoutMs: config$1.upgradeTimeoutMs ?? 18e4,
 		smokeCommands: config$1.smokeCommands ?? DEFAULT_SMOKE_COMMANDS,
 		allowedGitHosts: config$1.allowedGitHosts ?? ["github.com"],
-		overviewTtlMs: Math.max(0, Math.min(5e3, config$1.overviewTtlMs ?? 0))
+		overviewTtlMs: Math.max(0, Math.min(5e3, config$1.overviewTtlMs ?? 0)),
+		skillOverlayEnabled: config$1.skillOverlayEnabled ?? true,
+		skillOverlayNames: config$1.skillOverlayNames ?? ["insuremo-auth-cli"]
 	};
 }
 
@@ -17013,16 +17027,268 @@ async function resolveWithDeadline(rt, command, timeoutMs, signal) {
 		cleanup();
 	}
 }
+/** Maximum bytes read from an npm Windows shim during the safe adapter probe. */
+const WINDOWS_NPX_SHIM_MAX_BYTES = 16 * 1024;
+const WINDOWS_NPX_CLI_PARTS = [
+	"node_modules",
+	"npm",
+	"bin",
+	"npx-cli.js"
+];
+const WINDOWS_NPM_PREFIX_PARTS = [
+	"node_modules",
+	"npm",
+	"bin",
+	"npm-prefix.js"
+];
+const MODERN_NPX_SHIM_LINES = [
+	":: created by npm, please don't edit manually.",
+	"@echo off",
+	"setlocal",
+	"set \"node_exe=%~dp0\\node.exe\"",
+	"if not exist \"%node_exe%\" (",
+	"set \"node_exe=node\"",
+	")",
+	"set \"npm_prefix_js=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js\"",
+	"set \"npx_cli_js=%~dp0\\node_modules\\npm\\bin\\npx-cli.js\"",
+	"for /f \"delims=\" %%f in ('call \"%node_exe%\" \"%npm_prefix_js%\"') do (",
+	"set \"npm_prefix_npx_cli_js=%%f\\node_modules\\npm\\bin\\npx-cli.js\"",
+	")",
+	"if exist \"%npm_prefix_npx_cli_js%\" (",
+	"set \"npx_cli_js=%npm_prefix_npx_cli_js%\"",
+	")",
+	"\"%node_exe%\" \"%npx_cli_js%\" %*"
+];
+const LEGACY_NPX_SHIM_LINES = [
+	"@echo off",
+	"goto start",
+	":find_dp0",
+	"set dp0=%~dp0",
+	"exit /b",
+	":start",
+	"setlocal",
+	"call :find_dp0",
+	"if exist \"%dp0%\\node.exe\" (",
+	"set \"_prog=%dp0%\\node.exe\"",
+	") else (",
+	"set \"_prog=node\"",
+	"set pathext=%pathext:;.js;=;%",
+	")",
+	"endlocal & goto #_undefined_# 2>nul || title %comspec% & \"%_prog%\" \"%dp0%\\node_modules\\npm\\bin\\npx-cli.js\" %*"
+];
 /**
-* Build the spawn argv for one resolved executable. On Windows, npm-distributed
-* CLIs resolve through `.cmd`/`.bat` shims (PATHEXT candidates), and Node
-* refuses to spawn those directly without a shell (EINVAL, CVE-2024-27980),
-* while `ctx.subprocess` exposes no shell option. Route such shims through
-* `%COMSPEC% /d /s /c`: argv[0] is cmd.exe itself, which is directly
-* spawnable. The joined command line receives no extra quoting — the same
-* exposure as Node's own `shell: true` — which is safe for the service's
-* internally-constructed flags and CLI-provided profile/skill names, and was
-* verified against `imo.cmd` on Windows 11 (space-free install paths).
+* Parse only the exact npm-generated npx shim forms known to this adapter.
+*
+* This parser intentionally returns policies, not paths. A path-looking token
+* captured from a batch file is never trusted as an executable or CLI entry;
+* callers derive the two fixed npm-relative paths from the canonical shim
+* directory and verify them as real files before spawning.
+*/
+function parseNpmNpxShim(content) {
+	if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > WINDOWS_NPX_SHIM_MAX_BYTES) return void 0;
+	const lines = content.replace(/^\uFEFF/u, "").replace(/\r\n?/gu, "\n").split("\n").map(normalizeBatchLine).filter((line) => line.length > 0);
+	if (sameLines(lines, MODERN_NPX_SHIM_LINES)) return {
+		format: "modern",
+		nodePolicy: "sibling-or-path",
+		cliPolicy: "sibling-npm-cli"
+	};
+	if (sameLines(lines, LEGACY_NPX_SHIM_LINES)) return {
+		format: "legacy",
+		nodePolicy: "sibling-or-path",
+		cliPolicy: "sibling-npm-cli"
+	};
+	return void 0;
+}
+function normalizeBatchLine(line) {
+	return line.trim().replace(/[ \t]+/gu, " ").toLowerCase();
+}
+function sameLines(left, right) {
+	return left.length === right.length && left.every((line, index) => line === right[index]);
+}
+/**
+* Tests may pass POSIX fixture paths while exercising the Windows policy. Real
+* Windows resolver paths contain a drive or backslash and therefore use the
+* case-insensitive win32 path implementation.
+*/
+function pathApiFor(platform, path) {
+	if (platform === "win32" && (path.includes("\\") || /^[A-Za-z]:[\\/]/u.test(path))) return win32;
+	return posix;
+}
+function isWindowsNpxShim(executablePath, platform) {
+	if (platform !== "win32") return false;
+	const api = pathApiFor(platform, executablePath);
+	const name$8 = api.basename(executablePath).toLowerCase();
+	return name$8 === "npx.cmd" || name$8 === "npx.bat";
+}
+function containedPath(root, candidate, api, caseInsensitive) {
+	const normalizedRoot = caseInsensitive ? root.toLowerCase() : root;
+	const normalizedCandidate = caseInsensitive ? candidate.toLowerCase() : candidate;
+	const relativePath = api.relative(normalizedRoot, normalizedCandidate);
+	return relativePath.length > 0 && relativePath !== ".." && !relativePath.startsWith(`..${api.sep}`) && !api.isAbsolute(relativePath);
+}
+function missingPath(error$2) {
+	const code = error$2.code;
+	return code === "ENOENT" || code === "ENOTDIR";
+}
+/** Canonicalize and verify one readable file without widening the subprocess fs model. */
+async function canonicalFile(candidate, root, api, signal, executable) {
+	signal?.throwIfAborted();
+	const canonical = await realpath(candidate);
+	signal?.throwIfAborted();
+	if (root !== void 0 && !containedPath(root, canonical, api, true)) throw new Error("path outside shim directory");
+	const info = await stat(canonical);
+	if (!info.isFile()) throw new Error("path is not a file");
+	await access(canonical, constants.R_OK);
+	if (executable) await access(canonical, constants.X_OK);
+	return canonical;
+}
+async function optionalCanonicalFile(candidate, root, api, signal, executable) {
+	try {
+		return await canonicalFile(candidate, root, api, signal, executable);
+	} catch (error$2) {
+		if (missingPath(error$2)) return void 0;
+		throw error$2;
+	}
+}
+/** Read a shim with a hard byte bound; no batch contents are executed. */
+async function readBoundedShim(path, signal) {
+	const file = await open(path, "r");
+	try {
+		const bytes = Buffer.alloc(WINDOWS_NPX_SHIM_MAX_BYTES + 1);
+		let offset = 0;
+		while (offset < bytes.length) {
+			signal?.throwIfAborted();
+			const result = await file.read(bytes, offset, bytes.length - offset, offset);
+			if (result.bytesRead === 0) break;
+			offset += result.bytesRead;
+		}
+		if (offset > WINDOWS_NPX_SHIM_MAX_BYTES) throw new Error("npx shim is too large");
+		return bytes.subarray(0, offset).toString("utf8");
+	} finally {
+		try {
+			await file.close();
+		} catch {}
+	}
+}
+/** Canonicalize an npm prefix directory returned by the read-only helper. */
+async function canonicalDirectory(candidate, signal) {
+	try {
+		signal?.throwIfAborted();
+		const canonical = await realpath(candidate);
+		signal?.throwIfAborted();
+		const info = await stat(canonical);
+		return info.isDirectory() ? canonical : void 0;
+	} catch (error$2) {
+		if (missingPath(error$2)) return void 0;
+		throw error$2;
+	}
+}
+/** Parse exactly one absolute prefix line; never capture an arbitrary path token from logs. */
+function parsePrefixOutput(output, platform) {
+	const lines = output.replace(/\r\n?/gu, "\n").split("\n").filter((line) => line.length > 0);
+	if (lines.length !== 1) return void 0;
+	const raw = lines[0];
+	const value = raw.trim();
+	if (value.length === 0 || raw !== value || /[\u0000-\u001F\u007F"]/u.test(value)) return void 0;
+	const api = pathApiFor(platform, value);
+	return api.isAbsolute(value) ? value : void 0;
+}
+/**
+* Run npm's standard prefix helper through the same managed subprocess seam.
+* The helper is not the shim: it is an npm-owned read-only script whose only
+* stdout contract is the configured global prefix. Any failure falls back to
+* the shim-relative CLI, exactly as the standard batch shim does.
+*/
+async function readNpmPrefix(rt, node, prefixScript, options) {
+	let handle;
+	try {
+		handle = rt.spawn({
+			argv: [node, prefixScript],
+			cwd: options.cwd ?? process.cwd(),
+			stdio: {
+				stdin: "ignore",
+				stdout: { maxBytes: OUTPUT_LIMIT_BYTES },
+				stderr: { maxBytes: OUTPUT_LIMIT_BYTES }
+			},
+			graceMs: GRACE_MS,
+			signal: options.signal,
+			...options.env === void 0 ? {} : { env: options.env }
+		});
+	} catch {
+		return void 0;
+	}
+	try {
+		const outcome = await handle.done;
+		options.signal?.throwIfAborted();
+		if (outcome.exitCode !== 0 || outcome.signal !== null) return void 0;
+		const stdout = readCollected(handle, "stdout");
+		return stdout.truncated ? void 0 : stdout.text;
+	} catch (error$2) {
+		if (options.signal?.aborted) throw error$2;
+		return void 0;
+	}
+}
+/** Resolve the optional global-prefix npm CLI candidate emitted by npm 11's shim. */
+async function resolvePrefixedNpxCli(rt, node, prefixScript, platform, options) {
+	if (prefixScript === void 0) return void 0;
+	const prefixOutput = await readNpmPrefix(rt, node, prefixScript, options);
+	if (prefixOutput === void 0) return void 0;
+	const prefixText = parsePrefixOutput(prefixOutput, platform);
+	if (prefixText === void 0) return void 0;
+	const prefixApi = pathApiFor(platform, prefixText);
+	const prefixDir = await canonicalDirectory(prefixText, options.signal);
+	if (prefixDir === void 0) return void 0;
+	return optionalCanonicalFile(prefixApi.join(prefixDir, ...WINDOWS_NPX_CLI_PARTS), prefixDir, prefixApi, options.signal, false);
+}
+function nativeNodeExecutable(path, api) {
+	return api.basename(path).toLowerCase() === "node.exe";
+}
+function resolveEnvironment(env) {
+	if (env === void 0) return void 0;
+	const resolved$1 = {};
+	for (const [key, value] of Object.entries(env)) resolved$1[key] = value ?? "";
+	return resolved$1;
+}
+/**
+* Resolve a managed spawn argv. npx's npm shim is the one Windows command
+* whose command line must not be handed to cmd: the standard shim is inspected
+* read-only and replaced by native node.exe + the verified npm npx-cli.js.
+* Other `.cmd`/`.bat` commands retain the historical cmd fallback and its
+* existing quoting boundary; they are intentionally outside this npx fix.
+*/
+async function resolveSpawnArgv(rt, executablePath, args, options = {}) {
+	const platform = options.platform ?? process.platform;
+	if (!isWindowsNpxShim(executablePath, platform)) return toSpawnArgv(executablePath, args, platform, options.comspec);
+	const api = pathApiFor(platform, executablePath);
+	const shim = await canonicalFile(executablePath, void 0, api, options.signal, true);
+	const shimDir = api.dirname(shim);
+	const parsed = parseNpmNpxShim(await readBoundedShim(shim, options.signal));
+	if (parsed === void 0) throw new Error("unsupported npx shim");
+	if (parsed.cliPolicy !== "sibling-npm-cli") throw new Error("unsupported npx cli policy");
+	const siblingCli = await optionalCanonicalFile(api.join(shimDir, ...WINDOWS_NPX_CLI_PARTS), shimDir, api, options.signal, false);
+	const prefixScript = parsed.format === "modern" ? await optionalCanonicalFile(api.join(shimDir, ...WINDOWS_NPM_PREFIX_PARTS), shimDir, api, options.signal, false) : void 0;
+	const siblingNode = await optionalCanonicalFile(api.join(shimDir, "node.exe"), shimDir, api, options.signal, true);
+	let node = siblingNode;
+	if (node === void 0) {
+		const resolvedNode = await rt.resolveExecutable("node", resolveEnvironment(options.env), options.signal);
+		const resolvedApi = pathApiFor(platform, resolvedNode);
+		if (!nativeNodeExecutable(resolvedNode, resolvedApi)) throw new Error("resolved node is not node.exe");
+		node = await canonicalFile(resolvedNode, void 0, resolvedApi, options.signal, true);
+	}
+	if (node === void 0) throw new Error("node executable is unavailable");
+	const prefixedCli = await resolvePrefixedNpxCli(rt, node, prefixScript, platform, options);
+	const cli = prefixedCli ?? siblingCli;
+	if (cli === void 0) throw new Error("npm npx cli is unavailable");
+	return [
+		node,
+		cli,
+		...args
+	];
+}
+/**
+* Legacy fallback for non-npx Windows shims. It remains intentionally
+* unchanged in this card: callers with paths such as `imo.cmd` still use the
+* cmd boundary and must be handled by a separate compatibility decision.
 */
 function toSpawnArgv(executablePath, args, platform, comspec) {
 	if (platform !== "win32") return [executablePath, ...args];
@@ -17065,7 +17331,7 @@ async function captureCore(rt, options) {
 	const { signal: deadlineSignal, cleanup, timedOut, cancelled: cancelled$1 } = deadline(options.timeoutMs, options.signal);
 	let executablePath;
 	try {
-		executablePath = await rt.resolveExecutable(options.command, void 0, deadlineSignal);
+		executablePath = await rt.resolveExecutable(options.command, resolveEnvironment(options.env), deadlineSignal);
 	} catch (cause) {
 		cleanup();
 		return {
@@ -17076,19 +17342,39 @@ async function captureCore(rt, options) {
 			}
 		};
 	}
+	let argv;
+	try {
+		argv = await resolveSpawnArgv(rt, executablePath, options.args, {
+			env: options.env,
+			cwd: options.cwd,
+			signal: deadlineSignal,
+			platform: process.platform
+		});
+	} catch {
+		cleanup();
+		return {
+			ok: false,
+			error: {
+				code: timedOut() ? "timeout" : cancelled$1() ? "cancelled" : "spawn-failed",
+				message: timedOut() ? "IMO CLI operation timed out" : cancelled$1() ? "IMO CLI operation was cancelled" : isWindowsNpxShim(executablePath, process.platform) ? "the resolved npx shim is unsupported or incomplete; use a standard npm Node installation" : "IMO CLI executable could not be safely launched"
+			}
+		};
+	}
 	let handle;
 	try {
-		handle = rt.spawn({
-			argv: toSpawnArgv(executablePath, options.args, process.platform),
-			cwd: process.cwd(),
+		const spawnSpec = {
+			argv,
+			cwd: options.cwd ?? process.cwd(),
 			stdio: {
 				stdin: "ignore",
 				stdout: { maxBytes: OUTPUT_LIMIT_BYTES },
 				stderr: { maxBytes: OUTPUT_LIMIT_BYTES }
 			},
 			graceMs: GRACE_MS,
-			signal: deadlineSignal
-		});
+			signal: deadlineSignal,
+			...options.env === void 0 ? {} : { env: options.env }
+		};
+		handle = rt.spawn(spawnSpec);
 	} catch {
 		cleanup();
 		return {
@@ -18125,2152 +18411,13 @@ async function resolveSkillPath(skillPath, allowedRootPath, allowedRoot) {
 			absolute: canonical,
 			canonical
 		};
-	} catch {
+	} catch (error$2) {
+		const code = error$2?.code;
 		return {
 			absolute,
-			reason: "missing"
+			reason: code === "EACCES" || code === "EPERM" ? "unreadable" : "missing"
 		};
 	}
-}
-
-//#endregion
-//#region ../insuremo-service/src/skills.ts
-/** Emitted after a successful `imo skills list` finishes. */
-const SKILLS_INVENTORY_UPDATED_EVENT = "skills/inventory-updated";
-/** Read-only IMO Skills inventory service. All process operations route through `ctx.subprocess`. */
-var ImoSkillsService = class extends Service {
-	static inject = ["subprocess"];
-	static Config = Config;
-	config;
-	/** Root used by the internal path resolver; defaults to homedir(). */
-	skillsAllowedRoot;
-	constructor(ctx, config$1 = {}) {
-		super(ctx, "imoSkills");
-		this.config = resolveConfig(config$1);
-		this.skillsAllowedRoot = homedir();
-	}
-	async list(scope = "project", signal) {
-		const args = scope === "global" ? [
-			"skills",
-			"list",
-			"--json",
-			"-g"
-		] : [
-			"skills",
-			"list",
-			"--json"
-		];
-		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
-		const run = await runCapture(this.ctx.subprocess, {
-			command: this.config.command,
-			args,
-			timeoutMs: this.config.timeoutMs,
-			signal
-		});
-		if (!run.ok) return run.error.code === "cancelled" ? cancelledSkillsResult(this.config.command, args) : {
-			ok: false,
-			error: mapRunFailure(run.error, this.config.command, args)
-		};
-		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
-		let parsed;
-		try {
-			parsed = JSON.parse(run.value.stdout.text);
-		} catch {
-			return parseSkillsError(run, this.config.command, args, "skills list output was not valid JSON");
-		}
-		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
-		if (!Array.isArray(parsed)) return parseSkillsError(run, this.config.command, args, "skills list JSON was not an array");
-		const skills = parsed.map((row) => {
-			const entry = typeof row === "object" && row !== null ? row : {};
-			return {
-				name: typeof entry.name === "string" ? entry.name : "",
-				description: typeof entry.description === "string" ? entry.description : "",
-				path: typeof entry.path === "string" ? entry.path : ""
-			};
-		});
-		const stdoutDigest = run.value.stdoutDigest;
-		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
-		this.ctx.emit(SKILLS_INVENTORY_UPDATED_EVENT, {
-			scope,
-			skills: [...skills],
-			stdoutDigest
-		});
-		return {
-			ok: true,
-			value: {
-				scope,
-				skills,
-				stdoutDigest
-			}
-		};
-	}
-	async configPath(signal) {
-		const args = [
-			"skills",
-			"config",
-			"path"
-		];
-		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
-		const run = await runCapture(this.ctx.subprocess, {
-			command: this.config.command,
-			args,
-			timeoutMs: this.config.timeoutMs,
-			signal
-		});
-		if (!run.ok) return run.error.code === "cancelled" ? cancelledSkillsResult(this.config.command, args) : {
-			ok: false,
-			error: mapRunFailure(run.error, this.config.command, args)
-		};
-		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
-		const path = run.value.stdout.text.split(/\r?\n/)[0]?.trim() ?? "";
-		let exists = false;
-		try {
-			exists = (await stat(path)).isFile();
-		} catch {
-			exists = false;
-		}
-		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
-		return {
-			ok: true,
-			value: {
-				path,
-				exists
-			}
-		};
-	}
-	async validate(scope = "project", signal) {
-		const args = scope === "global" ? [
-			"skills",
-			"list",
-			"--json",
-			"-g"
-		] : [
-			"skills",
-			"list",
-			"--json"
-		];
-		try {
-			throwIfSkillAborted(signal);
-			const listResult = await this.list(scope, signal);
-			if (!listResult.ok) return listResult;
-			throwIfSkillAborted(signal);
-			const allowedRoot = await resolveAllowedSkillRoot(this.skillsAllowedRoot);
-			throwIfSkillAborted(signal);
-			const items = [];
-			for (const skill of listResult.value.skills) {
-				throwIfSkillAborted(signal);
-				const resolved$1 = await resolveSkillPath(skill.path, this.skillsAllowedRoot, allowedRoot);
-				throwIfSkillAborted(signal);
-				const absolute = resolved$1.canonical ?? resolved$1.absolute;
-				const reasons = [];
-				if (resolved$1.reason === "outside-allowed-root") reasons.push("outside-allowed-root");
-				else if (resolved$1.reason === "missing") reasons.push("missing-directory");
-				else if (resolved$1.canonical === void 0) reasons.push("missing-directory");
-				else try {
-					throwIfSkillAborted(signal);
-					if (!(await stat(resolved$1.canonical)).isDirectory()) reasons.push("not-directory");
-					else {
-						throwIfSkillAborted(signal);
-						const manifest = await resolveSkillPath(join(resolved$1.canonical, "SKILL.md"), this.skillsAllowedRoot, allowedRoot);
-						throwIfSkillAborted(signal);
-						if (manifest.reason === "outside-allowed-root") reasons.push("outside-allowed-root");
-						else if (manifest.canonical === void 0) reasons.push("missing-skill-md");
-						else try {
-							throwIfSkillAborted(signal);
-							if (!(await stat(manifest.canonical)).isFile()) reasons.push("missing-skill-md");
-							throwIfSkillAborted(signal);
-						} catch (error$2) {
-							if (isSkillAbortError(error$2)) throw error$2;
-							reasons.push("missing-skill-md");
-						}
-					}
-				} catch (error$2) {
-					if (isSkillAbortError(error$2)) throw error$2;
-					reasons.push("missing-directory");
-				}
-				items.push({
-					name: skill.name,
-					description: skill.description,
-					path: absolute,
-					valid: reasons.length === 0,
-					reasons
-				});
-			}
-			throwIfSkillAborted(signal);
-			return {
-				ok: true,
-				value: {
-					scope,
-					inventoryComplete: items.every((item) => item.valid),
-					items,
-					checkedAt: (/* @__PURE__ */ new Date()).toISOString()
-				}
-			};
-		} catch (error$2) {
-			if (isSkillAbortError(error$2)) return cancelledSkillsResult(this.config.command, args);
-			throw error$2;
-		}
-	}
-};
-function cancelledSkillsResult(command, args) {
-	return {
-		ok: false,
-		error: {
-			code: "cancelled",
-			message: "IMO Skills operation was cancelled",
-			command,
-			args
-		}
-	};
-}
-function parseSkillsError(run, command, args, message) {
-	return {
-		ok: false,
-		error: {
-			code: "parse-error",
-			message,
-			command,
-			args,
-			stdoutDigest: run.value.stdoutDigest,
-			stderrDigest: run.value.stderrDigest
-		}
-	};
-}
-
-//#endregion
-//#region ../insuremo-service/src/skill-activation.ts
-const SKILL_ACTIVATION_DOMAIN_NAME = "workbench_imo_skill_activation";
-const SKILL_ACTIVATION_CHANGED_EVENT = "skills/activation-changed";
-const GLOBAL_KEY = "global";
-const MAX_SAFE_REVISION = Number.MAX_SAFE_INTEGER;
-const SERVICE_DISPOSED_MESSAGE = "IMO skill activation service is disposed";
-const activationControllers = /* @__PURE__ */ new WeakMap();
-const activationStateSchema = object({
-	scope: literal("global"),
-	initialized: literal(true),
-	enabledNames: array(string$5()),
-	revision: number().int().nonnegative().max(MAX_SAFE_REVISION),
-	updatedAt: string$5().datetime({ offset: true })
-}).strict().superRefine((state, refinement) => {
-	const names = state.enabledNames;
-	if (new Set(names).size !== names.length) refinement.addIssue({
-		code: "custom",
-		path: ["enabledNames"],
-		message: "enabledNames must be unique"
-	});
-	if (names.some((name$8) => !isSkillName(name$8))) refinement.addIssue({
-		code: "custom",
-		path: ["enabledNames"],
-		message: "enabledNames contains an invalid skill name"
-	});
-	if (names.some((name$8, index) => index > 0 && names[index - 1].localeCompare(name$8) > 0)) refinement.addIssue({
-		code: "custom",
-		path: ["enabledNames"],
-		message: "enabledNames must be sorted"
-	});
-});
-const skillActivationDomain = defineDomain({
-	name: SKILL_ACTIVATION_DOMAIN_NAME,
-	version: 1,
-	tables: { states: domainTable(activationStateSchema) }
-});
-var SkillActivationError = class extends Error {
-	constructor(code, message, expectedRevision, actualRevision) {
-		super(message);
-		this.code = code;
-		this.expectedRevision = expectedRevision;
-		this.actualRevision = actualRevision;
-		this.name = "SkillActivationError";
-	}
-};
-/** Internal lifecycle owner. Its context value is replaced with a frozen read facade in the constructor. */
-function skillActivationControllerFor(face) {
-	return face === void 0 || typeof face !== "object" && typeof face !== "function" ? void 0 : activationControllers.get(face);
-}
-var ImoSkillActivationService = class extends Service {
-	static inject = ["storageDomain"];
-	#runtime;
-	constructor(ctx, options = {}) {
-		super(ctx, "imoSkillActivation");
-		const runtime = new ActivationRuntime(ctx, options.onController);
-		this.#runtime = runtime;
-		const face = Object.freeze({
-			ensureInitialized: (installedNames) => runtime.ensureInitialized(installedNames),
-			snapshot: (installedNames) => runtime.snapshot(installedNames)
-		});
-		runtime.setFace(face);
-		ctx.set("imoSkillActivation", face);
-		ctx.effect(() => () => runtime.dispose(), "imoSkillActivation.runtime");
-		const ownerFiber = ctx.fiber;
-		ctx.on("internal/plugin", (fiber) => {
-			if (fiber === ownerFiber) runtime.dispose().catch(() => void 0);
-		});
-	}
-	async [Service.init]() {
-		await this.#runtime.init();
-	}
-};
-var ActivationRuntime = class {
-	#domain;
-	#openedDomain;
-	#domainClose;
-	#opening;
-	#store;
-	#ready;
-	#resolveReady;
-	#rejectReady;
-	#readySettled = false;
-	#disposed = false;
-	#disposePromise;
-	#face;
-	constructor(ctx, onController) {
-		this.ctx = ctx;
-		this.onController = onController;
-		this.#ready = new Promise((resolve$1, reject) => {
-			this.#resolveReady = resolve$1;
-			this.#rejectReady = reject;
-		});
-		this.#ready.catch(() => void 0);
-	}
-	setFace(face) {
-		this.#face = face;
-	}
-	async init() {
-		this.assertOpen();
-		let resolveOpening;
-		let rejectOpening;
-		const opening = new Promise((resolve$1, reject) => {
-			resolveOpening = resolve$1;
-			rejectOpening = reject;
-		});
-		this.#opening = opening;
-		try {
-			Promise.resolve(this.ctx.storageDomain.open(skillActivationDomain)).then((domain) => {
-				this.#openedDomain = domain;
-				resolveOpening(domain);
-			}, rejectOpening);
-		} catch (error$2) {
-			rejectOpening(error$2);
-		}
-		try {
-			const domain = await opening;
-			this.assertOpen();
-			const store = new ActivationStore(this.ctx, domain.table("states"), () => this.assertOpen());
-			this.#domain = domain;
-			this.#store = store;
-			if (this.#face !== void 0) activationControllers.set(this.#face, store);
-			this.onController?.(store);
-			this.assertOpen();
-			this.resolveReady();
-		} catch (error$2) {
-			if (this.#disposed) {
-				this.resolveReady();
-				throw serviceDisposedError();
-			}
-			this.rejectReady(error$2);
-			throw error$2;
-		}
-	}
-	async ensureInitialized(installedNames) {
-		this.assertOpen();
-		const installed = checkedInstalledNames(installedNames);
-		if (installed === void 0) throw invalidInputError();
-		await this.waitReady();
-		this.assertOpen();
-		return this.requireStore().ensureInitialized(installed);
-	}
-	async snapshot(installedNames) {
-		this.assertOpen();
-		const installed = checkedInstalledNames(installedNames);
-		if (installed === void 0) throw invalidInputError();
-		await this.waitReady();
-		this.assertOpen();
-		return this.requireStore().snapshot(installed);
-	}
-	dispose() {
-		if (this.#disposePromise !== void 0) return this.#disposePromise;
-		this.#disposed = true;
-		if (this.#face !== void 0) activationControllers.delete(this.#face);
-		this.resolveReady();
-		this.#disposePromise = this.finishDispose();
-		return this.#disposePromise;
-	}
-	async finishDispose() {
-		await this.#opening?.then(() => void 0, () => void 0);
-		await this.#store?.drain();
-		await this.closeDomain();
-	}
-	async waitReady() {
-		try {
-			await this.#ready;
-		} catch (error$2) {
-			if (this.#disposed) throw serviceDisposedError();
-			throw error$2;
-		}
-	}
-	resolveReady() {
-		if (this.#readySettled) return;
-		this.#readySettled = true;
-		this.#resolveReady();
-	}
-	rejectReady(error$2) {
-		if (this.#readySettled) return;
-		this.#readySettled = true;
-		this.#rejectReady(error$2);
-	}
-	async closeDomain() {
-		const domain = this.#openedDomain;
-		if (domain === void 0) return;
-		this.#domainClose ??= Promise.resolve().then(() => domain.close());
-		await this.#domainClose;
-	}
-	assertOpen() {
-		if (this.#disposed) throw serviceDisposedError();
-	}
-	requireStore() {
-		if (this.#store === void 0 || this.#domain === void 0) throw new Error("imo skill activation storage is unavailable");
-		return this.#store;
-	}
-};
-var ActivationStore = class {
-	#tail = Promise.resolve();
-	constructor(ctx, table, assertActive) {
-		this.ctx = ctx;
-		this.table = table;
-		this.assertActive = assertActive;
-	}
-	async ensureInitialized(installedNames) {
-		this.assertActive();
-		const installed = checkedInstalledNames(installedNames);
-		if (installed === void 0) return Promise.reject(invalidInputError());
-		return this.enqueue(async () => {
-			const current = this.table.get(GLOBAL_KEY);
-			if (current === void 0) {
-				const initial = makeState(installed, 0);
-				await this.table.put(GLOBAL_KEY, initial);
-				return snapshotFromState(initial, installed);
-			}
-			return snapshotFromState(current, installed);
-		});
-	}
-	async snapshot(installedNames) {
-		this.assertActive();
-		const installed = checkedInstalledNames(installedNames);
-		if (installed === void 0) return Promise.reject(invalidInputError());
-		return this.enqueue(async () => {
-			const current = this.table.get(GLOBAL_KEY);
-			return current === void 0 ? emptySnapshot(installed) : snapshotFromState(current, installed);
-		});
-	}
-	async setEnabled(name$8, enabled, installedNames, expectedRevision) {
-		this.assertActive();
-		if (typeof enabled !== "boolean") return Promise.reject(invalidInputError());
-		if (typeof name$8 !== "string") return Promise.reject(invalidInputError());
-		if (!validSkillName(name$8)) return Promise.reject(new SkillActivationError("invalid-name", "skill activation name is invalid"));
-		const installed = checkedInstalledNames(installedNames);
-		if (installed === void 0 || !validExpectedRevision(expectedRevision)) return Promise.reject(invalidInputError());
-		if (!installed.includes(name$8)) return Promise.reject(new SkillActivationError("not-installed", "skill activation name is not installed"));
-		return this.enqueue(async () => {
-			const current = await this.ensureState(installed, expectedRevision);
-			assertRevision(current.revision, expectedRevision);
-			const names = new Set(current.enabledNames);
-			if (enabled) names.add(name$8);
-			else names.delete(name$8);
-			const nextNames = sortedNames(names);
-			if (sameNames(nextNames, current.enabledNames)) return snapshotFromState(current, installed);
-			const next = makeState(nextNames, nextRevision(current.revision));
-			await this.table.put(GLOBAL_KEY, next);
-			this.emitChanged(next, installed);
-			return snapshotFromState(next, installed);
-		});
-	}
-	async reconcile(installedNames, expectedRevision) {
-		this.assertActive();
-		const installed = checkedInstalledNames(installedNames);
-		if (installed === void 0 || !validExpectedRevision(expectedRevision)) return Promise.reject(invalidInputError());
-		return this.enqueue(async () => {
-			const current = await this.ensureState(installed, expectedRevision);
-			assertRevision(current.revision, expectedRevision);
-			const installedSet = new Set(installed);
-			const nextNames = current.enabledNames.filter((name$8) => installedSet.has(name$8));
-			if (sameNames(nextNames, current.enabledNames)) return snapshotFromState(current, installed);
-			const next = makeState(nextNames, nextRevision(current.revision));
-			await this.table.put(GLOBAL_KEY, next);
-			this.emitChanged(next, installed);
-			return snapshotFromState(next, installed);
-		});
-	}
-	enqueue(operation) {
-		this.assertActive();
-		const result = this.#tail.then(() => {
-			this.assertActive();
-			return operation();
-		});
-		this.#tail = result.then(() => void 0, () => void 0);
-		return result;
-	}
-	async drain() {
-		await this.#tail;
-	}
-	async ensureState(installed, expectedRevision) {
-		const current = this.table.get(GLOBAL_KEY);
-		if (current !== void 0) return current;
-		assertRevision(0, expectedRevision);
-		const initial = makeState(installed, 0);
-		await this.table.put(GLOBAL_KEY, initial);
-		return initial;
-	}
-	emitChanged(state, installed) {
-		const snapshot = snapshotFromState(state, installed);
-		const payload = {
-			revision: snapshot.revision,
-			enabledCount: snapshot.enabled.length,
-			disabledCount: snapshot.disabled.length,
-			staleCount: snapshot.stale.length
-		};
-		this.ctx.emit(SKILL_ACTIVATION_CHANGED_EVENT, payload);
-	}
-};
-function serviceDisposedError() {
-	return new SkillActivationError("service-disposed", SERVICE_DISPOSED_MESSAGE);
-}
-function invalidInputError() {
-	return new SkillActivationError("invalid-input", "skill activation input is invalid");
-}
-function checkedInstalledNames(value) {
-	if (!Array.isArray(value) || !value.every(validSkillName)) return void 0;
-	return sortedNames(value);
-}
-function validExpectedRevision(value) {
-	return value === void 0 || typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-function assertRevision(actual, expected) {
-	if (expected !== void 0 && expected !== actual) throw new SkillActivationError("revision-conflict", "skill activation revision does not match the requested revision", expected, actual);
-}
-function nextRevision(current) {
-	if (current >= MAX_SAFE_REVISION) throw new SkillActivationError("revision-exhausted", "skill activation revision is exhausted");
-	return current + 1;
-}
-function validSkillName(value) {
-	return typeof value === "string" && isSkillName(value);
-}
-function sortedNames(names) {
-	return [...new Set(names)].sort((left, right) => left.localeCompare(right));
-}
-function sameNames(left, right) {
-	return left.length === right.length && left.every((name$8, index) => name$8 === right[index]);
-}
-function makeState(enabledNames, revision) {
-	return {
-		scope: "global",
-		initialized: true,
-		enabledNames: [...enabledNames].sort((left, right) => left.localeCompare(right)),
-		revision,
-		updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-	};
-}
-function emptySnapshot(installed) {
-	return Object.freeze({
-		initialized: false,
-		installed: Object.freeze([...installed]),
-		enabled: Object.freeze([]),
-		disabled: Object.freeze([...installed]),
-		stale: Object.freeze([]),
-		revision: 0
-	});
-}
-function snapshotFromState(state, installed) {
-	const installedSet = new Set(installed);
-	const enabled = state.enabledNames.filter((name$8) => installedSet.has(name$8));
-	const stale = state.enabledNames.filter((name$8) => !installedSet.has(name$8));
-	const enabledSet = new Set(enabled);
-	const disabled = installed.filter((name$8) => !enabledSet.has(name$8));
-	return Object.freeze({
-		initialized: state.initialized,
-		installed: Object.freeze([...installed]),
-		enabled: Object.freeze(enabled),
-		disabled: Object.freeze(disabled),
-		stale: Object.freeze(stale),
-		revision: state.revision
-	});
-}
-
-//#endregion
-//#region ../insuremo-service/src/active-profile.ts
-const ACTIVE_KEY = "global";
-const MAX_REVISION = Number.MAX_SAFE_INTEGER;
-const activeProfileRecordSchema = object({
-	profileName: string$5().min(1).nullable(),
-	revision: number().int().nonnegative().max(MAX_REVISION),
-	updatedAt: string$5().datetime({ offset: true })
-}).strict();
-const activeProfileDomain = defineDomain({
-	name: "workbench_active_profile",
-	version: 1,
-	tables: { states: domainTable(activeProfileRecordSchema) }
-});
-const ACTIVE_PROFILE_CHANGED_EVENT = "active-profile/changed";
-function cancelled() {
-	return {
-		ok: false,
-		error: {
-			code: "cancelled",
-			message: "active profile operation was cancelled"
-		}
-	};
-}
-function error(code, message = code) {
-	return {
-		ok: false,
-		error: {
-			code,
-			message
-		}
-	};
-}
-/** Persistent Workbench-owned profile selection. It never writes an IMO CLI pointer. */
-var ImoActiveProfileService = class extends Service {
-	static inject = ["storageDomain", "imoAuth"];
-	#table;
-	#domain;
-	#queue = Promise.resolve();
-	#disposed = false;
-	#auth;
-	constructor(ctx) {
-		super(ctx, "imoActiveProfile");
-		this.#auth = ctx.get("imoAuth");
-		const face = Object.freeze({
-			get: (signal) => this.get(signal),
-			select: (name$8, signal) => this.select(name$8, signal)
-		});
-		ctx.set("imoActiveProfile", face);
-		this.get = this.get.bind(this);
-		this.select = this.select.bind(this);
-	}
-	async [Service.init]() {
-		try {
-			const domain = await this.ctx.storageDomain.open(activeProfileDomain);
-			this.#domain = domain;
-			this.#table = domain.table("states");
-		} catch {
-			throw new Error("active profile storage operation failed");
-		}
-		this.ctx.effect(() => async () => {
-			this.#disposed = true;
-			try {
-				await this.#domain?.close();
-			} catch {}
-			this.#domain = void 0;
-			this.#table = void 0;
-		}, "imoActiveProfile.dispose");
-	}
-	async get(signal) {
-		if (signal?.aborted) return cancelled();
-		if (this.#disposed || this.#table === void 0) return error("storage-error");
-		return this.enqueue(async () => {
-			if (signal?.aborted) return cancelled();
-			let record;
-			try {
-				record = this.#table.get(ACTIVE_KEY);
-			} catch {
-				return error("storage-error");
-			}
-			if (record === void 0) return this.bootstrap(signal);
-			return this.resolveRecord(record, signal);
-		});
-	}
-	async select(profileName, signal) {
-		if (signal?.aborted) return cancelled();
-		if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(profileName)) return {
-			ok: false,
-			error: {
-				code: "invalid-profile",
-				message: "profile is invalid"
-			}
-		};
-		if (this.#disposed || this.#table === void 0) return error("storage-error");
-		return this.enqueue(async () => {
-			if (signal?.aborted) return cancelled();
-			const listed = await this.#auth.listProfiles(signal);
-			if (this.#disposed || this.#table === void 0) return error("storage-error");
-			if (!listed.ok) return error("unavailable");
-			const profile = listed.value.profiles.find((item) => item.profileName === profileName);
-			if (profile === void 0) return {
-				ok: false,
-				error: {
-					code: "invalid-profile",
-					message: "profile is not available"
-				}
-			};
-			let previous;
-			try {
-				previous = this.#table.get(ACTIVE_KEY);
-			} catch {
-				return error("storage-error");
-			}
-			if (previous !== void 0 && previous.revision >= MAX_REVISION) return {
-				ok: false,
-				error: {
-					code: "revision-exhausted",
-					message: "active profile revision exhausted"
-				}
-			};
-			const record = {
-				profileName,
-				revision: previous === void 0 ? 1 : previous.revision + 1,
-				updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-			};
-			try {
-				await this.#table.put(ACTIVE_KEY, record);
-			} catch {
-				return error("storage-error");
-			}
-			this.ctx.emit(ACTIVE_PROFILE_CHANGED_EVENT, {
-				profileName,
-				revision: record.revision
-			});
-			return {
-				ok: true,
-				value: this.view(record, profile)
-			};
-		});
-	}
-	async bootstrap(signal) {
-		const fast = await this.#auth.profilesFast(signal);
-		if (this.#disposed || this.#table === void 0) return error("storage-error");
-		if (!fast.ok) return error("unavailable");
-		const selected = fast.value.defaultProfile;
-		const profile = selected === null ? void 0 : fast.value.profiles.find((item) => item.profileName === selected);
-		const record = {
-			profileName: profile?.profileName ?? null,
-			revision: 1,
-			updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-		};
-		try {
-			await this.#table.put(ACTIVE_KEY, record);
-		} catch {
-			return error("storage-error");
-		}
-		this.ctx.emit(ACTIVE_PROFILE_CHANGED_EVENT, {
-			profileName: record.profileName,
-			revision: record.revision
-		});
-		return {
-			ok: true,
-			value: this.view(record, profile)
-		};
-	}
-	async resolveRecord(record, signal) {
-		if (record.profileName === null) return {
-			ok: true,
-			value: this.view(record)
-		};
-		const listed = await this.#auth.listProfilesCached(signal);
-		if (this.#disposed || this.#table === void 0) return error("storage-error");
-		if (!listed.ok) return {
-			ok: true,
-			value: {
-				...this.view(record),
-				activeProfileName: null,
-				storedProfileName: record.profileName,
-				status: "unavailable",
-				code: "unavailable"
-			}
-		};
-		const profile = listed.value.profiles.find((item) => item.profileName === record.profileName);
-		if (profile === void 0) return {
-			ok: true,
-			value: {
-				...this.view(record),
-				activeProfileName: null,
-				storedProfileName: record.profileName,
-				status: "missing",
-				code: "missing"
-			}
-		};
-		return {
-			ok: true,
-			value: this.view(record, profile)
-		};
-	}
-	view(record, profile) {
-		if (record.profileName === null) return {
-			activeProfileName: null,
-			revision: record.revision,
-			status: "none"
-		};
-		if (profile === void 0) return {
-			activeProfileName: null,
-			storedProfileName: record.profileName,
-			revision: record.revision,
-			status: "missing",
-			code: "missing"
-		};
-		return {
-			activeProfileName: profile.profileName,
-			profile,
-			revision: record.revision,
-			status: "active"
-		};
-	}
-	enqueue(fn) {
-		const next = this.#queue.then(fn);
-		this.#queue = next.then(() => void 0, () => void 0);
-		return next;
-	}
-};
-
-//#endregion
-//#region ../insuremo-service/src/overview/snapshot.ts
-const MAX_PROFILES = 100;
-const MAX_SKILL_NAMES = 512;
-const MAX_SKILL_ENTRIES = 100;
-const MAX_RECENT = 20;
-/** Build the read-only allowlist overview; every section is best-effort. */
-async function buildOverview(deps, signal) {
-	const imo = await imoSection(deps, signal);
-	const auth = await authSection(deps, signal);
-	const skills = await skillsSection(deps, signal);
-	const operations = operationsSection(deps);
-	const diagnostics = diagnosticsSection(imo, auth, skills, operations);
-	return Object.freeze({
-		schemaVersion: "0",
-		generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-		imo,
-		auth,
-		skills,
-		operations,
-		diagnostics,
-		ici: Object.freeze({
-			status: "warning",
-			embeddingUrl: "",
-			graphWorkspaces: 0,
-			explainWorkspaces: 0
-		})
-	});
-}
-async function imoSection(deps, signal) {
-	const installBusy = deps.imoInstall?.installStatus().running === true;
-	const installFlag = installBusy ? Object.freeze({ installBusy }) : {};
-	let section = Object.freeze({
-		status: "error",
-		code: "unavailable",
-		available: false,
-		updateAvailable: false,
-		...installFlag
-	});
-	try {
-		const probe = await deps.imoCli.probe(signal);
-		if (!probe.ok) {
-			section = Object.freeze({
-				status: "error",
-				code: probe.error.code === "cancelled" ? "cancelled" : probe.error.code,
-				available: false,
-				updateAvailable: false,
-				...installFlag
-			});
-			return section;
-		}
-		const version$1 = await deps.imoCli.version(signal);
-		const check = await deps.imoCli.upgradeCheck(signal);
-		let warning = false;
-		let code;
-		let target;
-		let updateAvailable = false;
-		if (check.ok) {
-			target = check.value.targetVersion;
-			updateAvailable = check.value.updateAvailable;
-			if (updateAvailable) warning = true;
-		} else if (check.error.code !== "cancelled") code = "check-unavailable";
-		const busy = deps.imoUpgrade?.upgradeStatus().running === true;
-		section = Object.freeze({
-			status: warning ? "warning" : "ok",
-			...code === void 0 ? {} : { code },
-			available: true,
-			...version$1.ok && /^\d+\.\d+\.\d+/.test(version$1.value.currentVersion) ? { current: version$1.value.currentVersion } : {},
-			...target === void 0 ? {} : { target },
-			updateAvailable,
-			...busy ? { busy } : {},
-			...installFlag
-		});
-	} catch {
-		section = Object.freeze({
-			status: "error",
-			code: "unavailable",
-			available: false,
-			updateAvailable: false,
-			...installFlag
-		});
-	}
-	return section;
-}
-async function authSection(deps, signal) {
-	let section = Object.freeze({
-		status: "error",
-		code: "unavailable",
-		profiles: [],
-		count: 0
-	});
-	try {
-		const list = await deps.imoAuth.listProfiles(signal);
-		const def = await deps.imoAuth.defaultProfile(signal);
-		if (!list.ok) {
-			section = Object.freeze({
-				status: "error",
-				code: list.error.code === "cancelled" ? "cancelled" : "unavailable",
-				profiles: [],
-				count: 0
-			});
-			return section;
-		}
-		const active = deps.imoActiveProfile === void 0 ? void 0 : await deps.imoActiveProfile.get(signal);
-		const activeView = active?.ok === true ? active.value : void 0;
-		const activeName = activeView?.activeProfileName ?? null;
-		const profiles = list.value.profiles.slice(0, MAX_PROFILES).map((profile) => Object.freeze({
-			name: profile.profileName,
-			...profile.env === void 0 ? {} : { env: profile.env },
-			...profile.tenantCode === void 0 ? {} : { tenantCode: profile.tenantCode },
-			...profile.accountName === void 0 ? {} : { account: profile.accountName },
-			isDefault: profile.isDefault === true,
-			...activeView === void 0 ? {} : { isActive: activeName === profile.profileName },
-			...profile.valid === void 0 ? {} : { valid: profile.valid }
-		}));
-		const defaultProfile = def.ok ? def.value.profileName ?? void 0 : void 0;
-		const noDefault = defaultProfile === void 0 && profiles.length > 0;
-		const activeStatus = activeView?.status ?? (active === void 0 ? "active" : "unavailable");
-		section = Object.freeze({
-			status: noDefault || !def.ok || activeStatus !== "active" ? "warning" : "ok",
-			...active === void 0 || active.ok ? {} : { code: "unavailable" },
-			profiles,
-			count: list.value.profiles.length,
-			...defaultProfile === void 0 ? {} : {
-				defaultProfile,
-				defaultProfileName: defaultProfile
-			},
-			activeProfileName: activeName,
-			...activeView === void 0 ? {} : {
-				activeProfileRevision: activeView.revision,
-				activeProfileStatus: activeView.status
-			}
-		});
-	} catch {
-		section = Object.freeze({
-			status: "error",
-			code: "unavailable",
-			profiles: [],
-			count: 0
-		});
-	}
-	return section;
-}
-async function skillsSection(deps, signal) {
-	let section = Object.freeze({
-		status: "error",
-		code: "unavailable",
-		installed: 0,
-		valid: 0,
-		enabled: 0,
-		disabled: 0,
-		names: [],
-		entries: [],
-		entriesTruncated: false
-	});
-	try {
-		const list = await deps.imoSkills.list("global", signal);
-		if (!list.ok) {
-			section = Object.freeze({
-				status: "error",
-				code: list.error.code === "cancelled" ? "cancelled" : "unavailable",
-				installed: 0,
-				valid: 0,
-				enabled: 0,
-				disabled: 0,
-				names: [],
-				entries: [],
-				entriesTruncated: false
-			});
-			return section;
-		}
-		const names = [...new Set(list.value.skills.map((skill) => skill.name).filter((name$8) => isSkillName(name$8)))].sort((left, right) => left.localeCompare(right));
-		const validation = await deps.imoSkills.validate("global", signal);
-		const validCount = validation.ok ? validation.value.items.filter((item) => item.valid).length : void 0;
-		let enabled = 0;
-		let disabled = 0;
-		let activationCode;
-		let enabledSet = /* @__PURE__ */ new Set();
-		let activationRevision$1;
-		try {
-			const activation = await deps.imoSkillActivation.snapshot(names);
-			enabled = activation.enabled.length;
-			disabled = activation.disabled.length;
-			enabledSet = new Set(activation.enabled);
-			activationRevision$1 = activation.revision;
-		} catch {
-			activationCode = "activation-unavailable";
-		}
-		const described = new Map(list.value.skills.map((skill) => [skill.name, skill.description]));
-		const entries = names.slice(0, MAX_SKILL_ENTRIES).map((name$8) => {
-			const rawDescription = described.get(name$8) ?? "";
-			const description = rawDescription.length > 200 ? `${rawDescription.slice(0, 199)}…` : rawDescription;
-			return Object.freeze({
-				name: name$8,
-				description,
-				enabled: enabledSet.has(name$8)
-			});
-		});
-		const incomplete = validation.ok ? !validation.value.inventoryComplete : true;
-		section = Object.freeze({
-			status: incomplete && validation.ok ? "warning" : validation.ok ? "ok" : "error",
-			...activationCode === void 0 ? {} : { code: activationCode },
-			installed: names.length,
-			valid: validCount ?? names.length,
-			enabled,
-			disabled,
-			names: names.slice(0, MAX_SKILL_NAMES),
-			entries,
-			entriesTruncated: names.length > MAX_SKILL_ENTRIES,
-			...activationRevision$1 === void 0 ? {} : { activationRevision: activationRevision$1 }
-		});
-	} catch {
-		section = Object.freeze({
-			status: "error",
-			code: "unavailable",
-			installed: 0,
-			valid: 0,
-			enabled: 0,
-			disabled: 0,
-			names: [],
-			entries: [],
-			entriesTruncated: false
-		});
-	}
-	return section;
-}
-function operationsSection(deps) {
-	try {
-		const records = deps.operationLog.list();
-		let pending = 0;
-		let approved = 0;
-		let rejected = 0;
-		let recorded = 0;
-		for (const record of records) {
-			if (record.decision === "pending") pending += 1;
-			else if (record.decision === "approved") approved += 1;
-			else if (record.decision === "rejected") rejected += 1;
-			if (record.decision === "approved" && record.resultDigest !== void 0) recorded += 1;
-		}
-		const recent = [...records].sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")) || 0).slice(0, MAX_RECENT).map((record) => Object.freeze({
-			id: record.id,
-			kind: record.kind,
-			decision: record.decision,
-			recorded: record.decision === "approved" && record.resultDigest !== void 0,
-			...typeof record.createdAt === "string" ? { createdAt: record.createdAt } : {}
-		}));
-		return Object.freeze({
-			status: "ok",
-			pending,
-			approved,
-			rejected,
-			recorded,
-			recent
-		});
-	} catch {
-		return Object.freeze({
-			status: "error",
-			code: "unavailable",
-			pending: 0,
-			approved: 0,
-			rejected: 0,
-			recorded: 0,
-			recent: []
-		});
-	}
-}
-function diagnosticsSection(imo, auth, skills, operations) {
-	const diagnostics = [];
-	if (imo.code === "cancelled" || auth.code === "cancelled" || skills.code === "cancelled") diagnostics.push(Object.freeze({
-		id: "overview-cancelled",
-		severity: "info",
-		messageKey: "overview.diagnostic.cancelled"
-	}));
-	if (!imo.available) diagnostics.push(Object.freeze({
-		id: "imo-unavailable",
-		severity: "error",
-		messageKey: "overview.diagnostic.imoUnavailable"
-	}));
-	if (imo.updateAvailable) diagnostics.push(Object.freeze({
-		id: "imo-update-available",
-		severity: "warning",
-		messageKey: "overview.diagnostic.imoUpdateAvailable"
-	}));
-	if (auth.code === "unavailable") diagnostics.push(Object.freeze({
-		id: "auth-unavailable",
-		severity: "error",
-		messageKey: "overview.diagnostic.authUnavailable"
-	}));
-	if (auth.status === "warning" && auth.defaultProfile === void 0 && auth.count > 0) diagnostics.push(Object.freeze({
-		id: "auth-no-default",
-		severity: "warning",
-		messageKey: "overview.diagnostic.authNoDefault"
-	}));
-	if (skills.code === "unavailable") diagnostics.push(Object.freeze({
-		id: "skills-unavailable",
-		severity: "error",
-		messageKey: "overview.diagnostic.skillsUnavailable"
-	}));
-	if (skills.status === "warning") diagnostics.push(Object.freeze({
-		id: "skills-incomplete",
-		severity: "warning",
-		messageKey: "overview.diagnostic.skillsIncomplete"
-	}));
-	if (operations.pending > 0) diagnostics.push(Object.freeze({
-		id: "operations-pending",
-		severity: "info",
-		messageKey: "overview.diagnostic.operationsPending"
-	}));
-	const severity = diagnostics.some((diagnostic) => diagnostic.severity === "error") ? "error" : diagnostics.some((diagnostic) => diagnostic.severity === "warning") ? "warning" : "ok";
-	return Object.freeze({
-		status: severity,
-		diagnostics
-	});
-}
-
-//#endregion
-//#region ../insuremo-service/src/overview/paths.ts
-/** Shared overview route prefix (single definition; no import cycles). */
-const OVERVIEW_PATH = "/api/icomposer-workbench/insuremo/overview";
-
-//#endregion
-//#region ../insuremo-service/src/overview/workspaces-status.ts
-const JSON_TYPE$2 = "application/json; charset=utf-8";
-/** Default InsureMO embedding endpoint (mirrors the ici package constant). */
-const DEFAULT_EMBEDDING_ENDPOINT = "https://portal-gw.insuremo.com/mo-re/1.0/aiqa/api/embedding";
-/** GET route: per-workspace iComposer/ICI health (icon data source). */
-const WORKSPACES_STATUS_PATH = `${OVERVIEW_PATH}/workspaces/status`;
-/**
-* Bounded local read of the workspace-owned schema-3 final explain state.
-* Legacy/context/prepare markers are intentionally never readiness signals. Kept local because this package's tsconfig
-* rootDir cannot include sibling sources.
-*/
-async function localReadExplainState(canonicalPath, workspaceId) {
-	return await readValidatedExplainFinal(canonicalPath, void 0, workspaceId) !== null;
-}
-/**
-* Build the per-workspace status projection: binding face rows joined with
-* the ICI manifest presence (graphReady) and the explain-state marker
-* (explainReady). Read-only; every miss degrades to false, never errors.
-*/
-async function buildWorkspaceStatuses(ctx) {
-	const binding = ctx.get("workspaceBinding");
-	if (binding === void 0) return [];
-	let rows = [];
-	try {
-		const res = await binding.list();
-		if (res.ok === true && Array.isArray(res.value)) rows = res.value;
-	} catch {
-		return [];
-	}
-	const ici = ctx.get("iciEngine");
-	const readExplainState = localReadExplainState;
-	const entries = [];
-	for (const row of rows.slice(0, 100)) {
-		let graphReady = false;
-		let explainReady = false;
-		if (ici !== void 0) try {
-			const diag = await ici.diagnostics({ workspaceId: row.workspaceId });
-			graphReady = diag.ok === true && diag.value?.requiredFiles?.manifest === true && diag.value?.stale !== true;
-		} catch {}
-		try {
-			explainReady = await readExplainState(row.canonicalPath, row.workspaceId);
-		} catch {}
-		entries.push(Object.freeze({
-			workspaceId: row.workspaceId,
-			displayName: row.displayName && row.displayName.length > 0 ? row.displayName : row.workspaceId,
-			detected: row.detectedIcomposer === true,
-			autoBindState: row.autoBindState ?? "none",
-			graphReady,
-			explainReady
-		}));
-	}
-	return Object.freeze(entries);
-}
-/**
-* Mount the read-only workspaces status route (GET only, no-store, nosniff).
-* The UI polls it (60s TTL) or fetches on workspace switch.
-*/
-function mountWorkspacesStatusRoute(ctx) {
-	return ctx.webServer.register({
-		kind: "exact",
-		path: WORKSPACES_STATUS_PATH,
-		handler: (req, res) => {
-			if (req.method !== "GET" && req.method !== "HEAD") {
-				res.writeHead(405, {
-					Allow: "GET",
-					"Content-Type": JSON_TYPE$2,
-					"Cache-Control": "no-store",
-					"X-Content-Type-Options": "nosniff"
-				});
-				res.end();
-				return;
-			}
-			const controller = new AbortController();
-			const onClose = () => controller.abort();
-			res.on("close", onClose);
-			(async () => {
-				try {
-					const statuses = await buildWorkspaceStatuses(ctx);
-					if (res.destroyed || res.writableEnded) return;
-					res.writeHead(200, {
-						"Content-Type": JSON_TYPE$2,
-						"Cache-Control": "no-store",
-						"X-Content-Type-Options": "nosniff"
-					});
-					res.end(req.method === "HEAD" ? void 0 : JSON.stringify({ workspaces: statuses }));
-				} catch {
-					if (!res.destroyed && !res.writableEnded) {
-						res.writeHead(500, {
-							"Content-Type": JSON_TYPE$2,
-							"Cache-Control": "no-store",
-							"X-Content-Type-Options": "nosniff"
-						});
-						res.end();
-					}
-				} finally {
-					res.off("close", onClose);
-				}
-			})();
-		}
-	});
-}
-
-//#endregion
-//#region ../insuremo-service/src/overview/service.ts
-/** Cold-start degraded sections for the fast channel (never fake "None"). */
-const FAST_UNCACHED_IMO = Object.freeze({
-	status: "warning",
-	code: "fast-uncached",
-	available: false,
-	updateAvailable: false
-});
-const FAST_UNCACHED_SKILLS = Object.freeze({
-	status: "warning",
-	code: "fast-uncached",
-	installed: 0,
-	valid: 0,
-	enabled: 0,
-	disabled: 0,
-	names: [],
-	entries: [],
-	entriesTruncated: false
-});
-const MIN_TTL_MS = 0;
-const MAX_TTL_MS = 5e3;
-/** Read-only aggregate overview service with coalescing and an optional short TTL. */
-var ImoOverviewService = class extends Service {
-	static inject = [
-		"imoCli",
-		"imoAuth",
-		"imoActiveProfile",
-		"imoSkills",
-		"imoSkillActivation",
-		"operationLog"
-	];
-	static Config = Config;
-	#dependencies;
-	#ttlMs;
-	#cached;
-	#inflight;
-	#lastImo;
-	#lastSkills;
-	#lastAuth;
-	#disposed = false;
-	#cacheGeneration = 0;
-	constructor(ctx, config$1 = {}) {
-		super(ctx, "imoOverview");
-		const resolved$1 = resolveConfig(config$1);
-		this.#ttlMs = Math.max(MIN_TTL_MS, Math.min(MAX_TTL_MS, resolved$1.overviewTtlMs));
-		this.#dependencies = {
-			imoCli: ctx.get("imoCli"),
-			imoAuth: ctx.get("imoAuth"),
-			imoActiveProfile: ctx.get("imoActiveProfile") ?? {
-				get: async () => ({
-					ok: true,
-					value: {
-						activeProfileName: null,
-						revision: 0,
-						status: "none"
-					}
-				}),
-				select: async () => ({
-					ok: false,
-					error: {
-						code: "unavailable",
-						message: "active profile unavailable"
-					}
-				})
-			},
-			imoSkills: ctx.get("imoSkills"),
-			imoSkillActivation: ctx.get("imoSkillActivation"),
-			operationLog: ctx.get("operationLog"),
-			imoUpgrade: ctx.get("imoUpgrade"),
-			imoInstall: ctx.get("imoInstall")
-		};
-		this.snapshot = this.snapshot.bind(this);
-		this.snapshotFast = this.snapshotFast.bind(this);
-		this.ctx.effect(() => {
-			const off = this.ctx.on(ACTIVE_PROFILE_CHANGED_EVENT, () => {
-				this.#cacheGeneration += 1;
-				this.#cached = void 0;
-				this.#lastAuth = void 0;
-				this.#inflight = void 0;
-			});
-			const offInstallCompleted = this.ctx.on(IMO_INSTALL_COMPLETED_EVENT, () => {
-				this.#cacheGeneration += 1;
-				this.#cached = void 0;
-				this.#lastImo = void 0;
-				this.#inflight = void 0;
-				this.snapshot(void 0).catch(() => {});
-			});
-			const offInstallFailed = this.ctx.on(IMO_INSTALL_FAILED_EVENT, () => {
-				this.#cacheGeneration += 1;
-				this.#cached = void 0;
-				this.#inflight = void 0;
-			});
-			return () => {
-				off?.();
-				offInstallCompleted?.();
-				offInstallFailed?.();
-				this.#disposed = true;
-				this.#cached = void 0;
-				this.#inflight = void 0;
-			};
-		}, "imoOverview.state");
-	}
-	async snapshot(signal) {
-		if (this.#disposed || signal?.aborted) return this.cancelledView();
-		if (signal === void 0 && this.#ttlMs > 0 && this.#cached !== void 0) {
-			if (Date.now() - this.#cached.at <= this.#ttlMs) return this.#cached.view;
-		}
-		const existing = this.#inflight;
-		if (existing !== void 0) return existing;
-		const generation = this.#cacheGeneration;
-		let inflight;
-		inflight = buildOverview(this.#dependencies, signal).then(async (view) => {
-			const statuses = await buildWorkspaceStatuses(this.ctx).catch(() => []);
-			const enriched = Object.freeze({
-				...view,
-				ici: Object.freeze({
-					status: "ok",
-					embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
-					graphWorkspaces: statuses.filter((entry) => entry.graphReady).length,
-					explainWorkspaces: statuses.filter((entry) => entry.explainReady).length
-				})
-			});
-			if (generation === this.#cacheGeneration) {
-				this.#lastImo = view.imo;
-				this.#lastSkills = view.skills;
-				this.#lastAuth = view.auth;
-				this.#cached = {
-					at: Date.now(),
-					view: enriched
-				};
-			}
-			if (this.#inflight === inflight) this.#inflight = void 0;
-			return enriched;
-		}, (error$2) => {
-			if (this.#inflight === inflight) this.#inflight = void 0;
-			throw error$2;
-		});
-		this.#inflight = inflight;
-		return inflight;
-	}
-	async snapshotFast(signal) {
-		if (this.#disposed || signal?.aborted) return this.cancelledView();
-		const auth = await this.#fastAuth(signal);
-		const imo = this.#lastImo ?? FAST_UNCACHED_IMO;
-		const skills = this.#lastSkills ?? FAST_UNCACHED_SKILLS;
-		const operations = this.#fastOperations();
-		const statuses = await buildWorkspaceStatuses(this.ctx).catch(() => []);
-		return Object.freeze({
-			schemaVersion: "0",
-			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-			imo,
-			auth,
-			skills,
-			operations,
-			diagnostics: Object.freeze({
-				status: "ok",
-				diagnostics: []
-			}),
-			ici: Object.freeze({
-				status: "ok",
-				embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
-				graphWorkspaces: statuses.filter((entry) => entry.graphReady).length,
-				explainWorkspaces: statuses.filter((entry) => entry.explainReady).length
-			})
-		});
-	}
-	async #fastAuth(signal) {
-		const listed = await this.#dependencies.imoAuth.listProfilesCached(signal).catch(() => void 0);
-		if (listed !== void 0 && listed.ok) {
-			const active = this.#dependencies.imoActiveProfile === void 0 ? void 0 : await this.#dependencies.imoActiveProfile.get(signal).catch(() => void 0);
-			const activeView = active?.ok === true ? active.value : void 0;
-			const activeName = activeView?.activeProfileName ?? null;
-			const profiles = listed.value.profiles.slice(0, 100).map((profile) => Object.freeze({
-				name: profile.profileName,
-				...profile.env === void 0 ? {} : { env: profile.env },
-				...profile.tenantCode === void 0 ? {} : { tenantCode: profile.tenantCode },
-				...profile.accountName === void 0 ? {} : { account: profile.accountName },
-				isDefault: profile.isDefault === true,
-				isActive: activeName === profile.profileName
-			}));
-			const diagnosticDefault = profiles.find((profile) => profile.isDefault)?.name;
-			return Object.freeze({
-				status: activeView?.status === "active" || activeView?.status === "none" ? "ok" : "warning",
-				profiles,
-				count: profiles.length,
-				...diagnosticDefault === void 0 ? {} : {
-					defaultProfile: diagnosticDefault,
-					defaultProfileName: diagnosticDefault
-				},
-				activeProfileName: activeName,
-				...activeView === void 0 ? {} : {
-					activeProfileRevision: activeView.revision,
-					activeProfileStatus: activeView.status
-				}
-			});
-		}
-		return this.#lastAuth ?? Object.freeze({
-			status: "warning",
-			code: "fast-uncached",
-			profiles: [],
-			count: 0
-		});
-	}
-	#fastOperations() {
-		try {
-			const records = this.#dependencies.operationLog.list();
-			let pending = 0;
-			for (const record of records) if (record.decision === "pending") pending += 1;
-			return Object.freeze({
-				status: "ok",
-				pending,
-				approved: 0,
-				rejected: 0,
-				recorded: 0,
-				recent: []
-			});
-		} catch {
-			return Object.freeze({
-				status: "error",
-				code: "unavailable",
-				pending: 0,
-				approved: 0,
-				rejected: 0,
-				recorded: 0,
-				recent: []
-			});
-		}
-	}
-	cancelledView() {
-		return Object.freeze({
-			schemaVersion: "0",
-			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-			imo: Object.freeze({
-				status: "error",
-				code: "cancelled",
-				available: false,
-				updateAvailable: false
-			}),
-			auth: Object.freeze({
-				status: "error",
-				code: "cancelled",
-				profiles: [],
-				count: 0
-			}),
-			skills: Object.freeze({
-				status: "error",
-				code: "cancelled",
-				installed: 0,
-				valid: 0,
-				enabled: 0,
-				disabled: 0,
-				names: [],
-				entries: [],
-				entriesTruncated: false
-			}),
-			operations: Object.freeze({
-				status: "error",
-				code: "cancelled",
-				pending: 0,
-				approved: 0,
-				rejected: 0,
-				recorded: 0,
-				recent: []
-			}),
-			diagnostics: Object.freeze({
-				status: "error",
-				diagnostics: [Object.freeze({
-					id: "overview-cancelled",
-					severity: "error",
-					messageKey: "overview.diagnostic.cancelled"
-				})]
-			}),
-			ici: Object.freeze({
-				status: "warning",
-				embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
-				graphWorkspaces: 0,
-				explainWorkspaces: 0
-			})
-		});
-	}
-};
-
-//#endregion
-//#region ../insuremo-service/src/overview/route.ts
-const JSON_TYPE$1 = "application/json; charset=utf-8";
-const MAX_BODY_BYTES = 256 * 1024;
-/**
-* Mount the read-only GET overview route on the web server. This is a
-* same-origin read bridge only: no POST/approve/execute transport exists yet
-* (the write transport's CSRF/Origin design is a documented Phase 2 risk).
-*/
-function mountOverviewRoute(ctx) {
-	return ctx.webServer.register({
-		kind: "exact",
-		path: OVERVIEW_PATH,
-		handler: (req, res) => {
-			if (req.method !== "GET" && req.method !== "HEAD") {
-				res.writeHead(405, {
-					Allow: "GET",
-					"Content-Type": JSON_TYPE$1,
-					"Cache-Control": "no-store",
-					"X-Content-Type-Options": "nosniff"
-				});
-				res.end();
-				return;
-			}
-			const controller = new AbortController();
-			const onClose = () => controller.abort();
-			res.on("close", onClose);
-			const overview = ctx.get("imoOverview");
-			const url = new URL(req.url ?? "/", "http://localhost");
-			const fast = url.searchParams.get("fast") === "1";
-			const respond = async () => {
-				try {
-					const view = overview === void 0 ? void 0 : fast ? await overview.snapshotFast(controller.signal) : await overview.snapshot(controller.signal);
-					if (res.destroyed || res.writableEnded) return;
-					const body = view === void 0 ? "{}" : JSON.stringify(view);
-					const bounded = body.length > MAX_BODY_BYTES ? body.slice(0, MAX_BODY_BYTES) : body;
-					res.writeHead(200, {
-						"Content-Type": JSON_TYPE$1,
-						"Cache-Control": "no-store",
-						"X-Content-Type-Options": "nosniff"
-					});
-					res.end(req.method === "HEAD" ? void 0 : bounded);
-				} catch {
-					if (!res.destroyed && !res.writableEnded) {
-						res.writeHead(500, {
-							"Content-Type": JSON_TYPE$1,
-							"Cache-Control": "no-store",
-							"X-Content-Type-Options": "nosniff"
-						});
-						res.end();
-					}
-				} finally {
-					res.off("close", onClose);
-				}
-			};
-			respond();
-		}
-	});
-}
-
-//#endregion
-//#region ../insuremo-service/src/skill-actions/types.ts
-const SKILL_INSTALL_KIND = "skill-install";
-const SKILL_UPDATE_KIND = "skill-update";
-const SKILL_REMOVE_KIND = "skill-remove";
-const SKILL_ACTIVATION_KIND = "skill-activation";
-const SKILL_ACTION_COMPLETED_EVENT = "skills/action-completed";
-const SKILL_ACTION_FAILED_EVENT = "skills/action-failed";
-const SKILL_AGENTS = [
-	"codex",
-	"claude-code",
-	"cursor",
-	"opencode",
-	"windsurf",
-	"gemini-cli",
-	"qwen-code",
-	"github-copilot",
-	"cline",
-	"codebuddy",
-	"augment",
-	"continue",
-	"kilo",
-	"roo",
-	"trae",
-	"warp",
-	"goose",
-	"firebender",
-	"universal"
-];
-const SKILL_SCENARIOS = [
-	"icomposer-full-stack",
-	"icomposer-coding-lite",
-	"icomposer-api-design",
-	"uic-developer",
-	"ask-insuremo"
-];
-
-//#endregion
-//#region ../insuremo-service/src/overview/write-routes.ts
-const JSON_TYPE = "application/json; charset=utf-8";
-const MAX_ACTION_BODY_BYTES = 8 * 1024;
-const ACTION_HEADER = "x-workbench-action";
-/** Every POST shares one prefix under the overview read path's sibling. */
-const ACTIONS_PREFIX = `${OVERVIEW_PATH}/actions`;
-/** Same-origin write gate (runs before any service call). */
-function sameOriginGate(req) {
-	const host = typeof req.headers.host === "string" ? req.headers.host : void 0;
-	if (host === void 0 || host.length === 0) return {
-		ok: false,
-		status: 403,
-		code: "origin-required",
-		message: "request must arrive from the Workbench UI (host header missing)"
-	};
-	const originHeader = typeof req.headers.origin === "string" ? req.headers.origin : void 0;
-	const refererHeader = typeof req.headers.referer === "string" ? req.headers.referer : void 0;
-	if (originHeader === void 0 && refererHeader === void 0) return {
-		ok: false,
-		status: 403,
-		code: "origin-required",
-		message: "Origin or Referer header is required for write actions"
-	};
-	for (const header of [originHeader, refererHeader]) {
-		if (header === void 0) continue;
-		let parsed;
-		try {
-			parsed = new URL(header);
-		} catch {
-			return {
-				ok: false,
-				status: 403,
-				code: "origin-invalid",
-				message: "Origin/Referer header is not a valid URL"
-			};
-		}
-		if (parsed.host !== host) return {
-			ok: false,
-			status: 403,
-			code: "origin-mismatch",
-			message: `write actions must come from the Workbench host (${host})`
-		};
-	}
-	if (req.headers[ACTION_HEADER] !== "1") return {
-		ok: false,
-		status: 403,
-		code: "action-header-required",
-		message: "X-Workbench-Action: 1 header is required for write actions"
-	};
-	const contentType = typeof req.headers["content-type"] === "string" ? req.headers["content-type"] : "";
-	if (!contentType.toLowerCase().startsWith("application/json")) return {
-		ok: false,
-		status: 400,
-		code: "content-type",
-		message: "Content-Type must be application/json"
-	};
-	return { ok: true };
-}
-async function readBody(req) {
-	const chunks = [];
-	let size = 0;
-	for await (const chunk of req) {
-		size += chunk.length;
-		if (size > MAX_ACTION_BODY_BYTES) return {
-			ok: false,
-			status: 413,
-			code: "body-too-large",
-			message: "request body exceeds the 8KB action limit"
-		};
-		chunks.push(chunk);
-	}
-	return {
-		ok: true,
-		text: Buffer.concat(chunks).toString("utf8")
-	};
-}
-function parseBody(text$1) {
-	try {
-		const parsed = JSON.parse(text$1);
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {
-			ok: false,
-			status: 400,
-			code: "body-shape",
-			message: "request body must be a JSON object"
-		};
-		return {
-			ok: true,
-			value: parsed
-		};
-	} catch {
-		return {
-			ok: false,
-			status: 400,
-			code: "body-json",
-			message: "request body is not valid JSON"
-		};
-	}
-}
-function sendJson(res, status, payload) {
-	if (res.destroyed || res.writableEnded) return;
-	res.writeHead(status, {
-		"Content-Type": JSON_TYPE,
-		"Cache-Control": "no-store",
-		"X-Content-Type-Options": "nosniff"
-	});
-	res.end(JSON.stringify(payload));
-}
-function clipDetail(value) {
-	return value.length > 300 ? `${value.slice(0, 299)}…` : value;
-}
-/** One action route: gate + body + handler with sanitized error mapping. */
-function actionRoute(path, handler) {
-	return {
-		path,
-		handle(req, res) {
-			if (req.method !== "POST") {
-				sendJson(res, 405, {
-					ok: false,
-					error: {
-						code: "method-not-allowed",
-						message: "write actions accept POST only"
-					}
-				});
-				return;
-			}
-			const gate = sameOriginGate(req);
-			if (!gate.ok) {
-				sendJson(res, gate.status, {
-					ok: false,
-					error: {
-						code: gate.code,
-						message: gate.message
-					}
-				});
-				return;
-			}
-			const controller = new AbortController();
-			const onClose = () => controller.abort();
-			res.on("close", onClose);
-			(async () => {
-				try {
-					const body = await readBody(req);
-					if (!body.ok) {
-						sendJson(res, body.status, {
-							ok: false,
-							error: {
-								code: body.code,
-								message: body.message
-							}
-						});
-						return;
-					}
-					const parsed = parseBody(body.text);
-					if (!parsed.ok) {
-						sendJson(res, parsed.status, {
-							ok: false,
-							error: {
-								code: parsed.code,
-								message: parsed.message
-							}
-						});
-						return;
-					}
-					const outcome = await handler(parsed.value, controller.signal);
-					if (outcome.ok) sendJson(res, 200, {
-						ok: true,
-						result: outcome.result
-					});
-					else sendJson(res, 200, {
-						ok: false,
-						error: {
-							code: outcome.error.code,
-							message: outcome.error.message,
-							...outcome.error.detail === void 0 ? {} : { detail: clipDetail(outcome.error.detail) }
-						}
-					});
-				} catch {
-					sendJson(res, 500, {
-						ok: false,
-						error: {
-							code: "internal",
-							message: "action failed unexpectedly"
-						}
-					});
-				} finally {
-					res.off("close", onClose);
-				}
-			})();
-		}
-	};
-}
-function str(value) {
-	return typeof value === "string" && value.length > 0 ? value : void 0;
-}
-function parseScenario(value) {
-	return typeof value === "string" && SKILL_SCENARIOS.includes(value) ? value : void 0;
-}
-function boundedNames(value) {
-	if (!Array.isArray(value)) return [];
-	return [...new Set(value.filter((name$8) => typeof name$8 === "string" && isSkillName(name$8)))].slice(0, 100);
-}
-/** Map a face error object ({code,message}) into the action envelope. */
-function faceError(error$2, fallback) {
-	const code = typeof error$2?.code === "string" && /^[a-z0-9-]{1,64}$/.test(error$2.code) ? error$2.code : fallback;
-	const message = typeof error$2?.message === "string" && error$2.message.length > 0 ? error$2.message : fallback;
-	return {
-		ok: false,
-		error: {
-			code,
-			message
-		}
-	};
-}
-/**
-* Mount the same-origin write bridge (TASK-039 direct-execution form): the
-* InsureMO local CLI actions run immediately through the services' direct
-* kernels — no operation-log approval chain. Every route keeps the
-* Origin/Referer + X-Workbench-Action + JSON/8KB gate; responses are
-* no-store, never CORS.
-*/
-function mountWriteRoutes(ctx) {
-	const disposers = [];
-	const register = (route) => {
-		disposers.push(ctx.webServer.register({
-			kind: "exact",
-			path: route.path,
-			handler: (req, res) => route.handle(req, res)
-		}));
-	};
-	register(actionRoute(`${ACTIONS_PREFIX}/imo-upgrade`, async (body, signal) => {
-		const upgrade = ctx.get("imoUpgrade");
-		if (upgrade === void 0) return faceError(void 0, "service-unavailable");
-		if (upgrade.upgradeStatus().running) return faceError({
-			code: "busy",
-			message: "an IMO upgrade is already running"
-		}, "busy");
-		const targetVersion = str(body.targetVersion);
-		try {
-			const executed = await upgrade.executeDirect(targetVersion, signal);
-			if (!executed.ok) return faceError(executed.error, "upgrade-failed");
-			return {
-				ok: true,
-				result: {
-					status: executed.receipt.status,
-					currentVersion: executed.receipt.after,
-					targetVersion: executed.receipt.after
-				}
-			};
-		} catch {
-			return faceError(void 0, "upgrade-failed");
-		}
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/imo-install`, async (_body, signal) => {
-		const install = ctx.get("imoInstall");
-		if (install === void 0) return faceError(void 0, "service-unavailable");
-		if (install.installStatus().running) return faceError({
-			code: "busy",
-			message: "an IMO install is already running"
-		}, "busy");
-		try {
-			const outcome = await install.install(signal);
-			if (!outcome.ok) return faceError(outcome.error, "install-failed");
-			return {
-				ok: true,
-				result: {
-					status: outcome.receipt.status,
-					packageManager: outcome.receipt.packageManager,
-					currentVersion: outcome.receipt.after
-				}
-			};
-		} catch {
-			return faceError(void 0, "install-failed");
-		}
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/imo-diagnosis`, async (body) => {
-		const kind = body.kind === "imo-cli" || body.kind === "skill" ? body.kind : void 0;
-		if (kind === void 0) return faceError({
-			code: "invalid-input",
-			message: "diagnosis kind must be 'imo-cli' or 'skill'"
-		}, "invalid-input");
-		const diagnosis = failureDiagnosis.snapshot(kind);
-		if (diagnosis === void 0) return {
-			ok: true,
-			result: { available: false }
-		};
-		const diagnosisCwd = diagnosisDirectory();
-		try {
-			await mkdir(diagnosisCwd, { recursive: true });
-		} catch {}
-		return {
-			ok: true,
-			result: {
-				available: true,
-				diagnosis,
-				diagnosisCwd
-			}
-		};
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/skill-activation`, async (body, signal) => {
-		const activation = ctx.get("imoSkillActivation");
-		if (activation === void 0) return faceError(void 0, "service-unavailable");
-		const name$8 = str(body.name);
-		if (name$8 === void 0) return faceError({
-			code: "invalid-input",
-			message: "skill name is required"
-		}, "invalid-input");
-		if (typeof body.enabled !== "boolean") return faceError({
-			code: "invalid-input",
-			message: "enabled must be a boolean"
-		}, "invalid-input");
-		const expectedRevision = typeof body.expectedRevision === "number" && Number.isInteger(body.expectedRevision) ? body.expectedRevision : void 0;
-		const controller = optionsActivationController(ctx);
-		if (controller === void 0) return faceError({
-			code: "service-unavailable",
-			message: "activation controller unavailable"
-		}, "service-unavailable");
-		try {
-			const snapshot = await controller.setEnabled(name$8, body.enabled, [name$8], expectedRevision);
-			return {
-				ok: true,
-				result: {
-					name: name$8,
-					enabled: body.enabled,
-					revision: snapshot.revision
-				}
-			};
-		} catch (error$2) {
-			const code = typeof error$2?.code === "string" ? String(error$2.code) : "activation-failed";
-			const message = error$2 instanceof Error && error$2.message.length > 0 ? error$2.message : "skill activation failed";
-			return faceError({
-				code: /^[a-z0-9-]{1,64}$/.test(code) ? code : "activation-failed",
-				message
-			}, "activation-failed");
-		}
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/skill-update`, async (_body, signal) => {
-		const actions = ctx.get("imoSkillActions");
-		if (actions === void 0) return faceError(void 0, "service-unavailable");
-		const outcome = await actions.runDirect({ kind: "skill-update" }, signal);
-		return directSkillOutcome(outcome);
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/skill-install`, async (body, signal) => {
-		const actions = ctx.get("imoSkillActions");
-		if (actions === void 0) return faceError(void 0, "service-unavailable");
-		const scenario = parseScenario(body.scenario);
-		if (scenario === void 0) return faceError({
-			code: "invalid-input",
-			message: "scenario is not in the built-in allowlist"
-		}, "invalid-input");
-		const outcome = await actions.runDirect({
-			kind: "skill-install",
-			source: {
-				type: "scenario",
-				scenario
-			},
-			agent: "universal",
-			skills: []
-		}, signal);
-		return directSkillOutcome(outcome);
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/skill-remove`, async (body, signal) => {
-		const actions = ctx.get("imoSkillActions");
-		if (actions === void 0) return faceError(void 0, "service-unavailable");
-		const name$8 = str(body.name);
-		if (name$8 === void 0) return faceError({
-			code: "invalid-input",
-			message: "skill name is required"
-		}, "invalid-input");
-		const outcome = await actions.runDirect({
-			kind: "skill-remove",
-			agent: "universal",
-			names: [name$8]
-		}, signal);
-		return directSkillOutcome(outcome);
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/active-profile`, async (body, signal) => {
-		const active = ctx.get("imoActiveProfile");
-		if (active === void 0) return faceError(void 0, "service-unavailable");
-		const profile = str(body.profile);
-		if (profile === void 0) return faceError({
-			code: "invalid-input",
-			message: "profile is required"
-		}, "invalid-input");
-		const selected = await active.select(profile, signal);
-		if (!selected.ok) return faceError(selected.error, "action-failed");
-		return {
-			ok: true,
-			result: {
-				status: selected.value.activeProfileName === profile ? "completed" : "none",
-				profile,
-				revision: selected.value.revision
-			}
-		};
-	}));
-	register(actionRoute(`${ACTIONS_PREFIX}/default-profile`, async (body, signal) => {
-		const authActions = ctx.get("imoAuthActions");
-		if (authActions === void 0) return faceError(void 0, "service-unavailable");
-		const profile = str(body.profile);
-		if (profile === void 0) return faceError({
-			code: "invalid-input",
-			message: "profile is required"
-		}, "invalid-input");
-		try {
-			const executed = await authActions.runDirectDefaultSwitch({ profile }, signal);
-			if (!executed.ok) return faceError(executed.error, "action-failed");
-			return {
-				ok: true,
-				result: {
-					status: executed.receipt.status,
-					profile
-				}
-			};
-		} catch {
-			return faceError(void 0, "action-failed");
-		}
-	}));
-	return () => {
-		for (const dispose of disposers) dispose();
-	};
-}
-function directSkillOutcome(outcome) {
-	if (!outcome.ok) return faceError(outcome.error, "action-failed");
-	return {
-		ok: true,
-		result: directSkillResult(outcome.receipt)
-	};
-}
-function directSkillResult(receipt) {
-	return {
-		status: receipt.status,
-		...receipt.beforeCount === void 0 ? {} : { beforeCount: receipt.beforeCount },
-		...receipt.afterCount === void 0 ? {} : { afterCount: receipt.afterCount },
-		added: boundedNames(receipt.added ?? []),
-		updated: boundedNames(receipt.updated ?? []),
-		removed: boundedNames(receipt.removed ?? [])
-	};
-}
-/** Activation controller seam resolved through the composed context. */
-function optionsActivationController(ctx) {
-	const holder = ctx.__insuremoActivationController;
-	return holder;
-}
-
-//#endregion
-//#region ../insuremo-service/src/overview/route-service.ts
-/** Composition seam: index.ts stores the live controller here for the routes. */
-function setActivationControllerOnContext(ctx, controller) {
-	ctx.__insuremoActivationController = controller;
-}
-/**
-* Route/section host for the InsureMO UI bridges.
-*
-* Registration happens DIRECTLY in `[Service.init]` — not via `ctx.effect`.
-* Effects registered by plugins mounted inside a loader entry were observed
-* to be swept ~25ms after mount (the entry fiber's pre-activation epoch
-* unloads effect runners that never reached ACTIVE), which silently removed
-* every route while the process kept serving (`overview 404` with a clean
-* boot). Direct registration with an idempotence guard keeps the routes for
-* the process lifetime; disposers are only invoked on fiber unload via the
-* service registry teardown (and double-registration is tolerated).
-*/
-var InsuremoRoutesService = class extends Service {
-	static inject = ["webServer"];
-	#activationController;
-	#disposers = [];
-	#registered = false;
-	/** Capture point for the activation controller (composition wiring). */
-	setActivationController(controller) {
-		this.#activationController = controller;
-	}
-	async [Service.init]() {
-		if (this.#registered) return;
-		this.#registered = true;
-		const ctx = this.ctx;
-		const safe = (register) => {
-			try {
-				this.#disposers.push(register());
-			} catch {}
-		};
-		safe(() => mountOverviewRoute(ctx));
-		safe(() => mountWriteRoutes(ctx));
-		safe(() => mountWorkspacesStatusRoute(ctx));
-		const firstRequestGuard = (_req, res) => {
-			res.writeHead(500);
-			res.end();
-		};
-	}
-};
-
-//#endregion
-//#region ../insuremo-service/src/skill-activation-adapter.ts
-/** Provider-local adapter: activation storage stays outside the catalog provider contract. */
-var SkillActivationGate = class {
-	resolver;
-	revision;
-	constructor(ctx, control, activation) {
-		this.control = control;
-		this.resolver = activation === void 0 ? () => ctx.get("imoSkillActivation") : typeof activation === "function" ? activation : () => activation;
-	}
-	async ensure(items, signal) {
-		const activation = this.resolver();
-		if (activation === void 0) return void 0;
-		const snapshot = await raceSkillAbort(activation.ensureInitialized(eligibleNames(items)), signal);
-		this.revision = snapshot.revision;
-		return snapshot;
-	}
-	async snapshot(items, signal) {
-		const activation = this.resolver();
-		if (activation === void 0) return void 0;
-		const snapshot = await raceSkillAbort(activation.snapshot(eligibleNames(items)), signal);
-		this.revision = snapshot.revision;
-		return snapshot;
-	}
-	async stableList(items, signal, build, fail$1) {
-		let initial = await this.ensure(items, signal);
-		if (initial === void 0 || !initial.initialized) return fail$1();
-		for (let attempt = 0; attempt < 2; attempt += 1) {
-			throwIfSkillAborted(signal);
-			const result = await build(new Set(initial.enabled));
-			throwIfSkillAborted(signal);
-			const final = await this.snapshot(items, signal);
-			throwIfSkillAborted(signal);
-			if (final === void 0 || !final.initialized) return fail$1();
-			if (sameActivation(initial, final)) return result;
-			if (attempt === 1) return fail$1();
-			initial = final;
-		}
-		return fail$1();
-	}
-	onChanged(payload) {
-		if (this.control.signal.aborted) return;
-		const revision = activationRevision(payload);
-		if (revision === void 0 || this.revision !== void 0 && revision <= this.revision) return;
-		this.revision = revision;
-		this.control.invalidate();
-	}
-};
-function sameActivation(left, right) {
-	return left.revision === right.revision && left.enabled.length === right.enabled.length && left.enabled.every((name$8, index) => name$8 === right.enabled[index]);
-}
-function eligibleNames(items) {
-	return items.filter((item) => item.valid && typeof item.name === "string" && isSkillName(item.name)).map((item) => item.name);
-}
-function activationRevision(value) {
-	if (typeof value !== "object" || value === null) return void 0;
-	const revision = value.revision;
-	return typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0 ? revision : void 0;
 }
 
 //#endregion
@@ -27044,13 +25191,20 @@ const FRONTMATTER_METADATA_KEYS = new Set([
 	"license"
 ]);
 const CANONICAL_DESCRIPTION_MAX_BYTES = 4 * 1024;
-async function readFrontmatterPrefix(path, signal) {
+async function inspectSkillDocument(path, signal) {
 	throwIfSkillAborted(signal);
 	let file;
 	try {
 		const details = await stat(path);
 		throwIfSkillAborted(signal);
-		if (!details.isFile() || details.size > MAX_SKILL_FILE_BYTES) return { invalid: true };
+		if (!details.isFile()) return invalidInspection({
+			code: "skill-file-unreadable",
+			canonicalInvalid: false
+		});
+		if (details.size > MAX_SKILL_FILE_BYTES) return invalidInspection({
+			code: "skill-file-too-large",
+			canonicalInvalid: false
+		});
 		file = await open(path, "r");
 		const buffer = Buffer.alloc(MAX_FRONTMATTER_BYTES + 1);
 		let bytesRead = 0;
@@ -27062,23 +25216,27 @@ async function readFrontmatterPrefix(path, signal) {
 		}
 		throwIfSkillAborted(signal);
 		const text$1 = buffer.subarray(0, bytesRead).toString("utf8");
-		if (!text$1.startsWith("---")) return { invalid: false };
-		const match = frontmatterMatch(text$1);
-		if (match === void 0 || Buffer.byteLength(match[0], "utf8") > MAX_FRONTMATTER_BYTES) return { invalid: true };
-		const parsed = parseFrontmatter(match[1]);
-		return parsed === void 0 ? {
-			invalid: true,
-			...hasCanonicalPolicyKey(match[1]) ? { canonicalInvalid: true } : {}
-		} : {
-			...parsed,
-			invalid: false
-		};
+		return inspectFrontmatter(text$1, bytesRead >= buffer.length);
 	} catch (error$2) {
 		if (isSkillAbortError(error$2)) throw error$2;
-		return { invalid: true };
+		return invalidInspection({
+			code: "skill-file-unreadable",
+			canonicalInvalid: false
+		});
 	} finally {
 		await file?.close().catch(() => void 0);
 	}
+}
+async function readFrontmatterPrefix(path, signal) {
+	const inspection = await inspectSkillDocument(path, signal);
+	if (inspection.invalid) return {
+		invalid: true,
+		...inspection.canonicalInvalid === true ? { canonicalInvalid: true } : {}
+	};
+	return {
+		...inspection.frontmatter,
+		invalid: false
+	};
 }
 async function readSkillDocument(path, signal) {
 	throwIfSkillAborted(signal);
@@ -27089,13 +25247,12 @@ async function readSkillDocument(path, signal) {
 		const text$1 = await readFile(path, "utf8");
 		throwIfSkillAborted(signal);
 		if (Buffer.byteLength(text$1, "utf8") > MAX_SKILL_FILE_BYTES) return void 0;
-		if (!text$1.startsWith("---")) return { content: text$1 };
+		const inspection = inspectFrontmatter(text$1);
+		if (inspection.invalid) return void 0;
 		const match = frontmatterMatch(text$1);
-		if (match === void 0 || Buffer.byteLength(match[0], "utf8") > MAX_FRONTMATTER_BYTES) return void 0;
-		const parsed = parseFrontmatter(match[1]);
-		return parsed === void 0 ? void 0 : {
-			...parsed,
-			content: text$1.slice(match[0].length)
+		return {
+			...inspection.frontmatter,
+			content: match === void 0 ? text$1 : text$1.slice(match[0].length)
 		};
 	} catch (error$2) {
 		if (isSkillAbortError(error$2)) throw error$2;
@@ -27103,7 +25260,33 @@ async function readSkillDocument(path, signal) {
 	}
 }
 function hasCanonicalPolicyKey(block) {
-	return /(?:^|\n)\s*(?:disable-model-invocation|user-invocable|description)\s*:/.test(block);
+	return /(?:^|\n)\s*(?:description|disable-model-invocation|user-invocable|modelInvocable|userInvocable)\s*:/.test(block);
+}
+function invalidInspection(issue$1) {
+	return {
+		invalid: true,
+		canonicalInvalid: issue$1.canonicalInvalid,
+		issue: issue$1
+	};
+}
+function inspectFrontmatter(text$1, prefixTruncated = false) {
+	if (!text$1.startsWith("---")) return { invalid: false };
+	const match = frontmatterMatch(text$1);
+	if (match === void 0) return invalidInspection({
+		code: prefixTruncated ? "frontmatter-too-large" : "frontmatter-unclosed",
+		...prefixTruncated ? {} : { line: 1 },
+		canonicalInvalid: false
+	});
+	if (Buffer.byteLength(match[0], "utf8") > MAX_FRONTMATTER_BYTES) return invalidInspection({
+		code: "frontmatter-too-large",
+		line: 1,
+		canonicalInvalid: false
+	});
+	const parsed = parseFrontmatter(match[1]);
+	return parsed.issue === void 0 ? {
+		invalid: false,
+		...parsed.value === void 0 ? {} : { frontmatter: parsed.value }
+	} : invalidInspection(parsed.issue);
 }
 function frontmatterMatch(text$1) {
 	const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text$1);
@@ -27117,44 +25300,3062 @@ function parseFrontmatter(block) {
 			maxAliasCount: 0,
 			prettyErrors: false
 		});
-		if (!isPlainRecord(value)) return void 0;
+		if (!isPlainRecord(value)) return { issue: {
+			code: "frontmatter-root-invalid",
+			line: 2,
+			canonicalInvalid: hasCanonicalPolicyKey(block)
+		} };
 		const metadata = {};
 		for (const key of FRONTMATTER_METADATA_KEYS) {
 			const item = value[key];
 			if (typeof item === "string" && Buffer.byteLength(item, "utf8") <= MAX_FRONTMATTER_VALUE_BYTES) metadata[key] = item;
 		}
 		const descriptionValue = value.description;
-		if (descriptionValue !== void 0 && (typeof descriptionValue !== "string" || Buffer.byteLength(descriptionValue, "utf8") > CANONICAL_DESCRIPTION_MAX_BYTES)) return void 0;
+		if (descriptionValue !== void 0 && typeof descriptionValue !== "string") return { issue: fieldIssue(block, "description", "frontmatter-field-type-invalid") };
+		if (typeof descriptionValue === "string" && Buffer.byteLength(descriptionValue, "utf8") > CANONICAL_DESCRIPTION_MAX_BYTES) return { issue: fieldIssue(block, "description", "frontmatter-field-too-large") };
 		const description = typeof descriptionValue === "string" ? descriptionValue : void 0;
 		const hasDisableModel = Object.prototype.hasOwnProperty.call(value, "disable-model-invocation");
 		const disableModel = value["disable-model-invocation"];
-		if (hasDisableModel && typeof disableModel !== "boolean") return void 0;
+		if (hasDisableModel && typeof disableModel !== "boolean") return { issue: fieldIssue(block, "disable-model-invocation", "frontmatter-field-type-invalid") };
 		const hasUserInvocable = Object.prototype.hasOwnProperty.call(value, "user-invocable");
 		const userInvocable = value["user-invocable"];
-		if (hasUserInvocable && typeof userInvocable !== "boolean") return void 0;
+		if (hasUserInvocable && typeof userInvocable !== "boolean") return { issue: fieldIssue(block, "user-invocable", "frontmatter-field-type-invalid") };
 		const whenToUse = typeof value.whenToUse === "string" && Buffer.byteLength(value.whenToUse, "utf8") <= MAX_FRONTMATTER_VALUE_BYTES ? value.whenToUse : void 0;
 		const hasModel = Object.prototype.hasOwnProperty.call(value, "modelInvocable");
 		const hasUser = Object.prototype.hasOwnProperty.call(value, "userInvocable");
 		const model = value.modelInvocable;
 		const user = value.userInvocable;
-		if (hasModel && typeof model !== "boolean" || hasUser && typeof user !== "boolean") return void 0;
+		if (hasModel && typeof model !== "boolean") return { issue: fieldIssue(block, "modelInvocable", "frontmatter-field-type-invalid") };
+		if (hasUser && typeof user !== "boolean") return { issue: fieldIssue(block, "userInvocable", "frontmatter-field-type-invalid") };
 		const invocation = hasDisableModel || hasUserInvocable || hasModel || hasUser ? Object.freeze({
 			modelInvocable: hasDisableModel ? !disableModel : hasModel ? model : true,
 			userInvocable: hasUserInvocable ? userInvocable : hasUser ? user : true
 		}) : void 0;
-		return {
+		return { value: {
 			...Object.keys(metadata).length === 0 ? {} : { metadata: Object.freeze(metadata) },
 			...description === void 0 ? {} : { description },
 			...disableModel === true ? { disableModelInvocation: true } : {},
 			...whenToUse === void 0 ? {} : { whenToUse },
 			...invocation === void 0 ? {} : { invocation }
-		};
-	} catch {
-		return void 0;
+		} };
+	} catch (error$2) {
+		const line = parserLine(error$2, block);
+		return { issue: {
+			code: "frontmatter-yaml-invalid",
+			...line === void 0 ? {} : { line },
+			canonicalInvalid: hasCanonicalPolicyKey(block)
+		} };
 	}
+}
+function fieldIssue(block, key, code) {
+	return {
+		code,
+		line: lineForKey(block, key),
+		canonicalInvalid: true
+	};
+}
+function lineForKey(block, key) {
+	const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = new RegExp(`^\\s*${escaped}\\s*:`, "m").exec(block);
+	return match === null ? void 0 : block.slice(0, match.index).split(/\r?\n/).length + 1;
+}
+function parserLine(error$2, block) {
+	const pos = error$2?.pos;
+	if (!Array.isArray(pos) || typeof pos[0] !== "number" || pos[0] < 0) return void 0;
+	return block.slice(0, pos[0]).split(/\r?\n/).length + 1;
 }
 function isPlainRecord(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+//#endregion
+//#region ../insuremo-service/src/skills.ts
+/** Emitted after a successful `imo skills list` finishes. */
+const SKILLS_INVENTORY_UPDATED_EVENT = "skills/inventory-updated";
+/** Read-only IMO Skills inventory service. All process operations route through `ctx.subprocess`. */
+var ImoSkillsService = class extends Service {
+	static inject = ["subprocess"];
+	static Config = Config;
+	config;
+	/** Root used by the internal path resolver; defaults to homedir(). */
+	skillsAllowedRoot;
+	constructor(ctx, config$1 = {}) {
+		super(ctx, "imoSkills");
+		this.config = resolveConfig(config$1);
+		this.skillsAllowedRoot = homedir();
+	}
+	async list(scope = "project", signal) {
+		const args = scope === "global" ? [
+			"skills",
+			"list",
+			"--json",
+			"-g"
+		] : [
+			"skills",
+			"list",
+			"--json"
+		];
+		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+		const run = await runCapture(this.ctx.subprocess, {
+			command: this.config.command,
+			args,
+			timeoutMs: this.config.timeoutMs,
+			signal
+		});
+		if (!run.ok) return run.error.code === "cancelled" ? cancelledSkillsResult(this.config.command, args) : {
+			ok: false,
+			error: mapRunFailure(run.error, this.config.command, args)
+		};
+		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+		let parsed;
+		try {
+			parsed = JSON.parse(run.value.stdout.text);
+		} catch {
+			return parseSkillsError(run, this.config.command, args, "skills list output was not valid JSON");
+		}
+		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+		if (!Array.isArray(parsed)) return parseSkillsError(run, this.config.command, args, "skills list JSON was not an array");
+		const skills = parsed.map((row) => {
+			const entry = typeof row === "object" && row !== null ? row : {};
+			return {
+				name: typeof entry.name === "string" ? entry.name : "",
+				description: typeof entry.description === "string" ? entry.description : "",
+				path: typeof entry.path === "string" ? entry.path : ""
+			};
+		});
+		const stdoutDigest = run.value.stdoutDigest;
+		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+		this.ctx.emit(SKILLS_INVENTORY_UPDATED_EVENT, {
+			scope,
+			skills: [...skills],
+			stdoutDigest
+		});
+		return {
+			ok: true,
+			value: {
+				scope,
+				skills,
+				stdoutDigest
+			}
+		};
+	}
+	async configPath(signal) {
+		const args = [
+			"skills",
+			"config",
+			"path"
+		];
+		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+		const run = await runCapture(this.ctx.subprocess, {
+			command: this.config.command,
+			args,
+			timeoutMs: this.config.timeoutMs,
+			signal
+		});
+		if (!run.ok) return run.error.code === "cancelled" ? cancelledSkillsResult(this.config.command, args) : {
+			ok: false,
+			error: mapRunFailure(run.error, this.config.command, args)
+		};
+		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+		const path = run.value.stdout.text.split(/\r?\n/)[0]?.trim() ?? "";
+		let exists = false;
+		try {
+			exists = (await stat(path)).isFile();
+		} catch {
+			exists = false;
+		}
+		if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+		return {
+			ok: true,
+			value: {
+				path,
+				exists
+			}
+		};
+	}
+	async validate(scope = "project", signal) {
+		const args = scope === "global" ? [
+			"skills",
+			"list",
+			"--json",
+			"-g"
+		] : [
+			"skills",
+			"list",
+			"--json"
+		];
+		try {
+			throwIfSkillAborted(signal);
+			const listResult = await this.list(scope, signal);
+			if (!listResult.ok) return listResult;
+			throwIfSkillAborted(signal);
+			const allowedRoot = await resolveAllowedSkillRoot(this.skillsAllowedRoot);
+			throwIfSkillAborted(signal);
+			const items = [];
+			for (const skill of listResult.value.skills) {
+				throwIfSkillAborted(signal);
+				const resolved$1 = await resolveSkillPath(skill.path, this.skillsAllowedRoot, allowedRoot);
+				throwIfSkillAborted(signal);
+				const absolute = resolved$1.canonical ?? resolved$1.absolute;
+				const reasons = [];
+				let diagnostic;
+				const addPathReason = (code) => {
+					reasons.push(code);
+					diagnostic = { code };
+				};
+				if (resolved$1.reason === "outside-allowed-root") addPathReason("outside-allowed-root");
+				else if (resolved$1.reason === "missing") addPathReason("missing-directory");
+				else if (resolved$1.reason === "unreadable") addPathReason("path-unreadable");
+				else if (resolved$1.canonical === void 0) addPathReason("missing-directory");
+				else try {
+					throwIfSkillAborted(signal);
+					if (!(await stat(resolved$1.canonical)).isDirectory()) addPathReason("not-directory");
+					else {
+						throwIfSkillAborted(signal);
+						const manifest = await resolveSkillPath(join(resolved$1.canonical, "SKILL.md"), this.skillsAllowedRoot, allowedRoot);
+						throwIfSkillAborted(signal);
+						if (manifest.reason === "outside-allowed-root") addPathReason("outside-allowed-root");
+						else if (manifest.reason === "unreadable") addPathReason("skill-md-unreadable");
+						else if (manifest.canonical === void 0) addPathReason("missing-skill-md");
+						else try {
+							throwIfSkillAborted(signal);
+							if (!(await stat(manifest.canonical)).isFile()) addPathReason("missing-skill-md");
+							else {
+								const inspection = await inspectSkillDocument(manifest.canonical, signal);
+								throwIfSkillAborted(signal);
+								if (inspection.invalid) {
+									const issue$1 = inspection.issue ?? {
+										code: "skill-file-unreadable",
+										canonicalInvalid: false
+									};
+									const issueCode = issue$1.code === "skill-file-unreadable" ? "skill-md-unreadable" : issue$1.code;
+									reasons.push(issueCode);
+									diagnostic = {
+										code: issueCode,
+										canonicalInvalid: issue$1.canonicalInvalid,
+										...issue$1.line === void 0 ? {} : { line: issue$1.line }
+									};
+								}
+							}
+							throwIfSkillAborted(signal);
+						} catch (error$2) {
+							if (isSkillAbortError(error$2)) throw error$2;
+							addPathReason("skill-md-unreadable");
+						}
+					}
+				} catch (error$2) {
+					if (isSkillAbortError(error$2)) throw error$2;
+					addPathReason("path-unreadable");
+				}
+				items.push({
+					name: skill.name,
+					description: skill.description,
+					path: absolute,
+					valid: reasons.length === 0,
+					reasons,
+					...diagnostic === void 0 ? {} : { diagnostic }
+				});
+			}
+			throwIfSkillAborted(signal);
+			return {
+				ok: true,
+				value: {
+					scope,
+					inventoryComplete: items.every((item) => item.valid),
+					items,
+					checkedAt: (/* @__PURE__ */ new Date()).toISOString()
+				}
+			};
+		} catch (error$2) {
+			if (isSkillAbortError(error$2)) return cancelledSkillsResult(this.config.command, args);
+			throw error$2;
+		}
+	}
+};
+function cancelledSkillsResult(command, args) {
+	return {
+		ok: false,
+		error: {
+			code: "cancelled",
+			message: "IMO Skills operation was cancelled",
+			command,
+			args
+		}
+	};
+}
+function parseSkillsError(run, command, args, message) {
+	return {
+		ok: false,
+		error: {
+			code: "parse-error",
+			message,
+			command,
+			args,
+			stdoutDigest: run.value.stdoutDigest,
+			stderrDigest: run.value.stderrDigest
+		}
+	};
+}
+
+//#endregion
+//#region ../insuremo-service/src/skill-activation.ts
+const SKILL_ACTIVATION_DOMAIN_NAME = "workbench_imo_skill_activation";
+const SKILL_ACTIVATION_CHANGED_EVENT = "skills/activation-changed";
+const GLOBAL_KEY = "global";
+const MAX_SAFE_REVISION = Number.MAX_SAFE_INTEGER;
+const SERVICE_DISPOSED_MESSAGE = "IMO skill activation service is disposed";
+const activationControllers = /* @__PURE__ */ new WeakMap();
+const activationStateSchema = object({
+	scope: literal("global"),
+	initialized: literal(true),
+	enabledNames: array(string$5()),
+	revision: number().int().nonnegative().max(MAX_SAFE_REVISION),
+	updatedAt: string$5().datetime({ offset: true })
+}).strict().superRefine((state, refinement) => {
+	const names = state.enabledNames;
+	if (new Set(names).size !== names.length) refinement.addIssue({
+		code: "custom",
+		path: ["enabledNames"],
+		message: "enabledNames must be unique"
+	});
+	if (names.some((name$8) => !isSkillName(name$8))) refinement.addIssue({
+		code: "custom",
+		path: ["enabledNames"],
+		message: "enabledNames contains an invalid skill name"
+	});
+	if (names.some((name$8, index) => index > 0 && names[index - 1].localeCompare(name$8) > 0)) refinement.addIssue({
+		code: "custom",
+		path: ["enabledNames"],
+		message: "enabledNames must be sorted"
+	});
+});
+const skillActivationDomain = defineDomain({
+	name: SKILL_ACTIVATION_DOMAIN_NAME,
+	version: 1,
+	tables: { states: domainTable(activationStateSchema) }
+});
+var SkillActivationError = class extends Error {
+	constructor(code, message, expectedRevision, actualRevision) {
+		super(message);
+		this.code = code;
+		this.expectedRevision = expectedRevision;
+		this.actualRevision = actualRevision;
+		this.name = "SkillActivationError";
+	}
+};
+/** Internal lifecycle owner. Its context value is replaced with a frozen read facade in the constructor. */
+function skillActivationControllerFor(face) {
+	return face === void 0 || typeof face !== "object" && typeof face !== "function" ? void 0 : activationControllers.get(face);
+}
+var ImoSkillActivationService = class extends Service {
+	static inject = ["storageDomain"];
+	#runtime;
+	constructor(ctx, options = {}) {
+		super(ctx, "imoSkillActivation");
+		const runtime = new ActivationRuntime(ctx, options.onController);
+		this.#runtime = runtime;
+		const face = Object.freeze({
+			ensureInitialized: (installedNames) => runtime.ensureInitialized(installedNames),
+			snapshot: (installedNames) => runtime.snapshot(installedNames)
+		});
+		runtime.setFace(face);
+		ctx.set("imoSkillActivation", face);
+		ctx.effect(() => () => runtime.dispose(), "imoSkillActivation.runtime");
+		const ownerFiber = ctx.fiber;
+		ctx.on("internal/plugin", (fiber) => {
+			if (fiber === ownerFiber) runtime.dispose().catch(() => void 0);
+		});
+	}
+	async [Service.init]() {
+		await this.#runtime.init();
+	}
+};
+var ActivationRuntime = class {
+	#domain;
+	#openedDomain;
+	#domainClose;
+	#opening;
+	#store;
+	#ready;
+	#resolveReady;
+	#rejectReady;
+	#readySettled = false;
+	#disposed = false;
+	#disposePromise;
+	#face;
+	constructor(ctx, onController) {
+		this.ctx = ctx;
+		this.onController = onController;
+		this.#ready = new Promise((resolve$1, reject) => {
+			this.#resolveReady = resolve$1;
+			this.#rejectReady = reject;
+		});
+		this.#ready.catch(() => void 0);
+	}
+	setFace(face) {
+		this.#face = face;
+	}
+	async init() {
+		this.assertOpen();
+		let resolveOpening;
+		let rejectOpening;
+		const opening = new Promise((resolve$1, reject) => {
+			resolveOpening = resolve$1;
+			rejectOpening = reject;
+		});
+		this.#opening = opening;
+		try {
+			Promise.resolve(this.ctx.storageDomain.open(skillActivationDomain)).then((domain) => {
+				this.#openedDomain = domain;
+				resolveOpening(domain);
+			}, rejectOpening);
+		} catch (error$2) {
+			rejectOpening(error$2);
+		}
+		try {
+			const domain = await opening;
+			this.assertOpen();
+			const store = new ActivationStore(this.ctx, domain.table("states"), () => this.assertOpen());
+			this.#domain = domain;
+			this.#store = store;
+			if (this.#face !== void 0) activationControllers.set(this.#face, store);
+			this.onController?.(store);
+			this.assertOpen();
+			this.resolveReady();
+		} catch (error$2) {
+			if (this.#disposed) {
+				this.resolveReady();
+				throw serviceDisposedError();
+			}
+			this.rejectReady(error$2);
+			throw error$2;
+		}
+	}
+	async ensureInitialized(installedNames) {
+		this.assertOpen();
+		const installed = checkedInstalledNames(installedNames);
+		if (installed === void 0) throw invalidInputError();
+		await this.waitReady();
+		this.assertOpen();
+		return this.requireStore().ensureInitialized(installed);
+	}
+	async snapshot(installedNames) {
+		this.assertOpen();
+		const installed = checkedInstalledNames(installedNames);
+		if (installed === void 0) throw invalidInputError();
+		await this.waitReady();
+		this.assertOpen();
+		return this.requireStore().snapshot(installed);
+	}
+	dispose() {
+		if (this.#disposePromise !== void 0) return this.#disposePromise;
+		this.#disposed = true;
+		if (this.#face !== void 0) activationControllers.delete(this.#face);
+		this.resolveReady();
+		this.#disposePromise = this.finishDispose();
+		return this.#disposePromise;
+	}
+	async finishDispose() {
+		await this.#opening?.then(() => void 0, () => void 0);
+		await this.#store?.drain();
+		await this.closeDomain();
+	}
+	async waitReady() {
+		try {
+			await this.#ready;
+		} catch (error$2) {
+			if (this.#disposed) throw serviceDisposedError();
+			throw error$2;
+		}
+	}
+	resolveReady() {
+		if (this.#readySettled) return;
+		this.#readySettled = true;
+		this.#resolveReady();
+	}
+	rejectReady(error$2) {
+		if (this.#readySettled) return;
+		this.#readySettled = true;
+		this.#rejectReady(error$2);
+	}
+	async closeDomain() {
+		const domain = this.#openedDomain;
+		if (domain === void 0) return;
+		this.#domainClose ??= Promise.resolve().then(() => domain.close());
+		await this.#domainClose;
+	}
+	assertOpen() {
+		if (this.#disposed) throw serviceDisposedError();
+	}
+	requireStore() {
+		if (this.#store === void 0 || this.#domain === void 0) throw new Error("imo skill activation storage is unavailable");
+		return this.#store;
+	}
+};
+var ActivationStore = class {
+	#tail = Promise.resolve();
+	constructor(ctx, table, assertActive) {
+		this.ctx = ctx;
+		this.table = table;
+		this.assertActive = assertActive;
+	}
+	async ensureInitialized(installedNames) {
+		this.assertActive();
+		const installed = checkedInstalledNames(installedNames);
+		if (installed === void 0) return Promise.reject(invalidInputError());
+		return this.enqueue(async () => {
+			const current = this.table.get(GLOBAL_KEY);
+			if (current === void 0) {
+				const initial = makeState(installed, 0);
+				await this.table.put(GLOBAL_KEY, initial);
+				return snapshotFromState(initial, installed);
+			}
+			return snapshotFromState(current, installed);
+		});
+	}
+	async snapshot(installedNames) {
+		this.assertActive();
+		const installed = checkedInstalledNames(installedNames);
+		if (installed === void 0) return Promise.reject(invalidInputError());
+		return this.enqueue(async () => {
+			const current = this.table.get(GLOBAL_KEY);
+			return current === void 0 ? emptySnapshot(installed) : snapshotFromState(current, installed);
+		});
+	}
+	async setEnabled(name$8, enabled, installedNames, expectedRevision) {
+		this.assertActive();
+		if (typeof enabled !== "boolean") return Promise.reject(invalidInputError());
+		if (typeof name$8 !== "string") return Promise.reject(invalidInputError());
+		if (!validSkillName$1(name$8)) return Promise.reject(new SkillActivationError("invalid-name", "skill activation name is invalid"));
+		const installed = checkedInstalledNames(installedNames);
+		if (installed === void 0 || !validExpectedRevision(expectedRevision)) return Promise.reject(invalidInputError());
+		if (!installed.includes(name$8)) return Promise.reject(new SkillActivationError("not-installed", "skill activation name is not installed"));
+		return this.enqueue(async () => {
+			const current = await this.ensureState(installed, expectedRevision);
+			assertRevision(current.revision, expectedRevision);
+			const names = new Set(current.enabledNames);
+			if (enabled) names.add(name$8);
+			else names.delete(name$8);
+			const nextNames = sortedNames(names);
+			if (sameNames(nextNames, current.enabledNames)) return snapshotFromState(current, installed);
+			const next = makeState(nextNames, nextRevision(current.revision));
+			await this.table.put(GLOBAL_KEY, next);
+			this.emitChanged(next, installed);
+			return snapshotFromState(next, installed);
+		});
+	}
+	async reconcile(installedNames, expectedRevision) {
+		this.assertActive();
+		const installed = checkedInstalledNames(installedNames);
+		if (installed === void 0 || !validExpectedRevision(expectedRevision)) return Promise.reject(invalidInputError());
+		return this.enqueue(async () => {
+			const current = await this.ensureState(installed, expectedRevision);
+			assertRevision(current.revision, expectedRevision);
+			const installedSet = new Set(installed);
+			const nextNames = current.enabledNames.filter((name$8) => installedSet.has(name$8));
+			if (sameNames(nextNames, current.enabledNames)) return snapshotFromState(current, installed);
+			const next = makeState(nextNames, nextRevision(current.revision));
+			await this.table.put(GLOBAL_KEY, next);
+			this.emitChanged(next, installed);
+			return snapshotFromState(next, installed);
+		});
+	}
+	enqueue(operation) {
+		this.assertActive();
+		const result = this.#tail.then(() => {
+			this.assertActive();
+			return operation();
+		});
+		this.#tail = result.then(() => void 0, () => void 0);
+		return result;
+	}
+	async drain() {
+		await this.#tail;
+	}
+	async ensureState(installed, expectedRevision) {
+		const current = this.table.get(GLOBAL_KEY);
+		if (current !== void 0) return current;
+		assertRevision(0, expectedRevision);
+		const initial = makeState(installed, 0);
+		await this.table.put(GLOBAL_KEY, initial);
+		return initial;
+	}
+	emitChanged(state, installed) {
+		const snapshot = snapshotFromState(state, installed);
+		const payload = {
+			revision: snapshot.revision,
+			enabledCount: snapshot.enabled.length,
+			disabledCount: snapshot.disabled.length,
+			staleCount: snapshot.stale.length
+		};
+		this.ctx.emit(SKILL_ACTIVATION_CHANGED_EVENT, payload);
+	}
+};
+function serviceDisposedError() {
+	return new SkillActivationError("service-disposed", SERVICE_DISPOSED_MESSAGE);
+}
+function invalidInputError() {
+	return new SkillActivationError("invalid-input", "skill activation input is invalid");
+}
+function checkedInstalledNames(value) {
+	if (!Array.isArray(value) || !value.every(validSkillName$1)) return void 0;
+	return sortedNames(value);
+}
+function validExpectedRevision(value) {
+	return value === void 0 || typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function assertRevision(actual, expected) {
+	if (expected !== void 0 && expected !== actual) throw new SkillActivationError("revision-conflict", "skill activation revision does not match the requested revision", expected, actual);
+}
+function nextRevision(current) {
+	if (current >= MAX_SAFE_REVISION) throw new SkillActivationError("revision-exhausted", "skill activation revision is exhausted");
+	return current + 1;
+}
+function validSkillName$1(value) {
+	return typeof value === "string" && isSkillName(value);
+}
+function sortedNames(names) {
+	return [...new Set(names)].sort((left, right) => left.localeCompare(right));
+}
+function sameNames(left, right) {
+	return left.length === right.length && left.every((name$8, index) => name$8 === right[index]);
+}
+function makeState(enabledNames, revision) {
+	return {
+		scope: "global",
+		initialized: true,
+		enabledNames: [...enabledNames].sort((left, right) => left.localeCompare(right)),
+		revision,
+		updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+	};
+}
+function emptySnapshot(installed) {
+	return Object.freeze({
+		initialized: false,
+		installed: Object.freeze([...installed]),
+		enabled: Object.freeze([]),
+		disabled: Object.freeze([...installed]),
+		stale: Object.freeze([]),
+		revision: 0
+	});
+}
+function snapshotFromState(state, installed) {
+	const installedSet = new Set(installed);
+	const enabled = state.enabledNames.filter((name$8) => installedSet.has(name$8));
+	const stale = state.enabledNames.filter((name$8) => !installedSet.has(name$8));
+	const enabledSet = new Set(enabled);
+	const disabled = installed.filter((name$8) => !enabledSet.has(name$8));
+	return Object.freeze({
+		initialized: state.initialized,
+		installed: Object.freeze([...installed]),
+		enabled: Object.freeze(enabled),
+		disabled: Object.freeze(disabled),
+		stale: Object.freeze(stale),
+		revision: state.revision
+	});
+}
+
+//#endregion
+//#region ../insuremo-service/src/auth/workspace.ts
+/**
+* A workspace id is an opaque registry key.  Keep the transport grammar
+* narrow even though the registry remains the authority for existence and
+* path resolution.
+*/
+const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+/** Validate an id without consulting the registry. */
+function parseWorkspaceId(value) {
+	return typeof value === "string" && WORKSPACE_ID_PATTERN.test(value) ? value : void 0;
+}
+/**
+* Resolve a caller-provided workspace id through the Host registry.  The
+* caller never supplies a cwd: `path` comes only from the trusted registry,
+* which already canonicalizes paths on registration.
+*/
+function resolveWorkspace(ctx, value) {
+	if (value === void 0 || value === null) return {
+		ok: false,
+		code: "invalid-workspace-id",
+		message: "workspace id is required"
+	};
+	const workspaceId = parseWorkspaceId(value);
+	if (workspaceId === void 0) return {
+		ok: false,
+		code: "invalid-workspace-id",
+		message: "workspace id is invalid"
+	};
+	const registry$1 = ctx.get("workspaceRegistry");
+	if (registry$1 === void 0 || typeof registry$1.get !== "function") return {
+		ok: false,
+		code: "workspace-unavailable",
+		message: "workspace registry is unavailable"
+	};
+	let entry;
+	try {
+		entry = registry$1.get(workspaceId);
+	} catch {
+		return {
+			ok: false,
+			code: "workspace-unavailable",
+			message: "workspace registry is unavailable"
+		};
+	}
+	if (entry === void 0) return {
+		ok: false,
+		code: "workspace-not-found",
+		message: "workspace does not exist"
+	};
+	if (entry.id !== void 0 && String(entry.id) !== workspaceId) return {
+		ok: false,
+		code: "workspace-unavailable",
+		message: "workspace identity could not be verified"
+	};
+	if (typeof entry.path !== "string" || entry.path.length === 0 || !isAbsolute(entry.path)) return {
+		ok: false,
+		code: "workspace-unavailable",
+		message: "workspace path could not be verified"
+	};
+	return {
+		ok: true,
+		workspaceId,
+		cwd: entry.path
+	};
+}
+/** Stable cache namespace for a resolved workspace identity and path. */
+function workspaceScopeKey(workspaceId, cwd) {
+	return JSON.stringify([workspaceId, cwd]);
+}
+
+//#endregion
+//#region ../insuremo-service/src/active-profile.ts
+/** Legacy ungrouped key; existing records are deliberately never migrated. */
+const ACTIVE_KEY = "global";
+const MAX_REVISION = Number.MAX_SAFE_INTEGER;
+const activeProfileRecordSchema = object({
+	profileName: string$5().min(1).nullable(),
+	revision: number().int().nonnegative().max(MAX_REVISION),
+	updatedAt: string$5().datetime({ offset: true }),
+	workspaceCwdDigest: string$5().regex(/^sha256:[a-f0-9]{64}$/u).optional()
+}).strict();
+const activeProfileDomain = defineDomain({
+	name: "workbench_active_profile",
+	version: 1,
+	tables: { states: domainTable(activeProfileRecordSchema) }
+});
+const ACTIVE_PROFILE_CHANGED_EVENT = "active-profile/changed";
+function cancelled() {
+	return {
+		ok: false,
+		error: {
+			code: "cancelled",
+			message: "active profile operation was cancelled"
+		}
+	};
+}
+function error(code, message = code) {
+	return {
+		ok: false,
+		error: {
+			code,
+			message
+		}
+	};
+}
+function selectionKey(workspaceId) {
+	return workspaceId === void 0 || workspaceId === null ? ACTIVE_KEY : `workspace:${workspaceId}`;
+}
+/** Persistent Workbench-owned profile selection. It never writes an IMO CLI pointer. */
+var ImoActiveProfileService = class extends Service {
+	static inject = ["storageDomain", "imoAuth"];
+	#table;
+	#domain;
+	#queue = Promise.resolve();
+	#disposed = false;
+	#auth;
+	constructor(ctx) {
+		super(ctx, "imoActiveProfile");
+		this.#auth = ctx.get("imoAuth");
+		const face = Object.freeze({
+			get: (signal, workspaceId) => this.get(signal, workspaceId),
+			select: (name$8, signal, workspaceId) => this.select(name$8, signal, workspaceId)
+		});
+		ctx.set("imoActiveProfile", face);
+		this.get = this.get.bind(this);
+		this.select = this.select.bind(this);
+	}
+	async [Service.init]() {
+		try {
+			const domain = await this.ctx.storageDomain.open(activeProfileDomain);
+			this.#domain = domain;
+			this.#table = domain.table("states");
+		} catch {
+			throw new Error("active profile storage operation failed");
+		}
+		this.ctx.effect(() => async () => {
+			this.#disposed = true;
+			try {
+				await this.#domain?.close();
+			} catch {}
+			this.#domain = void 0;
+			this.#table = void 0;
+		}, "imoActiveProfile.dispose");
+	}
+	async get(signal, workspaceId) {
+		if (signal?.aborted) return cancelled();
+		if (this.#disposed || this.#table === void 0) return error("storage-error");
+		const scope = this.resolveWorkspace(workspaceId);
+		if (!scope.ok) return scope;
+		return this.enqueue(async () => {
+			if (signal?.aborted) return cancelled();
+			const currentScope = this.resolveWorkspace(workspaceId);
+			if (!currentScope.ok) return currentScope;
+			const key = selectionKey(workspaceId);
+			let record;
+			try {
+				record = this.#table.get(key);
+			} catch {
+				return error("storage-error");
+			}
+			if (record === void 0) return workspaceId === void 0 || workspaceId === null ? this.bootstrap(signal, workspaceId) : this.bootstrapWorkspace(key, currentScope.value.cwd, signal, workspaceId);
+			if (workspaceId !== void 0 && workspaceId !== null && record.workspaceCwdDigest !== digest$1(currentScope.value.cwd)) return error("workspace-unavailable", "workspace identity changed; select a profile again");
+			return this.resolveRecord(record, signal, workspaceId);
+		});
+	}
+	async select(profileName, signal, workspaceId) {
+		if (signal?.aborted) return cancelled();
+		if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(profileName)) return {
+			ok: false,
+			error: {
+				code: "invalid-profile",
+				message: "profile is invalid"
+			}
+		};
+		if (this.#disposed || this.#table === void 0) return error("storage-error");
+		const scope = this.resolveWorkspace(workspaceId);
+		if (!scope.ok) return scope;
+		return this.enqueue(async () => {
+			if (signal?.aborted) return cancelled();
+			const currentScope = this.resolveWorkspace(workspaceId);
+			if (!currentScope.ok) return currentScope;
+			const listed = await this.#auth.listProfiles(signal, workspaceId);
+			if (this.#disposed || this.#table === void 0) return error("storage-error");
+			if (!listed.ok) {
+				if (listed.error.code === "workspace-not-found") return error("workspace-not-found", "workspace does not exist");
+				if (listed.error.code === "workspace-unavailable" || listed.error.code === "invalid-workspace-id") return error("workspace-unavailable", "workspace is unavailable");
+				if (listed.error.code === "cancelled") return cancelled();
+				return error("unavailable");
+			}
+			const profile = listed.value.profiles.find((item) => item.profileName === profileName);
+			if (profile === void 0) return {
+				ok: false,
+				error: {
+					code: "invalid-profile",
+					message: "profile is not available"
+				}
+			};
+			const key = selectionKey(workspaceId);
+			let previous;
+			try {
+				previous = this.#table.get(key);
+			} catch {
+				return error("storage-error");
+			}
+			if (previous !== void 0 && previous.revision >= MAX_REVISION) return {
+				ok: false,
+				error: {
+					code: "revision-exhausted",
+					message: "active profile revision exhausted"
+				}
+			};
+			const record = {
+				profileName,
+				revision: previous === void 0 ? 1 : previous.revision + 1,
+				updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+				...workspaceId === void 0 || workspaceId === null ? {} : { workspaceCwdDigest: digest$1(currentScope.value.cwd) }
+			};
+			try {
+				await this.#table.put(key, record);
+			} catch {
+				return error("storage-error");
+			}
+			this.ctx.emit(ACTIVE_PROFILE_CHANGED_EVENT, {
+				profileName,
+				revision: record.revision,
+				...workspaceId === void 0 || workspaceId === null ? {} : { workspaceId }
+			});
+			return {
+				ok: true,
+				value: this.view(record, profile)
+			};
+		});
+	}
+	resolveWorkspace(workspaceId) {
+		if (workspaceId === void 0 || workspaceId === null) return {
+			ok: true,
+			value: {}
+		};
+		const resolved$1 = resolveWorkspace(this.ctx, workspaceId);
+		if (resolved$1.ok) return {
+			ok: true,
+			value: { cwd: resolved$1.cwd }
+		};
+		if (resolved$1.code === "invalid-workspace-id") return error("invalid-workspace-id", "workspace id is invalid");
+		if (resolved$1.code === "workspace-not-found") return error("workspace-not-found", "workspace does not exist");
+		return error("workspace-unavailable", "workspace is unavailable");
+	}
+	async bootstrap(signal, workspaceId) {
+		const fast = await this.#auth.profilesFast(signal, workspaceId);
+		if (this.#disposed || this.#table === void 0) return error("storage-error");
+		if (!fast.ok) {
+			if (fast.error.code === "cancelled") return cancelled();
+			return error("unavailable");
+		}
+		const selected = fast.value.defaultProfile;
+		const profile = selected === null ? void 0 : fast.value.profiles.find((item) => item.profileName === selected);
+		const key = selectionKey(workspaceId);
+		const record = {
+			profileName: profile?.profileName ?? null,
+			revision: 1,
+			updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+		};
+		try {
+			await this.#table.put(key, record);
+		} catch {
+			return error("storage-error");
+		}
+		this.ctx.emit(ACTIVE_PROFILE_CHANGED_EVENT, {
+			profileName: record.profileName,
+			revision: record.revision,
+			...workspaceId === void 0 || workspaceId === null ? {} : { workspaceId }
+		});
+		return {
+			ok: true,
+			value: this.view(record, profile)
+		};
+	}
+	/** A new workspace follows the CLI context's default policy, never the
+	* legacy global Workbench record. This keeps first-open behavior compatible
+	* while still persisting a workspace-isolated selection key. */
+	async bootstrapWorkspace(key, cwd, signal, workspaceId) {
+		const fast = await this.#auth.profilesFast(signal, workspaceId);
+		if (this.#disposed || this.#table === void 0) return error("storage-error");
+		if (!fast.ok) {
+			if (fast.error.code === "cancelled") return cancelled();
+			return error("unavailable");
+		}
+		const selected = fast.value.defaultProfile;
+		const profile = selected === null ? void 0 : fast.value.profiles.find((item) => item.profileName === selected);
+		const record = {
+			profileName: profile?.profileName ?? null,
+			revision: 1,
+			updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+			workspaceCwdDigest: digest$1(cwd)
+		};
+		try {
+			await this.#table.put(key, record);
+		} catch {
+			return error("storage-error");
+		}
+		this.ctx.emit(ACTIVE_PROFILE_CHANGED_EVENT, {
+			profileName: record.profileName,
+			revision: record.revision,
+			...workspaceId === void 0 || workspaceId === null ? {} : { workspaceId }
+		});
+		return {
+			ok: true,
+			value: this.view(record, profile)
+		};
+	}
+	async resolveRecord(record, signal, workspaceId) {
+		if (record.profileName === null) return {
+			ok: true,
+			value: this.view(record)
+		};
+		const listed = await this.#auth.listProfilesCached(signal, workspaceId);
+		if (this.#disposed || this.#table === void 0) return error("storage-error");
+		if (!listed.ok) {
+			if (listed.error.code === "cancelled") return cancelled();
+			if (listed.error.code === "workspace-not-found") return error("workspace-not-found", "workspace does not exist");
+			if (listed.error.code === "workspace-unavailable" || listed.error.code === "invalid-workspace-id") return error("workspace-unavailable", "workspace is unavailable");
+			return {
+				ok: true,
+				value: {
+					...this.view(record),
+					activeProfileName: null,
+					storedProfileName: record.profileName,
+					status: "unavailable",
+					code: "unavailable"
+				}
+			};
+		}
+		const profile = listed.value.profiles.find((item) => item.profileName === record.profileName);
+		if (profile === void 0) return {
+			ok: true,
+			value: {
+				...this.view(record),
+				activeProfileName: null,
+				storedProfileName: record.profileName,
+				status: "missing",
+				code: "missing"
+			}
+		};
+		return {
+			ok: true,
+			value: this.view(record, profile)
+		};
+	}
+	view(record, profile) {
+		if (record.profileName === null) return {
+			activeProfileName: null,
+			revision: record.revision,
+			status: "none"
+		};
+		if (profile === void 0) return {
+			activeProfileName: null,
+			storedProfileName: record.profileName,
+			revision: record.revision,
+			status: "missing",
+			code: "missing"
+		};
+		return {
+			activeProfileName: profile.profileName,
+			profile,
+			revision: record.revision,
+			status: "active"
+		};
+	}
+	enqueue(fn) {
+		const next = this.#queue.then(fn);
+		this.#queue = next.then(() => void 0, () => void 0);
+		return next;
+	}
+};
+
+//#endregion
+//#region ../insuremo-service/src/overview/snapshot.ts
+const MAX_PROFILES = 100;
+const MAX_SKILL_NAMES = 512;
+const MAX_SKILL_ENTRIES = 100;
+const MAX_SKILL_DIAGNOSTICS = 100;
+const MAX_RECENT = 20;
+/** Build the read-only allowlist overview; every section is best-effort. */
+async function buildOverview(deps, signal, workspaceId) {
+	const imo = await imoSection(deps, signal);
+	const auth = await authSection(deps, signal, workspaceId);
+	const skills = await skillsSection(deps, signal);
+	const operations = operationsSection(deps);
+	const diagnostics = diagnosticsSection(imo, auth, skills, operations);
+	return Object.freeze({
+		schemaVersion: "0",
+		generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+		imo,
+		auth,
+		skills,
+		operations,
+		diagnostics,
+		ici: Object.freeze({
+			status: "warning",
+			embeddingUrl: "",
+			graphWorkspaces: 0,
+			explainWorkspaces: 0
+		})
+	});
+}
+async function imoSection(deps, signal) {
+	const installBusy = deps.imoInstall?.installStatus().running === true;
+	const installFlag = installBusy ? Object.freeze({ installBusy }) : {};
+	let section = Object.freeze({
+		status: "error",
+		code: "unavailable",
+		available: false,
+		updateAvailable: false,
+		...installFlag
+	});
+	try {
+		const probe = await deps.imoCli.probe(signal);
+		if (!probe.ok) {
+			section = Object.freeze({
+				status: "error",
+				code: probe.error.code === "cancelled" ? "cancelled" : probe.error.code,
+				available: false,
+				updateAvailable: false,
+				...installFlag
+			});
+			return section;
+		}
+		const version$1 = await deps.imoCli.version(signal);
+		const check = await deps.imoCli.upgradeCheck(signal);
+		let warning = false;
+		let code;
+		let target;
+		let updateAvailable = false;
+		if (check.ok) {
+			target = check.value.targetVersion;
+			updateAvailable = check.value.updateAvailable;
+			if (updateAvailable) warning = true;
+		} else if (check.error.code !== "cancelled") code = "check-unavailable";
+		const busy = deps.imoUpgrade?.upgradeStatus().running === true;
+		section = Object.freeze({
+			status: warning ? "warning" : "ok",
+			...code === void 0 ? {} : { code },
+			available: true,
+			...version$1.ok && /^\d+\.\d+\.\d+/.test(version$1.value.currentVersion) ? { current: version$1.value.currentVersion } : {},
+			...target === void 0 ? {} : { target },
+			updateAvailable,
+			...busy ? { busy } : {},
+			...installFlag
+		});
+	} catch {
+		section = Object.freeze({
+			status: "error",
+			code: "unavailable",
+			available: false,
+			updateAvailable: false,
+			...installFlag
+		});
+	}
+	return section;
+}
+async function authSection(deps, signal, workspaceId) {
+	let section = Object.freeze({
+		status: "error",
+		code: "unavailable",
+		profiles: [],
+		count: 0
+	});
+	try {
+		const list = await deps.imoAuth.listProfiles(signal, workspaceId);
+		const def = await deps.imoAuth.defaultProfile(signal, workspaceId);
+		if (!list.ok) {
+			section = Object.freeze({
+				status: "error",
+				code: list.error.code === "cancelled" ? "cancelled" : "unavailable",
+				profiles: [],
+				count: 0
+			});
+			return section;
+		}
+		const active = deps.imoActiveProfile === void 0 ? void 0 : await deps.imoActiveProfile.get(signal, workspaceId);
+		const activeView = active?.ok === true ? active.value : void 0;
+		const activeName = activeView?.activeProfileName ?? null;
+		const profiles = list.value.profiles.slice(0, MAX_PROFILES).map((profile) => Object.freeze({
+			name: profile.profileName,
+			...profile.env === void 0 ? {} : { env: profile.env },
+			...profile.tenantCode === void 0 ? {} : { tenantCode: profile.tenantCode },
+			...profile.accountName === void 0 ? {} : { account: profile.accountName },
+			...profile.scope === "workspace" || profile.scope === "global" ? { sourceScope: profile.scope } : {},
+			isDefault: profile.isDefault === true,
+			...activeView === void 0 ? {} : { isActive: activeName === profile.profileName },
+			...profile.valid === void 0 ? {} : { valid: profile.valid }
+		}));
+		const defaultProfile = def.ok ? def.value.profileName ?? void 0 : void 0;
+		const noDefault = defaultProfile === void 0 && profiles.length > 0;
+		const activeStatus = activeView?.status ?? (active === void 0 ? "active" : "unavailable");
+		section = Object.freeze({
+			status: noDefault || !def.ok || activeStatus !== "active" ? "warning" : "ok",
+			...active === void 0 || active.ok ? {} : { code: "unavailable" },
+			profiles,
+			count: list.value.profiles.length,
+			...defaultProfile === void 0 ? {} : {
+				defaultProfile,
+				defaultProfileName: defaultProfile
+			},
+			activeProfileName: activeName,
+			...activeView === void 0 ? {} : {
+				activeProfileRevision: activeView.revision,
+				activeProfileStatus: activeView.status
+			}
+		});
+	} catch {
+		section = Object.freeze({
+			status: "error",
+			code: "unavailable",
+			profiles: [],
+			count: 0
+		});
+	}
+	return section;
+}
+async function skillsSection(deps, signal) {
+	const empty = () => Object.freeze({
+		status: "error",
+		code: "scan-failed",
+		installed: 0,
+		valid: 0,
+		enabled: 0,
+		disabled: 0,
+		names: [],
+		entries: [],
+		entriesTruncated: false,
+		formatInvalidCount: 0,
+		pathIssueCount: 0,
+		diagnosticCount: 0,
+		diagnostics: [],
+		diagnosticsTruncated: false
+	});
+	let section = empty();
+	try {
+		const list = await deps.imoSkills.list("global", signal);
+		if (!list.ok) {
+			section = Object.freeze({
+				...empty(),
+				code: list.error.code === "cancelled" ? "cancelled" : "scan-failed"
+			});
+			return section;
+		}
+		const names = [...new Set(list.value.skills.map((skill) => skill.name).filter((name$8) => isSkillName(name$8)))].sort((left, right) => left.localeCompare(right));
+		const validation = await deps.imoSkills.validate("global", signal);
+		const validCount = validation.ok ? validation.value.items.filter((item) => item.valid).length : void 0;
+		let enabled = 0;
+		let disabled = 0;
+		let activationCode;
+		let enabledSet = /* @__PURE__ */ new Set();
+		let activationRevision$1;
+		try {
+			const activation = await deps.imoSkillActivation.snapshot(names);
+			enabled = activation.enabled.length;
+			disabled = activation.disabled.length;
+			enabledSet = new Set(activation.enabled);
+			activationRevision$1 = activation.revision;
+		} catch {
+			activationCode = "activation-unavailable";
+		}
+		const described = new Map(list.value.skills.map((skill) => [skill.name, skill.description]));
+		const validationItems = validation.ok ? validation.value.items.filter((item) => names.includes(item.name)) : [];
+		const diagnostics = validationItems.map((item) => skillDiagnostic(item, "global", enabledSet)).filter((item) => item !== void 0);
+		const formatInvalidCount = diagnostics.filter((item) => isFormatDiagnostic$2(item.reason)).length;
+		const pathIssueCount = diagnostics.length - formatInvalidCount;
+		const visibleDiagnostics = diagnostics.slice(0, MAX_SKILL_DIAGNOSTICS);
+		const diagnosticBySkill = new Map(diagnostics.map((item) => [item.skill, item]));
+		const entries = names.slice(0, MAX_SKILL_ENTRIES).map((name$8) => {
+			const rawDescription = described.get(name$8) ?? "";
+			const description = rawDescription.length > 200 ? `${rawDescription.slice(0, 199)}…` : rawDescription;
+			const diagnostic = diagnosticBySkill.get(name$8);
+			return Object.freeze({
+				name: name$8,
+				description,
+				enabled: enabledSet.has(name$8),
+				...diagnostic === void 0 ? {} : { diagnostic }
+			});
+		});
+		const incomplete = validation.ok ? !validation.value.inventoryComplete : true;
+		const scanCode = validation.ok ? void 0 : validation.error.code === "cancelled" ? "cancelled" : "scan-failed";
+		section = Object.freeze({
+			status: validation.ok ? incomplete ? "warning" : "ok" : "error",
+			...scanCode === void 0 && activationCode === void 0 ? {} : { code: scanCode ?? activationCode },
+			installed: names.length,
+			valid: validCount ?? names.length,
+			enabled,
+			disabled,
+			names: names.slice(0, MAX_SKILL_NAMES),
+			entries,
+			entriesTruncated: names.length > MAX_SKILL_ENTRIES,
+			formatInvalidCount,
+			pathIssueCount,
+			diagnosticCount: diagnostics.length,
+			diagnostics: visibleDiagnostics,
+			diagnosticsTruncated: diagnostics.length > MAX_SKILL_DIAGNOSTICS,
+			...activationRevision$1 === void 0 ? {} : { activationRevision: activationRevision$1 }
+		});
+	} catch {
+		section = empty();
+	}
+	return section;
+}
+function isFormatDiagnostic$2(reason) {
+	return reason.startsWith("frontmatter-") || reason === "skill-file-too-large";
+}
+function skillDiagnostic(item, source, enabledSet) {
+	const issue$1 = item.diagnostic;
+	if (issue$1 === void 0) return void 0;
+	const disabled = !enabledSet.has(item.name);
+	return Object.freeze({
+		code: issue$1.code,
+		skill: item.name,
+		source,
+		reason: issue$1.code,
+		...issue$1.line === void 0 ? {} : { line: issue$1.line },
+		contextImpact: disabled ? "disabled" : issue$1.canonicalInvalid === false ? "source-may-be-unavailable" : "source-unavailable"
+	});
+}
+function operationsSection(deps) {
+	try {
+		const records = deps.operationLog.list();
+		let pending = 0;
+		let approved = 0;
+		let rejected = 0;
+		let recorded = 0;
+		for (const record of records) {
+			if (record.decision === "pending") pending += 1;
+			else if (record.decision === "approved") approved += 1;
+			else if (record.decision === "rejected") rejected += 1;
+			if (record.decision === "approved" && record.resultDigest !== void 0) recorded += 1;
+		}
+		const recent = [...records].sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")) || 0).slice(0, MAX_RECENT).map((record) => Object.freeze({
+			id: record.id,
+			kind: record.kind,
+			decision: record.decision,
+			recorded: record.decision === "approved" && record.resultDigest !== void 0,
+			...typeof record.createdAt === "string" ? { createdAt: record.createdAt } : {}
+		}));
+		return Object.freeze({
+			status: "ok",
+			pending,
+			approved,
+			rejected,
+			recorded,
+			recent
+		});
+	} catch {
+		return Object.freeze({
+			status: "error",
+			code: "unavailable",
+			pending: 0,
+			approved: 0,
+			rejected: 0,
+			recorded: 0,
+			recent: []
+		});
+	}
+}
+function diagnosticsSection(imo, auth, skills, operations) {
+	const diagnostics = [];
+	if (imo.code === "cancelled" || auth.code === "cancelled" || skills.code === "cancelled") diagnostics.push(Object.freeze({
+		id: "overview-cancelled",
+		severity: "info",
+		messageKey: "overview.diagnostic.cancelled"
+	}));
+	if (!imo.available) diagnostics.push(Object.freeze({
+		id: "imo-unavailable",
+		severity: "error",
+		messageKey: "overview.diagnostic.imoUnavailable"
+	}));
+	if (imo.updateAvailable) diagnostics.push(Object.freeze({
+		id: "imo-update-available",
+		severity: "warning",
+		messageKey: "overview.diagnostic.imoUpdateAvailable"
+	}));
+	if (auth.code === "unavailable") diagnostics.push(Object.freeze({
+		id: "auth-unavailable",
+		severity: "error",
+		messageKey: "overview.diagnostic.authUnavailable"
+	}));
+	if (auth.status === "warning" && auth.defaultProfile === void 0 && auth.count > 0) diagnostics.push(Object.freeze({
+		id: "auth-no-default",
+		severity: "warning",
+		messageKey: "overview.diagnostic.authNoDefault"
+	}));
+	if (skills.code === "scan-failed") diagnostics.push(Object.freeze({
+		id: "skills-scan-failed",
+		severity: "error",
+		messageKey: "overview.diagnostic.skillsScanFailed"
+	}));
+	else if (skills.code === "unavailable") diagnostics.push(Object.freeze({
+		id: "skills-unavailable",
+		severity: "error",
+		messageKey: "overview.diagnostic.skillsUnavailable"
+	}));
+	if (skills.status === "warning") diagnostics.push(Object.freeze({
+		id: "skills-incomplete",
+		severity: "warning",
+		messageKey: "overview.diagnostic.skillsIncomplete"
+	}));
+	if (operations.pending > 0) diagnostics.push(Object.freeze({
+		id: "operations-pending",
+		severity: "info",
+		messageKey: "overview.diagnostic.operationsPending"
+	}));
+	const severity = diagnostics.some((diagnostic) => diagnostic.severity === "error") ? "error" : diagnostics.some((diagnostic) => diagnostic.severity === "warning") ? "warning" : "ok";
+	return Object.freeze({
+		status: severity,
+		diagnostics
+	});
+}
+
+//#endregion
+//#region ../insuremo-service/src/overview/paths.ts
+/** Shared overview route prefix (single definition; no import cycles). */
+const OVERVIEW_PATH = "/api/icomposer-workbench/insuremo/overview";
+/** Read-only, cache-only Skills source catalog projection. */
+const SKILL_CATALOG_PATH = `${OVERVIEW_PATH}/skill-catalog`;
+
+//#endregion
+//#region ../insuremo-service/src/overview/workspaces-status.ts
+const JSON_TYPE$3 = "application/json; charset=utf-8";
+/** Default InsureMO embedding endpoint (mirrors the ici package constant). */
+const DEFAULT_EMBEDDING_ENDPOINT = "https://portal-gw.insuremo.com/mo-re/1.0/aiqa/api/embedding";
+/** GET route: per-workspace iComposer/ICI health (icon data source). */
+const WORKSPACES_STATUS_PATH = `${OVERVIEW_PATH}/workspaces/status`;
+/**
+* Bounded local read of the workspace-owned schema-3 final explain state.
+* Legacy/context/prepare markers are intentionally never readiness signals. Kept local because this package's tsconfig
+* rootDir cannot include sibling sources.
+*/
+async function localReadExplainState(canonicalPath, workspaceId) {
+	return await readValidatedExplainFinal(canonicalPath, void 0, workspaceId) !== null;
+}
+/**
+* Build the per-workspace status projection: binding face rows joined with
+* the ICI manifest presence (graphReady) and the explain-state marker
+* (explainReady). Read-only; every miss degrades to false, never errors.
+*/
+async function buildWorkspaceStatuses(ctx) {
+	const binding = ctx.get("workspaceBinding");
+	if (binding === void 0) return [];
+	let rows = [];
+	try {
+		const res = await binding.list();
+		if (res.ok === true && Array.isArray(res.value)) rows = res.value;
+	} catch {
+		return [];
+	}
+	const ici = ctx.get("iciEngine");
+	const readExplainState = localReadExplainState;
+	const entries = [];
+	for (const row of rows.slice(0, 100)) {
+		let graphReady = false;
+		let explainReady = false;
+		if (ici !== void 0) try {
+			const diag = await ici.diagnostics({ workspaceId: row.workspaceId });
+			graphReady = diag.ok === true && diag.value?.requiredFiles?.manifest === true && diag.value?.stale !== true;
+		} catch {}
+		try {
+			explainReady = await readExplainState(row.canonicalPath, row.workspaceId);
+		} catch {}
+		entries.push(Object.freeze({
+			workspaceId: row.workspaceId,
+			displayName: row.displayName && row.displayName.length > 0 ? row.displayName : row.workspaceId,
+			detected: row.detectedIcomposer === true,
+			autoBindState: row.autoBindState ?? "none",
+			graphReady,
+			explainReady
+		}));
+	}
+	return Object.freeze(entries);
+}
+/**
+* Mount the read-only workspaces status route (GET only, no-store, nosniff).
+* The UI polls it (60s TTL) or fetches on workspace switch.
+*/
+function mountWorkspacesStatusRoute(ctx) {
+	return ctx.webServer.register({
+		kind: "exact",
+		path: WORKSPACES_STATUS_PATH,
+		handler: (req, res) => {
+			if (req.method !== "GET" && req.method !== "HEAD") {
+				res.writeHead(405, {
+					Allow: "GET",
+					"Content-Type": JSON_TYPE$3,
+					"Cache-Control": "no-store",
+					"X-Content-Type-Options": "nosniff"
+				});
+				res.end();
+				return;
+			}
+			const controller = new AbortController();
+			const onClose = () => controller.abort();
+			res.on("close", onClose);
+			(async () => {
+				try {
+					const statuses = await buildWorkspaceStatuses(ctx);
+					if (res.destroyed || res.writableEnded) return;
+					res.writeHead(200, {
+						"Content-Type": JSON_TYPE$3,
+						"Cache-Control": "no-store",
+						"X-Content-Type-Options": "nosniff"
+					});
+					res.end(req.method === "HEAD" ? void 0 : JSON.stringify({ workspaces: statuses }));
+				} catch {
+					if (!res.destroyed && !res.writableEnded) {
+						res.writeHead(500, {
+							"Content-Type": JSON_TYPE$3,
+							"Cache-Control": "no-store",
+							"X-Content-Type-Options": "nosniff"
+						});
+						res.end();
+					}
+				} finally {
+					res.off("close", onClose);
+				}
+			})();
+		}
+	});
+}
+
+//#endregion
+//#region ../insuremo-service/src/overview/service.ts
+/** Cold-start degraded sections for the fast channel (never fake "None"). */
+const FAST_UNCACHED_IMO = Object.freeze({
+	status: "warning",
+	code: "fast-uncached",
+	available: false,
+	updateAvailable: false
+});
+const FAST_UNCACHED_SKILLS = Object.freeze({
+	status: "warning",
+	code: "fast-uncached",
+	installed: 0,
+	valid: 0,
+	enabled: 0,
+	disabled: 0,
+	names: [],
+	entries: [],
+	entriesTruncated: false,
+	formatInvalidCount: 0,
+	pathIssueCount: 0,
+	diagnosticCount: 0,
+	diagnostics: [],
+	diagnosticsTruncated: false
+});
+const MIN_TTL_MS = 0;
+const MAX_TTL_MS = 5e3;
+/** Read-only aggregate overview service with coalescing and an optional short TTL. */
+var ImoOverviewService = class extends Service {
+	static inject = [
+		"imoCli",
+		"imoAuth",
+		"imoActiveProfile",
+		"imoSkills",
+		"imoSkillActivation",
+		"operationLog"
+	];
+	static Config = Config;
+	#dependencies;
+	#ttlMs;
+	#cached = /* @__PURE__ */ new Map();
+	#inflight = /* @__PURE__ */ new Map();
+	#lastImo = /* @__PURE__ */ new Map();
+	#lastSkills = /* @__PURE__ */ new Map();
+	#lastAuth = /* @__PURE__ */ new Map();
+	#disposed = false;
+	#cacheGeneration = 0;
+	constructor(ctx, config$1 = {}) {
+		super(ctx, "imoOverview");
+		const resolved$1 = resolveConfig(config$1);
+		this.#ttlMs = Math.max(MIN_TTL_MS, Math.min(MAX_TTL_MS, resolved$1.overviewTtlMs));
+		this.#dependencies = {
+			imoCli: ctx.get("imoCli"),
+			imoAuth: ctx.get("imoAuth"),
+			imoActiveProfile: ctx.get("imoActiveProfile") ?? {
+				get: async () => ({
+					ok: true,
+					value: {
+						activeProfileName: null,
+						revision: 0,
+						status: "none"
+					}
+				}),
+				select: async () => ({
+					ok: false,
+					error: {
+						code: "unavailable",
+						message: "active profile unavailable"
+					}
+				})
+			},
+			imoSkills: ctx.get("imoSkills"),
+			imoSkillActivation: ctx.get("imoSkillActivation"),
+			operationLog: ctx.get("operationLog"),
+			imoUpgrade: ctx.get("imoUpgrade"),
+			imoInstall: ctx.get("imoInstall")
+		};
+		this.snapshot = this.snapshot.bind(this);
+		this.snapshotFast = this.snapshotFast.bind(this);
+		this.ctx.effect(() => {
+			const off = this.ctx.on(ACTIVE_PROFILE_CHANGED_EVENT, () => {
+				this.#cacheGeneration += 1;
+				this.#cached.clear();
+				this.#lastAuth.clear();
+				this.#inflight.clear();
+			});
+			const offInstallCompleted = this.ctx.on(IMO_INSTALL_COMPLETED_EVENT, () => {
+				this.#cacheGeneration += 1;
+				this.#cached.clear();
+				this.#lastImo.clear();
+				this.#inflight.clear();
+				this.snapshot(void 0).catch(() => {});
+			});
+			const offInstallFailed = this.ctx.on(IMO_INSTALL_FAILED_EVENT, () => {
+				this.#cacheGeneration += 1;
+				this.#cached.clear();
+				this.#inflight.clear();
+			});
+			return () => {
+				off?.();
+				offInstallCompleted?.();
+				offInstallFailed?.();
+				this.#disposed = true;
+				this.#cached.clear();
+				this.#inflight.clear();
+				this.#lastImo.clear();
+				this.#lastSkills.clear();
+				this.#lastAuth.clear();
+			};
+		}, "imoOverview.state");
+	}
+	async snapshot(signal, workspaceId) {
+		if (this.#disposed || signal?.aborted) return this.cancelledView();
+		const scopeKey = this.cacheScope(workspaceId);
+		if (signal === void 0 && this.#ttlMs > 0 && scopeKey !== void 0) {
+			const cached$1 = this.#cached.get(scopeKey);
+			if (cached$1 !== void 0 && Date.now() - cached$1.at <= this.#ttlMs) return cached$1.view;
+		}
+		const existing = scopeKey === void 0 ? void 0 : this.#inflight.get(scopeKey);
+		if (existing !== void 0) return existing;
+		const generation = this.#cacheGeneration;
+		let inflight;
+		inflight = buildOverview(this.#dependencies, signal, workspaceId).then(async (view) => {
+			const statuses = await buildWorkspaceStatuses(this.ctx).catch(() => []);
+			const enriched = Object.freeze({
+				...view,
+				ici: Object.freeze({
+					status: "ok",
+					embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
+					graphWorkspaces: statuses.filter((entry) => entry.graphReady).length,
+					explainWorkspaces: statuses.filter((entry) => entry.explainReady).length
+				})
+			});
+			if (generation === this.#cacheGeneration && scopeKey !== void 0) {
+				this.#lastImo.set(scopeKey, view.imo);
+				this.#lastSkills.set(scopeKey, view.skills);
+				this.#lastAuth.set(scopeKey, view.auth);
+				this.#cached.set(scopeKey, {
+					at: Date.now(),
+					view: enriched
+				});
+			}
+			if (scopeKey !== void 0 && this.#inflight.get(scopeKey) === inflight) this.#inflight.delete(scopeKey);
+			return enriched;
+		}, (error$2) => {
+			if (scopeKey !== void 0 && this.#inflight.get(scopeKey) === inflight) this.#inflight.delete(scopeKey);
+			throw error$2;
+		});
+		if (scopeKey !== void 0) this.#inflight.set(scopeKey, inflight);
+		return inflight;
+	}
+	async snapshotFast(signal, workspaceId) {
+		if (this.#disposed || signal?.aborted) return this.cancelledView();
+		const scopeKey = this.cacheScope(workspaceId);
+		const auth = await this.#fastAuth(signal, workspaceId, scopeKey);
+		const imo = scopeKey === void 0 ? FAST_UNCACHED_IMO : this.#lastImo.get(scopeKey) ?? FAST_UNCACHED_IMO;
+		const skills = scopeKey === void 0 ? FAST_UNCACHED_SKILLS : this.#lastSkills.get(scopeKey) ?? FAST_UNCACHED_SKILLS;
+		const operations = this.#fastOperations();
+		const statuses = await buildWorkspaceStatuses(this.ctx).catch(() => []);
+		return Object.freeze({
+			schemaVersion: "0",
+			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+			imo,
+			auth,
+			skills,
+			operations,
+			diagnostics: Object.freeze({
+				status: "ok",
+				diagnostics: []
+			}),
+			ici: Object.freeze({
+				status: "ok",
+				embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
+				graphWorkspaces: statuses.filter((entry) => entry.graphReady).length,
+				explainWorkspaces: statuses.filter((entry) => entry.explainReady).length
+			})
+		});
+	}
+	#fastAuth(signal, workspaceId, scopeKey) {
+		return this.fastAuthImpl(signal, workspaceId, scopeKey);
+	}
+	async fastAuthImpl(signal, workspaceId, scopeKey) {
+		const listed = await this.#dependencies.imoAuth.listProfilesCached(signal, workspaceId).catch(() => void 0);
+		if (listed !== void 0 && listed.ok) {
+			const active = this.#dependencies.imoActiveProfile === void 0 ? void 0 : await this.#dependencies.imoActiveProfile.get(signal, workspaceId).catch(() => void 0);
+			const activeView = active?.ok === true ? active.value : void 0;
+			const activeName = activeView?.activeProfileName ?? null;
+			const profiles = listed.value.profiles.slice(0, 100).map((profile) => Object.freeze({
+				name: profile.profileName,
+				...profile.env === void 0 ? {} : { env: profile.env },
+				...profile.tenantCode === void 0 ? {} : { tenantCode: profile.tenantCode },
+				...profile.accountName === void 0 ? {} : { account: profile.accountName },
+				...profile.scope === "workspace" || profile.scope === "global" ? { sourceScope: profile.scope } : {},
+				isDefault: profile.isDefault === true,
+				isActive: activeName === profile.profileName
+			}));
+			const diagnosticDefault = profiles.find((profile) => profile.isDefault)?.name;
+			const result = Object.freeze({
+				status: activeView?.status === "active" || activeView?.status === "none" ? "ok" : "warning",
+				profiles,
+				count: profiles.length,
+				...diagnosticDefault === void 0 ? {} : {
+					defaultProfile: diagnosticDefault,
+					defaultProfileName: diagnosticDefault
+				},
+				activeProfileName: activeName,
+				...activeView === void 0 ? {} : {
+					activeProfileRevision: activeView.revision,
+					activeProfileStatus: activeView.status
+				}
+			});
+			if (scopeKey !== void 0) this.#lastAuth.set(scopeKey, result);
+			return result;
+		}
+		if (workspaceId !== void 0 && workspaceId !== null) {
+			const code = listed !== void 0 && !listed.ok && (listed.error.code === "workspace-not-found" || listed.error.code === "workspace-unavailable" || listed.error.code === "invalid-workspace-id") ? listed.error.code : "unavailable";
+			return Object.freeze({
+				status: "warning",
+				code,
+				profiles: [],
+				count: 0
+			});
+		}
+		return scopeKey === void 0 ? Object.freeze({
+			status: "warning",
+			code: "fast-uncached",
+			profiles: [],
+			count: 0
+		}) : this.#lastAuth.get(scopeKey) ?? Object.freeze({
+			status: "warning",
+			code: "fast-uncached",
+			profiles: [],
+			count: 0
+		});
+	}
+	#fastOperations() {
+		try {
+			const records = this.#dependencies.operationLog.list();
+			let pending = 0;
+			for (const record of records) if (record.decision === "pending") pending += 1;
+			return Object.freeze({
+				status: "ok",
+				pending,
+				approved: 0,
+				rejected: 0,
+				recorded: 0,
+				recent: []
+			});
+		} catch {
+			return Object.freeze({
+				status: "error",
+				code: "unavailable",
+				pending: 0,
+				approved: 0,
+				rejected: 0,
+				recorded: 0,
+				recent: []
+			});
+		}
+	}
+	cacheScope(workspaceId) {
+		if (workspaceId === void 0 || workspaceId === null) return "global";
+		const resolved$1 = resolveWorkspace(this.ctx, workspaceId);
+		return resolved$1.ok ? workspaceScopeKey(resolved$1.workspaceId, resolved$1.cwd) : void 0;
+	}
+	cancelledView() {
+		return Object.freeze({
+			schemaVersion: "0",
+			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+			imo: Object.freeze({
+				status: "error",
+				code: "cancelled",
+				available: false,
+				updateAvailable: false
+			}),
+			auth: Object.freeze({
+				status: "error",
+				code: "cancelled",
+				profiles: [],
+				count: 0
+			}),
+			skills: Object.freeze({
+				status: "error",
+				code: "cancelled",
+				installed: 0,
+				valid: 0,
+				enabled: 0,
+				disabled: 0,
+				names: [],
+				entries: [],
+				entriesTruncated: false,
+				formatInvalidCount: 0,
+				pathIssueCount: 0,
+				diagnosticCount: 0,
+				diagnostics: [],
+				diagnosticsTruncated: false
+			}),
+			operations: Object.freeze({
+				status: "error",
+				code: "cancelled",
+				pending: 0,
+				approved: 0,
+				rejected: 0,
+				recorded: 0,
+				recent: []
+			}),
+			diagnostics: Object.freeze({
+				status: "error",
+				diagnostics: [Object.freeze({
+					id: "overview-cancelled",
+					severity: "error",
+					messageKey: "overview.diagnostic.cancelled"
+				})]
+			}),
+			ici: Object.freeze({
+				status: "warning",
+				embeddingUrl: DEFAULT_EMBEDDING_ENDPOINT,
+				graphWorkspaces: 0,
+				explainWorkspaces: 0
+			})
+		});
+	}
+};
+
+//#endregion
+//#region ../insuremo-service/src/overview/route.ts
+const JSON_TYPE$2 = "application/json; charset=utf-8";
+const MAX_BODY_BYTES = 256 * 1024;
+/** Resolve the optional workspace selector from an untrusted HTTP query. */
+function requestedWorkspace$1(ctx, value) {
+	if (value === null) return { ok: true };
+	const workspaceId = parseWorkspaceId(value);
+	if (workspaceId === void 0) return {
+		ok: false,
+		status: 400,
+		code: "invalid-workspace-id",
+		message: "workspace id is invalid"
+	};
+	const resolved$1 = resolveWorkspace(ctx, workspaceId);
+	if (resolved$1.ok) return {
+		ok: true,
+		workspaceId: resolved$1.workspaceId
+	};
+	const status = resolved$1.code === "workspace-not-found" ? 404 : resolved$1.code === "workspace-unavailable" ? 503 : 400;
+	return {
+		ok: false,
+		status,
+		code: resolved$1.code,
+		message: resolved$1.message
+	};
+}
+/**
+* Mount the read-only GET overview route on the web server. This is a
+* same-origin read bridge only: no POST/approve/execute transport exists yet
+* (the write transport's CSRF/Origin design is a documented Phase 2 risk).
+*/
+function mountOverviewRoute(ctx) {
+	return ctx.webServer.register({
+		kind: "exact",
+		path: OVERVIEW_PATH,
+		handler: (req, res) => {
+			if (req.method !== "GET" && req.method !== "HEAD") {
+				res.writeHead(405, {
+					Allow: "GET",
+					"Content-Type": JSON_TYPE$2,
+					"Cache-Control": "no-store",
+					"X-Content-Type-Options": "nosniff"
+				});
+				res.end();
+				return;
+			}
+			const controller = new AbortController();
+			const onClose = () => controller.abort();
+			res.on("close", onClose);
+			const overview = ctx.get("imoOverview");
+			const url = new URL(req.url ?? "/", "http://localhost");
+			const target = requestedWorkspace$1(ctx, url.searchParams.get("workspaceId"));
+			if (!target.ok) {
+				res.writeHead(target.status, {
+					"Content-Type": JSON_TYPE$2,
+					"Cache-Control": "no-store",
+					"X-Content-Type-Options": "nosniff"
+				});
+				res.end(req.method === "HEAD" ? void 0 : JSON.stringify({ error: {
+					code: target.code,
+					message: target.message
+				} }));
+				res.off("close", onClose);
+				return;
+			}
+			const fast = url.searchParams.get("fast") === "1";
+			const respond = async () => {
+				try {
+					const view = overview === void 0 ? void 0 : fast ? target.workspaceId === void 0 ? await overview.snapshotFast(controller.signal) : await overview.snapshotFast(controller.signal, target.workspaceId) : target.workspaceId === void 0 ? await overview.snapshot(controller.signal) : await overview.snapshot(controller.signal, target.workspaceId);
+					if (res.destroyed || res.writableEnded) return;
+					const body = view === void 0 ? "{}" : JSON.stringify(view);
+					const bounded = body.length > MAX_BODY_BYTES ? body.slice(0, MAX_BODY_BYTES) : body;
+					res.writeHead(200, {
+						"Content-Type": JSON_TYPE$2,
+						"Cache-Control": "no-store",
+						"X-Content-Type-Options": "nosniff"
+					});
+					res.end(req.method === "HEAD" ? void 0 : bounded);
+				} catch {
+					if (!res.destroyed && !res.writableEnded) {
+						res.writeHead(500, {
+							"Content-Type": JSON_TYPE$2,
+							"Cache-Control": "no-store",
+							"X-Content-Type-Options": "nosniff"
+						});
+						res.end();
+					}
+				} finally {
+					res.off("close", onClose);
+				}
+			};
+			respond();
+		}
+	});
+}
+
+//#endregion
+//#region ../insuremo-service/src/skill-actions/types.ts
+const SKILL_INSTALL_KIND = "skill-install";
+const SKILL_UPDATE_KIND = "skill-update";
+const SKILL_REMOVE_KIND = "skill-remove";
+const SKILL_ACTIVATION_KIND = "skill-activation";
+const SKILL_ACTION_COMPLETED_EVENT = "skills/action-completed";
+const SKILL_ACTION_FAILED_EVENT = "skills/action-failed";
+const SKILL_AGENTS = [
+	"codex",
+	"claude-code",
+	"cursor",
+	"opencode",
+	"windsurf",
+	"gemini-cli",
+	"qwen-code",
+	"github-copilot",
+	"cline",
+	"codebuddy",
+	"augment",
+	"continue",
+	"kilo",
+	"roo",
+	"trae",
+	"warp",
+	"goose",
+	"firebender",
+	"universal"
+];
+const SKILL_SCENARIOS = [
+	"icomposer-full-stack",
+	"icomposer-coding-lite",
+	"icomposer-api-design",
+	"uic-developer",
+	"ask-insuremo"
+];
+
+//#endregion
+//#region ../insuremo-service/src/skill-actions/catalog.ts
+/** The source alias is fixed by the product; it is never accepted from a request. */
+const SKILLS_TOOL_SOURCE = "insuremo-skills";
+/** Human-readable `add -l` output is bounded before it reaches this parser. */
+const SKILL_CATALOG_OUTPUT_LIMIT_BYTES = 64 * 1024;
+/** Keep the cache and every response finite even when a source grows unexpectedly. */
+const SKILL_CATALOG_MAX_ENTRIES = 128;
+const SKILL_CATALOG_DESCRIPTION_MAX = 500;
+const SKILL_CATALOG_TTL_MS = 6e4;
+const SKILL_CATALOG_TIMEOUT_MS = 15e3;
+const SKILL_CATALOG_SCHEMA_VERSION = "1";
+const ANSI_ESCAPE$1 = /\u001B(?:\](?:[^\u0007\u001B]|\u001B(?=\\))*\u0007|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
+const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
+const MESSAGE_PREFIX = /^\s*[│|]\s{2,}/u;
+const PREFIXES = /^(?:[┌└│|—]\s*|T(?=\s)\s*)/u;
+const INDICATOR = /^[◇◆●•*oO0◒◐◓◑x>!▲■]\s{1,}/u;
+const FOUND = /^Found\s+([0-9]{1,4})\s+skills?$/u;
+const FOOTER = "Use --skill <name> to install specific skills";
+const EMPTY_STATUS = "No skills found";
+const EMPTY_DETAIL = "No valid skills found. Skills require a SKILL.md with name and description.";
+const MARKER = "Available Skills";
+const MAX_GROUP_LENGTH = 128;
+const MAX_SKILL_NAME_LENGTH = 128;
+const PREAMBLE_ALLOWED = [
+	/^skills$/u,
+	/^Tip: use the --yes \(-y\) and --global \(-g\) flags to install without prompts\.$/u,
+	/^Parsing source\.\.\.$/u,
+	/^Source:\s+https:\/\/gitlab\.insuremo\.com\/insuremo-public\/insuremo-skills\.git$/u,
+	/^Validating local path\.\.\.$/u,
+	/^Local path validated$/u,
+	/^Fetching npm package from registry\.\.\.$/u,
+	/^Fetching skills from npm registry\.\.\.$/u,
+	/^Package resolved:\s+@insuremo\/skills@[A-Za-z0-9][A-Za-z0-9._+-]*$/u,
+	/^Package resolved from local copy$/u,
+	/^Registry fetch failed, looking for a local copy\.\.\.$/u,
+	/^Syncing repository to store\.\.\.$/u,
+	/^Repository synced$/u,
+	/^Git host unreachable — using npm registry \(.+\)$/u,
+	/^Git sync failed — falling back to npm registry \(.+\)$/u,
+	/^Discovering skills\.\.\.$/u,
+	FOUND
+];
+/**
+* Parse the POC `@insuremo/skills-tool@1.1.2 add -l` stream.
+*
+* `add -l` has no machine-readable mode (the CLI's `list --json` is only the
+* installed inventory), so this parser deliberately accepts one known human
+* format and rejects every unknown shape. ANSI/cursor decoration emitted by
+* clack is removed, while arbitrary stdout logs are not silently skipped.
+*/
+function parseSkillCatalogOutput(output) {
+	if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > SKILL_CATALOG_OUTPUT_LIMIT_BYTES) return {
+		ok: false,
+		reason: "oversized"
+	};
+	const lines = output.replace(/\r\n?/gu, "\n").split("\n").map(cleanLine);
+	const markerIndexes = lines.map((line, index) => lineText(line) === MARKER ? index : -1).filter((index) => index >= 0);
+	if (markerIndexes.length !== 1) return {
+		ok: false,
+		reason: "format"
+	};
+	const markerIndex = markerIndexes[0];
+	const footerIndexes = lines.map((line, index) => messageText(line) === FOOTER ? index : -1).filter((index) => index >= 0);
+	if (footerIndexes.length !== 1 || footerIndexes[0] <= markerIndex) return {
+		ok: false,
+		reason: "format"
+	};
+	const footerIndex = footerIndexes[0];
+	const found = lines.slice(0, markerIndex).map(lineText).map((value) => FOUND.exec(value)?.[1]).filter((value) => value !== void 0);
+	if (found.length !== 1) return {
+		ok: false,
+		reason: "format"
+	};
+	const foundCount = Number(found[0]);
+	if (!Number.isSafeInteger(foundCount) || foundCount < 0 || foundCount > SKILL_CATALOG_MAX_ENTRIES) return {
+		ok: false,
+		reason: foundCount === 0 ? "empty" : "oversized"
+	};
+	for (const line of lines.slice(0, markerIndex)) {
+		const text$1 = lineText(line);
+		if (text$1.length === 0) continue;
+		if (!PREAMBLE_ALLOWED.some((pattern) => pattern.test(text$1))) return {
+			ok: false,
+			reason: "format"
+		};
+	}
+	for (const line of lines.slice(footerIndex + 1)) if (lineText(line).length > 0) return {
+		ok: false,
+		reason: "format"
+	};
+	const skills = [];
+	const names = /* @__PURE__ */ new Set();
+	let currentGroup;
+	let pendingName;
+	let sawFooter = false;
+	for (let index = markerIndex + 1; index <= footerIndex; index += 1) {
+		const line = lines[index] ?? "";
+		const text$1 = lineText(line);
+		if (text$1.length === 0) continue;
+		const message = messageText(line);
+		if (message !== void 0) {
+			if (message === FOOTER) {
+				if (pendingName !== void 0) return {
+					ok: false,
+					reason: "format"
+				};
+				sawFooter = true;
+				continue;
+			}
+			if (sawFooter) return {
+				ok: false,
+				reason: "format"
+			};
+			if (pendingName === void 0) {
+				if (!validSkillName(message) || names.has(message)) return {
+					ok: false,
+					reason: "format"
+				};
+				pendingName = message;
+			} else {
+				if (!validDescription(message) || skills.length >= SKILL_CATALOG_MAX_ENTRIES) return {
+					ok: false,
+					reason: "format"
+				};
+				names.add(pendingName);
+				skills.push({
+					type: "skill",
+					name: pendingName,
+					description: message,
+					...currentGroup === void 0 ? {} : { group: currentGroup }
+				});
+				pendingName = void 0;
+			}
+			continue;
+		}
+		if (sawFooter || pendingName !== void 0 || !validGroup(text$1)) return {
+			ok: false,
+			reason: "format"
+		};
+		currentGroup = text$1;
+	}
+	if (!sawFooter || pendingName !== void 0 || skills.length !== foundCount) return {
+		ok: false,
+		reason: skills.length === 0 ? "empty" : "format"
+	};
+	return {
+		ok: true,
+		value: {
+			skills: Object.freeze(skills),
+			foundCount
+		}
+	};
+}
+/** Recognize only the documented 1.1.2 empty-source failure envelope. */
+function isEmptySkillCatalogOutput(output) {
+	if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > SKILL_CATALOG_OUTPUT_LIMIT_BYTES) return false;
+	const lines = output.replace(/\r\n?/gu, "\n").split("\n").map(cleanLine);
+	let foundStatus = 0;
+	let foundDetail = 0;
+	for (const line of lines) {
+		const text$1 = lineText(line);
+		if (text$1.length === 0) continue;
+		if (text$1 === EMPTY_STATUS) {
+			foundStatus += 1;
+			continue;
+		}
+		if (text$1 === EMPTY_DETAIL) {
+			foundDetail += 1;
+			continue;
+		}
+		if (!PREAMBLE_ALLOWED.some((pattern) => pattern.test(text$1))) return false;
+	}
+	return foundStatus === 1 && foundDetail === 1;
+}
+/** Alias kept short for callers that do not need the implementation detail. */
+const parseCatalogOutput = parseSkillCatalogOutput;
+/** Add the fixed, server-owned scenario choices to a successfully parsed source catalog. */
+function buildSkillCatalog(parsed, now = Date.now(), ttlMs = SKILL_CATALOG_TTL_MS) {
+	const safeTtl = Number.isFinite(ttlMs) ? Math.max(1, Math.min(ttlMs, 5 * 6e4)) : SKILL_CATALOG_TTL_MS;
+	const scenarios = SKILL_SCENARIOS.map((name$8) => ({
+		type: "scenario",
+		name: name$8,
+		description: scenarioDescription(name$8)
+	}));
+	const skills = [...parsed.skills].sort((left, right) => left.name.localeCompare(right.name));
+	const entries = [...scenarios, ...skills].map((entry) => Object.freeze(entry));
+	return Object.freeze({
+		schemaVersion: SKILL_CATALOG_SCHEMA_VERSION,
+		status: parsed.skills.length === 0 ? "empty" : "ready",
+		source: SKILLS_TOOL_SOURCE,
+		fetchedAt: new Date(now).toISOString(),
+		expiresAt: new Date(now + safeTtl).toISOString(),
+		entries: Object.freeze(entries)
+	});
+}
+function catalogSkillNames(snapshot) {
+	return snapshot.entries.filter((entry) => entry.type === "skill").map((entry) => entry.name);
+}
+function cleanLine(value) {
+	return value.replace(ANSI_ESCAPE$1, "").replace(CONTROL, "");
+}
+/** Remove clack's line/symbol decoration without changing user-facing text. */
+function lineText(value) {
+	let text$1 = value.trim();
+	for (let pass = 0; pass < 3; pass += 1) {
+		const next = text$1.replace(PREFIXES, "").replace(INDICATOR, "").trim();
+		if (next === text$1) break;
+		text$1 = next;
+	}
+	return text$1;
+}
+/** Return payload text only for the exact clack message prefix used by 1.1.2. */
+function messageText(value) {
+	const match = MESSAGE_PREFIX.exec(value);
+	return match === null ? void 0 : value.slice(match[0].length).trim();
+}
+function validSkillName(value) {
+	return value.length > 0 && value.length <= MAX_SKILL_NAME_LENGTH && isSkillName(value);
+}
+function validDescription(value) {
+	return value.length > 0 && value.length <= SKILL_CATALOG_DESCRIPTION_MAX && !/[\u0000-\u001F\u007F]/u.test(value);
+}
+function validGroup(value) {
+	return value.length > 0 && value.length <= MAX_GROUP_LENGTH && /^[A-Za-z0-9][A-Za-z0-9 _-]*$/u.test(value);
+}
+function scenarioDescription(name$8) {
+	const descriptions = {
+		"icomposer-full-stack": "完整 iComposer 开发工具包（设计、编码、部署、搜索与配置）",
+		"icomposer-coding-lite": "轻量 iComposer 开发工具包（编码与部署）",
+		"icomposer-api-design": "API 设计与研究工具包",
+		"uic-developer": "UI Connector 开发工具包",
+		"ask-insuremo": "InsureMO 知识搜索工具包"
+	};
+	return descriptions[name$8];
+}
+
+//#endregion
+//#region ../insuremo-service/src/overview/skill-catalog-route.ts
+const JSON_TYPE$1 = "application/json; charset=utf-8";
+const MAX_RESPONSE_BYTES = 256 * 1024;
+/**
+* Mount the cache-only Skills catalog read bridge. It deliberately calls
+* `getCatalog`, never `refreshCatalog`: GET must not make npx install a tool,
+* contact a registry, or otherwise perform an implicit network operation.
+*/
+function mountSkillCatalogRoute(ctx) {
+	return ctx.webServer.register({
+		kind: "exact",
+		path: SKILL_CATALOG_PATH,
+		handler: (req, res) => {
+			if (req.method !== "GET" && req.method !== "HEAD") {
+				writeJson(res, 405, {
+					ok: false,
+					error: {
+						code: "method-not-allowed",
+						message: "skill catalog accepts GET only"
+					}
+				}, req.method === "HEAD");
+				return;
+			}
+			const actions = ctx.get("imoSkillActions");
+			if (actions === void 0 || typeof actions.getCatalog !== "function") {
+				writeJson(res, 503, {
+					ok: false,
+					error: {
+						code: "service-unavailable",
+						message: "Skills catalog service is unavailable"
+					}
+				}, req.method === "HEAD");
+				return;
+			}
+			const controller = new AbortController();
+			const onClose = () => controller.abort();
+			res.on("close", onClose);
+			(async () => {
+				try {
+					const result = await actions.getCatalog(controller.signal);
+					if (!result.ok) {
+						writeJson(res, 200, {
+							ok: false,
+							error: safeError(result)
+						}, req.method === "HEAD");
+						return;
+					}
+					const snapshot = sanitizeSkillCatalogSnapshot(result.value);
+					if (snapshot === void 0) {
+						writeJson(res, 200, {
+							ok: false,
+							error: {
+								code: "catalog-unavailable",
+								message: "the trusted Skills catalog is unavailable"
+							}
+						}, req.method === "HEAD");
+						return;
+					}
+					writeJson(res, 200, {
+						ok: true,
+						result: snapshot
+					}, req.method === "HEAD");
+				} catch {
+					writeJson(res, 500, {
+						ok: false,
+						error: {
+							code: "catalog-unavailable",
+							message: "the trusted Skills catalog is unavailable"
+						}
+					}, req.method === "HEAD");
+				} finally {
+					res.off("close", onClose);
+				}
+			})();
+		}
+	});
+}
+/** Sanitize the face result before either read or explicit-refresh output. */
+function sanitizeSkillCatalogSnapshot(value) {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
+	const candidate = value;
+	if (candidate.schemaVersion !== SKILL_CATALOG_SCHEMA_VERSION || candidate.source !== SKILLS_TOOL_SOURCE) return void 0;
+	const status = candidate.status;
+	if (status !== "ready" && status !== "empty") return void 0;
+	const fetchedAt = candidate.fetchedAt;
+	if (typeof fetchedAt !== "string" || fetchedAt.length > 64 || !Number.isFinite(Date.parse(fetchedAt))) return void 0;
+	const expiresAt = candidate.expiresAt;
+	if (typeof expiresAt !== "string" || expiresAt.length > 64 || !Number.isFinite(Date.parse(expiresAt))) return void 0;
+	if (!Array.isArray(candidate.entries) || candidate.entries.length > SKILL_CATALOG_MAX_ENTRIES + SKILL_SCENARIOS.length) return void 0;
+	const entries = [];
+	const seen = /* @__PURE__ */ new Set();
+	for (const raw of candidate.entries) {
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
+		const entry = raw;
+		if (entry.type === "scenario") {
+			if (!isScenario(entry.name) || !safeDescription(entry.description)) return void 0;
+			const key$1 = `scenario:${entry.name}`;
+			if (seen.has(key$1)) return void 0;
+			seen.add(key$1);
+			entries.push({
+				type: "scenario",
+				name: entry.name,
+				description: entry.description
+			});
+			continue;
+		}
+		const name$8 = entry.name;
+		const description = entry.description;
+		if (entry.type !== "skill" || typeof name$8 !== "string" || name$8.length > 128 || !isSkillName(name$8) || !safeDescription(description)) return void 0;
+		const key = `skill:${name$8}`;
+		if (seen.has(key)) return void 0;
+		seen.add(key);
+		const group = entry.group;
+		if (group !== void 0 && !safeGroup(group)) return void 0;
+		entries.push({
+			type: "skill",
+			name: name$8,
+			description,
+			...group === void 0 ? {} : { group }
+		});
+	}
+	const skillCount = entries.filter((entry) => entry.type === "skill").length;
+	if (status === "empty" !== (skillCount === 0)) return void 0;
+	return Object.freeze({
+		schemaVersion: SKILL_CATALOG_SCHEMA_VERSION,
+		status,
+		source: SKILLS_TOOL_SOURCE,
+		fetchedAt,
+		expiresAt,
+		entries: Object.freeze(entries)
+	});
+}
+function isScenario(value) {
+	return typeof value === "string" && SKILL_SCENARIOS.includes(value);
+}
+function safeDescription(value) {
+	return typeof value === "string" && value.length > 0 && value.length <= SKILL_CATALOG_DESCRIPTION_MAX && !/[\u0000-\u001F\u007F]/u.test(value);
+}
+function safeGroup(value) {
+	return typeof value === "string" && value.length > 0 && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9 _-]*$/u.test(value);
+}
+function safeError(result) {
+	const code = /^[a-z0-9-]{1,64}$/u.test(result.error.code) ? result.error.code : "catalog-unavailable";
+	return {
+		code,
+		message: code === "catalog-unavailable" ? "the trusted Skills catalog is unavailable; refresh it explicitly" : "the Skills catalog could not be read"
+	};
+}
+function writeJson(res, status, payload, head) {
+	if (res.destroyed || res.writableEnded) return;
+	const body = JSON.stringify(payload);
+	if (Buffer.byteLength(body, "utf8") > MAX_RESPONSE_BYTES) {
+		res.writeHead(503, {
+			"Content-Type": JSON_TYPE$1,
+			"Cache-Control": "no-store",
+			"X-Content-Type-Options": "nosniff"
+		});
+		res.end(head ? void 0 : JSON.stringify({
+			ok: false,
+			error: {
+				code: "catalog-unavailable",
+				message: "the Skills catalog response is too large"
+			}
+		}));
+		return;
+	}
+	res.writeHead(status, {
+		"Content-Type": JSON_TYPE$1,
+		"Cache-Control": "no-store",
+		"X-Content-Type-Options": "nosniff"
+	});
+	res.end(head ? void 0 : body);
+}
+
+//#endregion
+//#region ../insuremo-service/src/overview/write-routes.ts
+const JSON_TYPE = "application/json; charset=utf-8";
+const MAX_ACTION_BODY_BYTES = 8 * 1024;
+const ACTION_HEADER = "x-workbench-action";
+/** Every POST shares one prefix under the overview read path's sibling. */
+const ACTIONS_PREFIX = `${OVERVIEW_PATH}/actions`;
+/** Same-origin write gate (runs before any service call). */
+function sameOriginGate(req) {
+	const host = typeof req.headers.host === "string" ? req.headers.host : void 0;
+	if (host === void 0 || host.length === 0) return {
+		ok: false,
+		status: 403,
+		code: "origin-required",
+		message: "request must arrive from the Workbench UI (host header missing)"
+	};
+	const originHeader = typeof req.headers.origin === "string" ? req.headers.origin : void 0;
+	const refererHeader = typeof req.headers.referer === "string" ? req.headers.referer : void 0;
+	if (originHeader === void 0 && refererHeader === void 0) return {
+		ok: false,
+		status: 403,
+		code: "origin-required",
+		message: "Origin or Referer header is required for write actions"
+	};
+	for (const header of [originHeader, refererHeader]) {
+		if (header === void 0) continue;
+		let parsed;
+		try {
+			parsed = new URL(header);
+		} catch {
+			return {
+				ok: false,
+				status: 403,
+				code: "origin-invalid",
+				message: "Origin/Referer header is not a valid URL"
+			};
+		}
+		if (parsed.host !== host) return {
+			ok: false,
+			status: 403,
+			code: "origin-mismatch",
+			message: `write actions must come from the Workbench host (${host})`
+		};
+	}
+	if (req.headers[ACTION_HEADER] !== "1") return {
+		ok: false,
+		status: 403,
+		code: "action-header-required",
+		message: "X-Workbench-Action: 1 header is required for write actions"
+	};
+	const contentType = typeof req.headers["content-type"] === "string" ? req.headers["content-type"] : "";
+	if (!contentType.toLowerCase().startsWith("application/json")) return {
+		ok: false,
+		status: 400,
+		code: "content-type",
+		message: "Content-Type must be application/json"
+	};
+	return { ok: true };
+}
+async function readBody(req) {
+	const chunks = [];
+	let size = 0;
+	for await (const chunk of req) {
+		size += chunk.length;
+		if (size > MAX_ACTION_BODY_BYTES) return {
+			ok: false,
+			status: 413,
+			code: "body-too-large",
+			message: "request body exceeds the 8KB action limit"
+		};
+		chunks.push(chunk);
+	}
+	return {
+		ok: true,
+		text: Buffer.concat(chunks).toString("utf8")
+	};
+}
+function parseBody(text$1) {
+	try {
+		const parsed = JSON.parse(text$1);
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {
+			ok: false,
+			status: 400,
+			code: "body-shape",
+			message: "request body must be a JSON object"
+		};
+		return {
+			ok: true,
+			value: parsed
+		};
+	} catch {
+		return {
+			ok: false,
+			status: 400,
+			code: "body-json",
+			message: "request body is not valid JSON"
+		};
+	}
+}
+function sendJson(res, status, payload) {
+	if (res.destroyed || res.writableEnded) return;
+	res.writeHead(status, {
+		"Content-Type": JSON_TYPE,
+		"Cache-Control": "no-store",
+		"X-Content-Type-Options": "nosniff"
+	});
+	res.end(JSON.stringify(payload));
+}
+function clipDetail(value) {
+	return value.length > 300 ? `${value.slice(0, 299)}…` : value;
+}
+/** One action route: gate + body + handler with sanitized error mapping. */
+function actionRoute(path, handler) {
+	return {
+		path,
+		handle(req, res) {
+			if (req.method !== "POST") {
+				sendJson(res, 405, {
+					ok: false,
+					error: {
+						code: "method-not-allowed",
+						message: "write actions accept POST only"
+					}
+				});
+				return;
+			}
+			const gate = sameOriginGate(req);
+			if (!gate.ok) {
+				sendJson(res, gate.status, {
+					ok: false,
+					error: {
+						code: gate.code,
+						message: gate.message
+					}
+				});
+				return;
+			}
+			const controller = new AbortController();
+			const onClose = () => controller.abort();
+			res.on("close", onClose);
+			(async () => {
+				try {
+					const body = await readBody(req);
+					if (!body.ok) {
+						sendJson(res, body.status, {
+							ok: false,
+							error: {
+								code: body.code,
+								message: body.message
+							}
+						});
+						return;
+					}
+					const parsed = parseBody(body.text);
+					if (!parsed.ok) {
+						sendJson(res, parsed.status, {
+							ok: false,
+							error: {
+								code: parsed.code,
+								message: parsed.message
+							}
+						});
+						return;
+					}
+					const outcome = await handler(parsed.value, controller.signal);
+					if (outcome.ok) sendJson(res, 200, {
+						ok: true,
+						result: outcome.result
+					});
+					else sendJson(res, 200, {
+						ok: false,
+						error: {
+							code: outcome.error.code,
+							message: outcome.error.message,
+							...outcome.error.detail === void 0 ? {} : { detail: clipDetail(outcome.error.detail) }
+						}
+					});
+				} catch {
+					sendJson(res, 500, {
+						ok: false,
+						error: {
+							code: "internal",
+							message: "action failed unexpectedly"
+						}
+					});
+				} finally {
+					res.off("close", onClose);
+				}
+			})();
+		}
+	};
+}
+function str(value) {
+	return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+/** Resolve a body selector through the trusted registry; never accept a cwd. */
+function requestedWorkspace(ctx, value) {
+	if (value === void 0 || value === null) return { ok: true };
+	const workspaceId = parseWorkspaceId(value);
+	if (workspaceId === void 0) return {
+		ok: false,
+		code: "invalid-workspace-id",
+		message: "workspace id is invalid"
+	};
+	const resolved$1 = resolveWorkspace(ctx, workspaceId);
+	return resolved$1.ok ? {
+		ok: true,
+		workspaceId: resolved$1.workspaceId
+	} : {
+		ok: false,
+		code: resolved$1.code,
+		message: resolved$1.message
+	};
+}
+function parseScenario(value) {
+	return typeof value === "string" && SKILL_SCENARIOS.includes(value) ? value : void 0;
+}
+function boundedNames(value) {
+	if (!Array.isArray(value)) return [];
+	return [...new Set(value.filter((name$8) => typeof name$8 === "string" && isSkillName(name$8)))].slice(0, 100);
+}
+/** Map a face error object ({code,message}) into the action envelope. */
+function faceError(error$2, fallback) {
+	const code = typeof error$2?.code === "string" && /^[a-z0-9-]{1,64}$/.test(error$2.code) ? error$2.code : fallback;
+	const message = typeof error$2?.message === "string" && error$2.message.length > 0 ? error$2.message : fallback;
+	return {
+		ok: false,
+		error: {
+			code,
+			message
+		}
+	};
+}
+/**
+* Mount the same-origin write bridge (TASK-039 direct-execution form): the
+* InsureMO local CLI actions run immediately through the services' direct
+* kernels — no operation-log approval chain. Every route keeps the
+* Origin/Referer + X-Workbench-Action + JSON/8KB gate; responses are
+* no-store, never CORS.
+*/
+function mountWriteRoutes(ctx) {
+	const disposers = [];
+	const register = (route) => {
+		disposers.push(ctx.webServer.register({
+			kind: "exact",
+			path: route.path,
+			handler: (req, res) => route.handle(req, res)
+		}));
+	};
+	register(actionRoute(`${ACTIONS_PREFIX}/imo-upgrade`, async (body, signal) => {
+		const upgrade = ctx.get("imoUpgrade");
+		if (upgrade === void 0) return faceError(void 0, "service-unavailable");
+		if (upgrade.upgradeStatus().running) return faceError({
+			code: "busy",
+			message: "an IMO upgrade is already running"
+		}, "busy");
+		const targetVersion = str(body.targetVersion);
+		try {
+			const executed = await upgrade.executeDirect(targetVersion, signal);
+			if (!executed.ok) return faceError(executed.error, "upgrade-failed");
+			return {
+				ok: true,
+				result: {
+					status: executed.receipt.status,
+					currentVersion: executed.receipt.after,
+					targetVersion: executed.receipt.after
+				}
+			};
+		} catch {
+			return faceError(void 0, "upgrade-failed");
+		}
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/imo-install`, async (_body, signal) => {
+		const install = ctx.get("imoInstall");
+		if (install === void 0) return faceError(void 0, "service-unavailable");
+		if (install.installStatus().running) return faceError({
+			code: "busy",
+			message: "an IMO install is already running"
+		}, "busy");
+		try {
+			const outcome = await install.install(signal);
+			if (!outcome.ok) return faceError(outcome.error, "install-failed");
+			return {
+				ok: true,
+				result: {
+					status: outcome.receipt.status,
+					packageManager: outcome.receipt.packageManager,
+					currentVersion: outcome.receipt.after
+				}
+			};
+		} catch {
+			return faceError(void 0, "install-failed");
+		}
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/imo-diagnosis`, async (body) => {
+		const kind = body.kind === "imo-cli" || body.kind === "skill" ? body.kind : void 0;
+		if (kind === void 0) return faceError({
+			code: "invalid-input",
+			message: "diagnosis kind must be 'imo-cli' or 'skill'"
+		}, "invalid-input");
+		const diagnosis = failureDiagnosis.snapshot(kind);
+		if (diagnosis === void 0) return {
+			ok: true,
+			result: { available: false }
+		};
+		const diagnosisCwd = diagnosisDirectory();
+		try {
+			await mkdir(diagnosisCwd, { recursive: true });
+		} catch {}
+		return {
+			ok: true,
+			result: {
+				available: true,
+				diagnosis,
+				diagnosisCwd
+			}
+		};
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/skill-activation`, async (body, signal) => {
+		const activation = ctx.get("imoSkillActivation");
+		if (activation === void 0) return faceError(void 0, "service-unavailable");
+		const name$8 = str(body.name);
+		if (name$8 === void 0) return faceError({
+			code: "invalid-input",
+			message: "skill name is required"
+		}, "invalid-input");
+		if (typeof body.enabled !== "boolean") return faceError({
+			code: "invalid-input",
+			message: "enabled must be a boolean"
+		}, "invalid-input");
+		const expectedRevision = typeof body.expectedRevision === "number" && Number.isInteger(body.expectedRevision) ? body.expectedRevision : void 0;
+		const controller = optionsActivationController(ctx);
+		if (controller === void 0) return faceError({
+			code: "service-unavailable",
+			message: "activation controller unavailable"
+		}, "service-unavailable");
+		try {
+			const snapshot = await controller.setEnabled(name$8, body.enabled, [name$8], expectedRevision);
+			return {
+				ok: true,
+				result: {
+					name: name$8,
+					enabled: body.enabled,
+					revision: snapshot.revision
+				}
+			};
+		} catch (error$2) {
+			const code = typeof error$2?.code === "string" ? String(error$2.code) : "activation-failed";
+			const message = error$2 instanceof Error && error$2.message.length > 0 ? error$2.message : "skill activation failed";
+			return faceError({
+				code: /^[a-z0-9-]{1,64}$/.test(code) ? code : "activation-failed",
+				message
+			}, "activation-failed");
+		}
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/skill-catalog-refresh`, async (body, signal) => {
+		const actions = ctx.get("imoSkillActions");
+		if (actions === void 0 || typeof actions.refreshCatalog !== "function") return faceError(void 0, "service-unavailable");
+		const force = body.force === true;
+		const result = await actions.refreshCatalog(signal, force);
+		if (!result.ok) return faceError(result.error, "catalog-unavailable");
+		const snapshot = sanitizeSkillCatalogSnapshot(result.value);
+		if (snapshot === void 0) return faceError({
+			code: "catalog-unavailable",
+			message: "the trusted Skills catalog is unavailable"
+		}, "catalog-unavailable");
+		return {
+			ok: true,
+			result: snapshot
+		};
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/skill-update`, async (_body, signal) => {
+		const actions = ctx.get("imoSkillActions");
+		if (actions === void 0) return faceError(void 0, "service-unavailable");
+		const outcome = await actions.runDirect({ kind: "skill-update" }, signal);
+		return directSkillOutcome(outcome);
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/skill-install`, async (body, signal) => {
+		const actions = ctx.get("imoSkillActions");
+		if (actions === void 0) return faceError(void 0, "service-unavailable");
+		const hasScenario = body.scenario !== void 0;
+		const hasSkill = body.skill !== void 0;
+		if (hasScenario && hasSkill) return faceError({
+			code: "invalid-input",
+			message: "choose either a scenario or a single Skill"
+		}, "invalid-input");
+		if (hasSkill) {
+			const skill = body.skill;
+			if (typeof skill !== "string" || !isSkillName(skill)) return faceError({
+				code: "invalid-skill-name",
+				message: "skill name is invalid"
+			}, "invalid-input");
+			if (typeof actions.installCatalogSkill === "function") {
+				const outcome$2 = await actions.installCatalogSkill(skill, signal);
+				return directSkillOutcome(outcome$2);
+			}
+			if (typeof actions.getCatalog !== "function") return faceError(void 0, "service-unavailable");
+			const catalog = await actions.getCatalog(signal);
+			if (!catalog.ok) return faceError(catalog.error, "catalog-unavailable");
+			const snapshot = sanitizeSkillCatalogSnapshot(catalog.value);
+			if (snapshot === void 0) return faceError({
+				code: "catalog-unavailable",
+				message: "the trusted Skills catalog is unavailable"
+			}, "catalog-unavailable");
+			if (!snapshot.entries.some((entry) => entry.type === "skill" && entry.name === skill)) return faceError({
+				code: "catalog-selection-invalid",
+				message: "the selected Skill is not in the current trusted catalog"
+			}, "catalog-selection-invalid");
+			if (typeof actions.runDirect !== "function") return faceError(void 0, "service-unavailable");
+			const outcome$1 = await actions.runDirect({
+				kind: "skill-install",
+				source: {
+					type: "alias",
+					value: SKILLS_TOOL_SOURCE
+				},
+				agent: "universal",
+				skills: [skill]
+			}, signal);
+			return directSkillOutcome(outcome$1);
+		}
+		const scenario = parseScenario(body.scenario);
+		if (scenario === void 0) return faceError({
+			code: "invalid-input",
+			message: "scenario is not in the built-in allowlist"
+		}, "invalid-input");
+		if (typeof actions.runDirect !== "function") return faceError(void 0, "service-unavailable");
+		const outcome = await actions.runDirect({
+			kind: "skill-install",
+			source: {
+				type: "scenario",
+				scenario
+			},
+			agent: "universal",
+			skills: []
+		}, signal);
+		return directSkillOutcome(outcome);
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/skill-remove`, async (body, signal) => {
+		const actions = ctx.get("imoSkillActions");
+		if (actions === void 0) return faceError(void 0, "service-unavailable");
+		const name$8 = str(body.name);
+		if (name$8 === void 0) return faceError({
+			code: "invalid-input",
+			message: "skill name is required"
+		}, "invalid-input");
+		const outcome = await actions.runDirect({
+			kind: "skill-remove",
+			agent: "universal",
+			names: [name$8]
+		}, signal);
+		return directSkillOutcome(outcome);
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/active-profile`, async (body, signal) => {
+		const active = ctx.get("imoActiveProfile");
+		if (active === void 0) return faceError(void 0, "service-unavailable");
+		const profile = str(body.profile);
+		if (profile === void 0) return faceError({
+			code: "invalid-input",
+			message: "profile is required"
+		}, "invalid-input");
+		const target = requestedWorkspace(ctx, body.workspaceId);
+		if (!target.ok) return faceError(target, target.code);
+		const selected = await active.select(profile, signal, target.workspaceId);
+		if (!selected.ok) return faceError(selected.error, "action-failed");
+		return {
+			ok: true,
+			result: {
+				status: selected.value.activeProfileName === profile ? "completed" : "none",
+				profile,
+				revision: selected.value.revision,
+				...target.workspaceId === void 0 ? {} : { workspaceId: target.workspaceId }
+			}
+		};
+	}));
+	register(actionRoute(`${ACTIONS_PREFIX}/default-profile`, async (body, signal) => {
+		const authActions = ctx.get("imoAuthActions");
+		if (authActions === void 0) return faceError(void 0, "service-unavailable");
+		const profile = str(body.profile);
+		if (profile === void 0) return faceError({
+			code: "invalid-input",
+			message: "profile is required"
+		}, "invalid-input");
+		try {
+			const executed = await authActions.runDirectDefaultSwitch({ profile }, signal);
+			if (!executed.ok) return faceError(executed.error, "action-failed");
+			return {
+				ok: true,
+				result: {
+					status: executed.receipt.status,
+					profile
+				}
+			};
+		} catch {
+			return faceError(void 0, "action-failed");
+		}
+	}));
+	return () => {
+		for (const dispose of disposers) dispose();
+	};
+}
+function directSkillOutcome(outcome) {
+	if (!outcome.ok) return faceError(outcome.error, "action-failed");
+	return {
+		ok: true,
+		result: directSkillResult(outcome.receipt)
+	};
+}
+function directSkillResult(receipt) {
+	return {
+		status: receipt.status,
+		...receipt.beforeCount === void 0 ? {} : { beforeCount: receipt.beforeCount },
+		...receipt.afterCount === void 0 ? {} : { afterCount: receipt.afterCount },
+		added: boundedNames(receipt.added ?? []),
+		updated: boundedNames(receipt.updated ?? []),
+		removed: boundedNames(receipt.removed ?? [])
+	};
+}
+/** Activation controller seam resolved through the composed context. */
+function optionsActivationController(ctx) {
+	const holder = ctx.__insuremoActivationController;
+	return holder;
+}
+
+//#endregion
+//#region ../insuremo-service/src/overview/route-service.ts
+/** Composition seam: index.ts stores the live controller here for the routes. */
+function setActivationControllerOnContext(ctx, controller) {
+	ctx.__insuremoActivationController = controller;
+}
+/**
+* Route/section host for the InsureMO UI bridges.
+*
+* Registration happens DIRECTLY in `[Service.init]` — not via `ctx.effect`.
+* Effects registered by plugins mounted inside a loader entry were observed
+* to be swept ~25ms after mount (the entry fiber's pre-activation epoch
+* unloads effect runners that never reached ACTIVE), which silently removed
+* every route while the process kept serving (`overview 404` with a clean
+* boot). Direct registration with an idempotence guard keeps the routes for
+* the process lifetime; disposers are only invoked on fiber unload via the
+* service registry teardown (and double-registration is tolerated).
+*/
+var InsuremoRoutesService = class extends Service {
+	static inject = ["webServer"];
+	#activationController;
+	#disposers = [];
+	#registered = false;
+	/** Capture point for the activation controller (composition wiring). */
+	setActivationController(controller) {
+		this.#activationController = controller;
+	}
+	async [Service.init]() {
+		if (this.#registered) return;
+		this.#registered = true;
+		const ctx = this.ctx;
+		const safe = (register) => {
+			try {
+				this.#disposers.push(register());
+			} catch {}
+		};
+		safe(() => mountOverviewRoute(ctx));
+		safe(() => mountSkillCatalogRoute(ctx));
+		safe(() => mountWriteRoutes(ctx));
+		safe(() => mountWorkspacesStatusRoute(ctx));
+		const firstRequestGuard = (_req, res) => {
+			res.writeHead(500);
+			res.end();
+		};
+	}
+};
+
+//#endregion
+//#region ../insuremo-service/src/skill-overlay.ts
+/**
+* TASK-100 skill context overlay: append a FIXED, code-owned Workbench policy
+* note to the body a skill provider returns for allowlisted skill names.
+*
+* The overlay is applied only at the final provider `get()` return, AFTER the
+* canonical frontmatter has been parsed and sliced away, so installed skill
+* files, catalog rows, summaries, TASK-092 diagnostics, and frontmatter
+* semantics are untouched. Configuration decides ONLY the exact-name
+* allowlist and the on/off switch; the text below is a code constant — no
+* caller- or config-supplied text is ever interpolated.
+*/
+const SKILL_OVERLAY_TEXT = [
+	"",
+	"---",
+	"",
+	"## Workbench policy overlay",
+	"",
+	"> This section is appended by the InsureMO Workbench plugin.",
+	"> It is NOT part of the upstream skill document.",
+	"",
+	"- Auth commands that persist credentials — `imo auth login`, `imo auth token set`,",
+	"  `imo auth remote-profile create`, `imo auth default-profile set` — run with",
+	"  `--scope workspace` by default in this Workbench.",
+	"- Workspace-scope credentials are written under `<workspace>/.insuremo/`, inside",
+	"  the sandbox's writable roots.",
+	"- Use `--scope global` only when the user explicitly asks for machine-global",
+	"  persistence; global writes land outside the sandbox and may need user approval.",
+	""
+].join("\n");
+/**
+* Hard byte bound for the fixed template. The text is code-owned so the bound
+* holds by construction; the resolver re-checks it as a pinned invariant.
+*/
+const SKILL_OVERLAY_MAX_BYTES = 8 * 1024;
+/** Upper bound on allowlisted names; a longer list is a configuration error. */
+const SKILL_OVERLAY_MAX_NAMES = 16;
+/** Default allowlist: the one skill whose auth guidance benefits from the overlay. */
+const DEFAULT_SKILL_OVERLAY_NAMES = ["insuremo-auth-cli"];
+/**
+* Resolve and validate overlay configuration. Invalid names, duplicates, and
+* over-long lists fail loud here (service construction) instead of silently
+* degrading — the same fail-loud pattern as the package's other config knobs.
+*/
+function resolveSkillOverlayConfig(settings = {}) {
+	const enabled = settings.enabled ?? true;
+	const rawNames = settings.names ?? DEFAULT_SKILL_OVERLAY_NAMES;
+	if (!Array.isArray(rawNames)) throw new Error("skill-overlay: overlay names must be an array of skill names");
+	if (rawNames.length > SKILL_OVERLAY_MAX_NAMES) throw new Error(`skill-overlay: overlay allowlist exceeds ${SKILL_OVERLAY_MAX_NAMES} names`);
+	const seen = /* @__PURE__ */ new Set();
+	for (const name$8 of rawNames) {
+		if (typeof name$8 !== "string" || name$8.length === 0 || !isSkillName(name$8)) throw new Error(`skill-overlay: invalid overlay skill name ${JSON.stringify(name$8)}`);
+		if (seen.has(name$8)) throw new Error(`skill-overlay: duplicate overlay skill name "${name$8}"`);
+		seen.add(name$8);
+	}
+	if (Buffer.byteLength(SKILL_OVERLAY_TEXT, "utf8") > SKILL_OVERLAY_MAX_BYTES) throw new Error("skill-overlay: fixed overlay template exceeds its byte bound");
+	return Object.freeze({
+		enabled,
+		names: Object.freeze([...rawNames])
+	});
+}
+/**
+* Append the fixed overlay to `content` when `skillName` is allowlisted and
+* the overlay is enabled; otherwise return `content` unchanged. Exact-name
+* matching only — no content sniffing, no partial matches.
+*/
+function applySkillOverlay(skillName, content, overlay) {
+	if (!overlay.enabled || !overlay.names.includes(skillName)) return content;
+	return `${content}${SKILL_OVERLAY_TEXT}`;
+}
+
+//#endregion
+//#region ../insuremo-service/src/skill-activation-adapter.ts
+/** Provider-local adapter: activation storage stays outside the catalog provider contract. */
+var SkillActivationGate = class {
+	resolver;
+	revision;
+	constructor(ctx, control, activation) {
+		this.control = control;
+		this.resolver = activation === void 0 ? () => ctx.get("imoSkillActivation") : typeof activation === "function" ? activation : () => activation;
+	}
+	async ensure(items, signal) {
+		const activation = this.resolver();
+		if (activation === void 0) return void 0;
+		const snapshot = await raceSkillAbort(activation.ensureInitialized(eligibleNames(items)), signal);
+		this.revision = snapshot.revision;
+		return snapshot;
+	}
+	async snapshot(items, signal) {
+		const activation = this.resolver();
+		if (activation === void 0) return void 0;
+		const snapshot = await raceSkillAbort(activation.snapshot(eligibleNames(items)), signal);
+		this.revision = snapshot.revision;
+		return snapshot;
+	}
+	async stableList(items, signal, build, fail$1) {
+		let initial = await this.ensure(items, signal);
+		if (initial === void 0 || !initial.initialized) return fail$1();
+		for (let attempt = 0; attempt < 2; attempt += 1) {
+			throwIfSkillAborted(signal);
+			const result = await build(new Set(initial.enabled));
+			throwIfSkillAborted(signal);
+			const final = await this.snapshot(items, signal);
+			throwIfSkillAborted(signal);
+			if (final === void 0 || !final.initialized) return fail$1();
+			if (sameActivation(initial, final)) return result;
+			if (attempt === 1) return fail$1();
+			initial = final;
+		}
+		return fail$1();
+	}
+	onChanged(payload) {
+		if (this.control.signal.aborted) return;
+		const revision = activationRevision(payload);
+		if (revision === void 0 || this.revision !== void 0 && revision <= this.revision) return;
+		this.revision = revision;
+		this.control.invalidate();
+	}
+};
+function sameActivation(left, right) {
+	return left.revision === right.revision && left.enabled.length === right.enabled.length && left.enabled.every((name$8, index) => name$8 === right.enabled[index]);
+}
+function eligibleNames(items) {
+	return items.filter((item) => (item.valid || isFormatDiagnostic$1(item.diagnostic)) && typeof item.name === "string" && isSkillName(item.name)).map((item) => item.name);
+}
+function isFormatDiagnostic$1(diagnostic) {
+	const code = diagnostic?.code;
+	return typeof code === "string" && (code.startsWith("frontmatter-") || code === "skill-file-too-large");
+}
+function activationRevision(value) {
+	if (typeof value !== "object" || value === null) return void 0;
+	const revision = value.revision;
+	return typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0 ? revision : void 0;
 }
 
 //#endregion
@@ -27187,12 +28388,14 @@ var InsuremoSkillProvider = class {
 	#activation;
 	#listenerDispose;
 	#issued = /* @__PURE__ */ new WeakSet();
+	#overlay;
 	inventoryResolver;
 	mode;
-	constructor(ctx, control, inventory, scope = "global", activation, mode = "full") {
+	constructor(ctx, control, inventory, scope = "global", activation, mode = "full", overlay) {
 		this.ctx = ctx;
 		this.scope = scope;
 		this.mode = mode;
+		this.#overlay = overlay ?? resolveSkillOverlayConfig();
 		this.#control = control;
 		this.#activation = new SkillActivationGate(ctx, control, activation);
 		this.inventoryResolver = typeof inventory === "function" ? inventory : () => inventory;
@@ -27252,7 +28455,8 @@ var InsuremoSkillProvider = class {
 					this.throwIfCancelled(cancellation$1.signal);
 					if (!item.valid || !isSkillName(item.name)) {
 						complete = false;
-						continue;
+						const canRetainFallback = item.diagnostic?.canonicalInvalid === false && (item.diagnostic.code === "skill-file-too-large" || item.diagnostic.code.startsWith("frontmatter-"));
+						if (!canRetainFallback) continue;
 					}
 					if (!enabledNames.has(item.name)) {
 						candidates.push(Object.freeze({
@@ -27399,7 +28603,7 @@ var InsuremoSkillProvider = class {
 			},
 			path: locator.manifestPath,
 			...parsed.metadata === void 0 ? {} : { metadata: parsed.metadata },
-			content: parsed.content
+			content: applySkillOverlay(candidate.name, parsed.content, this.#overlay)
 		};
 	}
 	onInventoryUpdated(payload) {
@@ -27434,13 +28638,13 @@ var InsuremoSkillProvider = class {
 function invalidateInsuremoSkillCatalog(ctx, scope = "global") {
 	ctx.emit(INSUREMO_SKILL_CATALOG_INVALIDATE_EVENT, { scope });
 }
-function mountInsuremoSkillProvider(ctx, scope = "global") {
+function mountInsuremoSkillProvider(ctx, scope = "global", overlay) {
 	const registry$1 = ctx.get("skills");
 	if (registry$1 === void 0 || typeof registry$1.registerProvider !== "function") return () => {};
-	return registry$1.registerProvider((control) => new InsuremoSkillProvider(ctx, control, () => ctx.get("imoSkills"), scope, () => ctx.get("imoSkillActivation")));
+	return registry$1.registerProvider((control) => new InsuremoSkillProvider(ctx, control, () => ctx.get("imoSkills"), scope, () => ctx.get("imoSkillActivation"), "full", overlay));
 }
 /** Register exact-agent disabled masks plus explicit managed opt-out overrides. */
-function mountInsuremoSkillMaskProvider(ctx, agentCtx, scope = "global") {
+function mountInsuremoSkillMaskProvider(ctx, agentCtx, scope = "global", overlay) {
 	let registry$1;
 	try {
 		registry$1 = agentCtx.skills;
@@ -27449,7 +28653,7 @@ function mountInsuremoSkillMaskProvider(ctx, agentCtx, scope = "global") {
 	}
 	registry$1 ??= agentCtx.get("skills");
 	if (registry$1 === void 0 || typeof registry$1.registerProvider !== "function") return () => {};
-	return registry$1.registerProvider((control) => new InsuremoSkillProvider(ctx, control, () => ctx.get("imoSkills"), scope, () => ctx.get("imoSkillActivation"), "disabled-mask"));
+	return registry$1.registerProvider((control) => new InsuremoSkillProvider(ctx, control, () => ctx.get("imoSkills"), scope, () => ctx.get("imoSkillActivation"), "disabled-mask", overlay));
 }
 async function resolveManifest(directory, allowedRootPath, allowedRoot) {
 	if (allowedRoot === null) return void 0;
@@ -27521,13 +28725,19 @@ var InsuremoSkillProviderService = class extends Service {
 		"imoSkills",
 		"imoSkillActivation"
 	];
+	/** Overlay settings (TASK-100); raw/optional — validated fail-loud in the constructor. */
+	skillOverlay;
 	#disposer;
-	constructor(ctx) {
+	constructor(ctx, config$1 = {}) {
 		super(ctx, "insuremoSkillProvider");
+		this.skillOverlay = resolveSkillOverlayConfig({
+			enabled: config$1.skillOverlayEnabled,
+			names: config$1.skillOverlayNames
+		});
 		this.disposeProvider = this.disposeProvider.bind(this);
 	}
 	[Service.init]() {
-		if (this.#disposer === void 0) this.#disposer = mountInsuremoSkillProvider(this.ctx);
+		if (this.#disposer === void 0) this.#disposer = mountInsuremoSkillProvider(this.ctx, "global", this.skillOverlay);
 	}
 	/** Explicit teardown (tests + service lifecycle): unregister + abort control. */
 	disposeProvider() {
@@ -27559,10 +28769,16 @@ var InsuremoAgentSkillMaskService = class extends Service {
 		"imoSkills",
 		"imoSkillActivation"
 	];
+	/** Overlay settings (TASK-100); validated fail-loud so the mask chain shares one config. */
+	skillOverlay;
 	#seen = /* @__PURE__ */ new WeakSet();
 	#listenerDispose;
-	constructor(ctx) {
+	constructor(ctx, config$1 = {}) {
 		super(ctx, "insuremoAgentSkillMask");
+		this.skillOverlay = resolveSkillOverlayConfig({
+			enabled: config$1.skillOverlayEnabled,
+			names: config$1.skillOverlayNames
+		});
 		this.ensureAgent = this.ensureAgent.bind(this);
 		this.disposeMasks = this.disposeMasks.bind(this);
 	}
@@ -27588,7 +28804,7 @@ var InsuremoAgentSkillMaskService = class extends Service {
 			return;
 		}
 		if (registry$1 === void 0 || typeof registry$1.registerProvider !== "function") return;
-		const disposer = mountInsuremoSkillMaskProvider(this.ctx, agentCtx);
+		const disposer = mountInsuremoSkillMaskProvider(this.ctx, agentCtx, "global", this.skillOverlay);
 		this.ctx.effect(() => disposer, `insuremoAgentSkillMask:${String(agent.id ?? "agent")}`);
 		this.#seen.add(agent);
 	}
@@ -27635,12 +28851,26 @@ rules:
 - Never use cwd/global defaults.
 - If explicit \`--profile\` is unsupported, stop and report.`;
 }
+/** Resolve the agent's session through the trusted workspace registry. */
+function workspaceForSession(ctx, sessionId) {
+	if (sessionId === void 0) return void 0;
+	const registry$1 = ctx.get("workspaceRegistry");
+	if (registry$1?.list === void 0) return null;
+	try {
+		const workspace = registry$1.list().find((candidate) => candidate.sessionIds.some((id) => String(id) === sessionId));
+		return workspace === void 0 ? void 0 : typeof workspace.id === "string" ? workspace.id : String(workspace.id);
+	} catch {
+		return null;
+	}
+}
 /** Resolver reads only the Workbench-owned Active Profile face. */
 function defaultResolver(ctx) {
-	return async () => {
+	return async (sessionId) => {
 		const active = ctx.get("imoActiveProfile");
 		if (active?.get === void 0) return void 0;
-		const result = await active.get();
+		const workspaceId = workspaceForSession(ctx, sessionId);
+		if (workspaceId === null) return void 0;
+		const result = await active.get(void 0, workspaceId);
 		if (result.ok !== true || result.value === void 0) return void 0;
 		const name$8 = result.value.activeProfileName;
 		return {
@@ -27765,7 +28995,7 @@ var ImoProfileContextService = class extends Service {
 			if (decision.kind === "reject" || p.signal?.aborted === true) return decision;
 			if (p.step !== 1) return decision;
 			const events = p.agent.session.events ?? [];
-			const profile = await this.resolver().catch(() => void 0);
+			const profile = await this.resolver(p.agent?.id).catch(() => void 0);
 			if (profile === void 0) return decision;
 			const plan = decideProfileContext(events, profile);
 			if (!plan.inject) return decision;
@@ -28008,8 +29238,12 @@ function authLifecycleError(code, command) {
 		}
 	};
 }
-function authCacheKey(profile, env) {
-	return JSON.stringify([profile, env]);
+function authCacheKey(profile, env, scope = "global") {
+	return JSON.stringify([
+		scope,
+		profile,
+		env
+	]);
 }
 function authCacheMatches(entry, request) {
 	return (request.profile === void 0 || entry.profile === request.profile) && (request.env === void 0 || entry.env === request.env);
@@ -28022,13 +29256,15 @@ var ImoAuthService = class extends Service {
 	static Config = Config;
 	config;
 	#cache = /* @__PURE__ */ new Map();
-	#listCache;
-	#listInflight;
-	#defaultCache;
-	#defaultInflight;
+	#listCache = /* @__PURE__ */ new Map();
+	#listInflight = /* @__PURE__ */ new Map();
+	#defaultCache = /* @__PURE__ */ new Map();
+	#defaultInflight = /* @__PURE__ */ new Map();
 	#inflight = /* @__PURE__ */ new Map();
 	#pendingMeta = /* @__PURE__ */ new Map();
 	#generations = /* @__PURE__ */ new Map();
+	#globalCwd;
+	#fastCacheEpoch = 0;
 	#disposed = false;
 	#epoch = 0;
 	constructor(ctx, config$1 = {}) {
@@ -28045,7 +29281,9 @@ var ImoAuthService = class extends Service {
 		this.cacheStatus = this.cacheStatus.bind(this);
 		this.ctx.effect(() => () => this.clearCache(), "imoAuth.cache");
 	}
-	async listProfiles(signal) {
+	async listProfiles(signal, workspaceId) {
+		const scope = this.resolveScope(workspaceId);
+		if (!scope.ok) return scope;
 		const args = [
 			"auth",
 			"profile",
@@ -28057,7 +29295,8 @@ var ImoAuthService = class extends Service {
 			command: this.config.command,
 			args,
 			timeoutMs: this.config.timeoutMs,
-			signal
+			signal,
+			cwd: scope.value.cwd
 		});
 		if (!run.ok) return {
 			ok: false,
@@ -28070,7 +29309,7 @@ var ImoAuthService = class extends Service {
 			return authParseError(this.config.command, "profile list", run.value.stdoutDigest, run.value.stderrDigest);
 		}
 		if (!Array.isArray(parsed)) return authParseError(this.config.command, "profile list", run.value.stdoutDigest, run.value.stderrDigest);
-		const profiles = parsed.map(profileView).filter((profile) => profile !== null);
+		const profiles = sanitizeProfiles(parsed);
 		return {
 			ok: true,
 			value: {
@@ -28079,90 +29318,77 @@ var ImoAuthService = class extends Service {
 			}
 		};
 	}
-	async defaultProfile(signal) {
-		const args = [
-			"auth",
-			"default-profile",
-			"get"
-		];
-		const run = await runCapture(this.ctx.subprocess, {
-			command: this.config.command,
-			args,
-			timeoutMs: this.config.timeoutMs,
-			signal
-		});
-		if (!run.ok) return {
-			ok: false,
-			error: authRunError(run.error, this.config.command, "default profile")
-		};
-		const profileName = parseDefaultProfile(run.value.stdout.text);
-		if (profileName === void 0) return authParseError(this.config.command, "default profile", run.value.stdoutDigest, run.value.stderrDigest);
-		return {
-			ok: true,
-			value: {
-				profileName,
-				stdoutDigest: run.value.stdoutDigest
-			}
-		};
+	async defaultProfile(signal, workspaceId) {
+		const scope = this.resolveScope(workspaceId);
+		if (!scope.ok) return scope;
+		return this.defaultProfileAt(scope.value, signal);
 	}
 	/**
 	* Cached default-profile (TASK-043 fix-3): 60s TTL + in-flight coalescing,
-	* so `profilesFast` never spawns the CLI on a warm fast read.
+	* partitioned by the trusted workspace cwd.
 	*/
-	async defaultProfileCached(signal) {
+	async defaultProfileCached(signal, workspaceId) {
+		const scope = this.resolveScope(workspaceId);
+		if (!scope.ok) return scope;
+		return this.defaultProfileCachedAt(scope.value, signal);
+	}
+	async defaultProfileCachedAt(scope, signal) {
+		const cached$1 = this.#defaultCache.get(scope.key);
 		const now = Date.now();
-		if (this.#defaultCache !== void 0 && now - this.#defaultCache.at <= LIST_CACHE_TTL_MS) return this.#defaultCache.value;
-		if (this.#defaultInflight !== void 0) return this.#defaultInflight;
-		const inflight = this.defaultProfile(signal).then((result) => {
-			this.#defaultInflight = void 0;
-			if (result.ok) this.#defaultCache = {
+		if (cached$1 !== void 0 && now - cached$1.at <= LIST_CACHE_TTL_MS) return cached$1.value;
+		const existing = this.#defaultInflight.get(scope.key);
+		if (existing !== void 0) return existing;
+		const epoch = this.#fastCacheEpoch;
+		const inflight = this.defaultProfileAt(scope, signal).then((result) => {
+			if (this.#defaultInflight.get(scope.key) === inflight) this.#defaultInflight.delete(scope.key);
+			if (epoch === this.#fastCacheEpoch && result.ok) this.#defaultCache.set(scope.key, {
 				at: Date.now(),
 				value: result
-			};
+			});
 			return result;
 		}, (error$2) => {
-			this.#defaultInflight = void 0;
+			if (this.#defaultInflight.get(scope.key) === inflight) this.#defaultInflight.delete(scope.key);
 			throw error$2;
 		});
-		this.#defaultInflight = inflight;
+		this.#defaultInflight.set(scope.key, inflight);
 		return inflight;
 	}
 	/**
-	* Fast snapshot (TASK-043): sanitized CLI profile list with a 60s TTL
-	* in-memory cache — NO direct read of the imo credential store (that file
-	* holds `access_token`, so it must never enter this process's memory).
-	* A CLI failure serves the last good sanitized list (stale=true) instead
-	* of an empty result, so the UI never renders a misleading "None".
+	* Fast snapshot from the SANITIZED CLI cache only: no direct credential-store
+	* read. Each workspace has an independent list/default cache namespace.
 	*/
-	async listProfilesCached(signal) {
+	async listProfilesCached(signal, workspaceId) {
+		const scope = this.resolveScope(workspaceId);
+		if (!scope.ok) return scope;
+		return this.listProfilesCachedAt(scope.value, signal);
+	}
+	async listProfilesCachedAt(scope, signal) {
+		const cached$1 = this.#listCache.get(scope.key);
 		const now = Date.now();
-		if (this.#listCache !== void 0 && now - this.#listCache.at <= LIST_CACHE_TTL_MS) return this.#listCache.value;
-		if (this.#listInflight !== void 0) return this.#listInflight;
-		const inflight = this.listProfiles(signal).then((result) => {
-			this.#listInflight = void 0;
-			if (result.ok) this.#listCache = {
+		if (cached$1 !== void 0 && now - cached$1.at <= LIST_CACHE_TTL_MS) return cached$1.value;
+		const existing = this.#listInflight.get(scope.key);
+		if (existing !== void 0) return existing;
+		const epoch = this.#fastCacheEpoch;
+		const inflight = this.listProfilesAt(scope, signal).then((result) => {
+			if (this.#listInflight.get(scope.key) === inflight) this.#listInflight.delete(scope.key);
+			if (epoch === this.#fastCacheEpoch && result.ok) this.#listCache.set(scope.key, {
 				at: Date.now(),
 				value: result
-			};
+			});
 			return result;
 		}, (error$2) => {
-			this.#listInflight = void 0;
+			if (this.#listInflight.get(scope.key) === inflight) this.#listInflight.delete(scope.key);
 			throw error$2;
 		});
-		this.#listInflight = inflight;
+		this.#listInflight.set(scope.key, inflight);
 		return inflight;
 	}
-	/**
-	* Millisecond profile snapshot from the SANITIZED CLI cache only
-	* (TASK-043): never reads the credential store. First call triggers the
-	* CLI prep run; subsequent calls within the 60s TTL are cache hits. A CLI
-	* failure with no warm cache is an honest error (UI shows a skeleton +
-	* short retry, never a fake empty list).
-	*/
-	async profilesFast(signal) {
-		const cached$1 = await this.listProfilesCached(signal);
+	async profilesFast(signal, workspaceId) {
+		const scope = this.resolveScope(workspaceId);
+		if (!scope.ok) return scope;
+		const cached$1 = await this.listProfilesCachedAt(scope.value, signal);
 		if (!cached$1.ok) return cached$1;
-		const def = await this.defaultProfileCached(signal);
+		const def = await this.defaultProfileCachedAt(scope.value, signal);
 		const profiles = cached$1.value.profiles.map((profile) => {
 			const isDefault = def.ok ? def.value.profileName === profile.profileName : profile.isDefault === true;
 			return isDefault === (profile.isDefault === true) ? profile : {
@@ -28179,7 +29405,9 @@ var ImoAuthService = class extends Service {
 			}
 		};
 	}
-	async validate(profile, signal) {
+	async validate(profile, signal, workspaceId) {
+		const scope = this.resolveScope(workspaceId);
+		if (!scope.ok) return scope;
 		const args = [
 			"auth",
 			"profile",
@@ -28191,7 +29419,8 @@ var ImoAuthService = class extends Service {
 			command: this.config.command,
 			args,
 			timeoutMs: this.config.timeoutMs,
-			signal
+			signal,
+			cwd: scope.value.cwd
 		});
 		if (!run.ok) {
 			const error$2 = authRunError(run.error, this.config.command, "profile validate", true);
@@ -28237,9 +29466,11 @@ var ImoAuthService = class extends Service {
 	}
 	async prepare(request = {}, signal) {
 		if (this.#disposed) return authLifecycleError(AUTH_SERVICE_DISPOSED_CODE, this.config.command);
+		const scope = this.resolveScope(request.workspaceId);
+		if (!scope.ok) return scope;
 		const profile = request.profile ?? null;
 		const env = request.env ?? null;
-		const key = authCacheKey(profile, env);
+		const key = authCacheKey(profile, env, scope.value.key);
 		const cached$1 = this.#cache.get(key);
 		if (cached$1 !== void 0) return {
 			ok: true,
@@ -28262,7 +29493,7 @@ var ImoAuthService = class extends Service {
 			invalidated: false,
 			promise: Promise.resolve(authLifecycleError(AUTH_PREPARE_INVALIDATED_CODE, this.config.command))
 		};
-		const raw = this.executePrepare(profile, env, signal);
+		const raw = this.executePrepare(profile, env, scope.value, signal);
 		pending.promise = raw.then((result$1) => this.finalizePrepare(key, pending, result$1)).finally(() => {
 			if (this.#inflight.get(key) === pending) this.#inflight.delete(key);
 			this.#pendingMeta.delete(key);
@@ -28300,10 +29531,11 @@ var ImoAuthService = class extends Service {
 			if (pending !== void 0) pending.invalidated = true;
 		}
 		for (const key of keys) this.#generations.set(key, (this.#generations.get(key) ?? 0) + 1);
-		this.#listCache = void 0;
-		this.#listInflight = void 0;
-		this.#defaultCache = void 0;
-		this.#defaultInflight = void 0;
+		this.#fastCacheEpoch += 1;
+		this.#listCache.clear();
+		this.#defaultCache.clear();
+		this.#listInflight.clear();
+		this.#defaultInflight.clear();
 		this.ctx.emit(AUTH_CACHE_INVALIDATED_EVENT, {
 			...request.profile === void 0 ? {} : { profile: request.profile },
 			...request.env === void 0 ? {} : { env: request.env },
@@ -28318,28 +29550,129 @@ var ImoAuthService = class extends Service {
 	cacheStatus() {
 		return { size: this.#cache.size };
 	}
-	clearCache() {
-		this.#disposed = true;
-		this.#epoch += 1;
-		for (const entry of this.#cache.values()) entry.cell.revoked = true;
-		for (const pending of this.#inflight.values()) pending.invalidated = true;
-		this.#cache.clear();
-		this.#inflight.clear();
-		this.#pendingMeta.clear();
-		this.#generations.clear();
+	resolveScope(workspaceId) {
+		if (this.#disposed) return {
+			ok: false,
+			error: {
+				code: AUTH_SERVICE_DISPOSED_CODE,
+				message: `IMO auth scope failed: ${AUTH_SERVICE_DISPOSED_CODE}`,
+				command: this.config.command
+			}
+		};
+		if (workspaceId !== void 0 && workspaceId !== null) {
+			const resolved$1 = resolveWorkspace(this.ctx, workspaceId);
+			if (!resolved$1.ok) return {
+				ok: false,
+				error: {
+					code: resolved$1.code,
+					message: `IMO auth workspace failed: ${resolved$1.code}`,
+					command: this.config.command
+				}
+			};
+			return {
+				ok: true,
+				value: {
+					workspaceId: resolved$1.workspaceId,
+					cwd: resolved$1.cwd,
+					key: workspaceScopeKey(resolved$1.workspaceId, resolved$1.cwd)
+				}
+			};
+		}
+		let cwd;
+		try {
+			cwd = this.ensureGlobalCwd();
+			if (!this.isPrivateGlobalCwd(cwd)) throw new Error("global auth cwd is not private");
+		} catch {
+			return {
+				ok: false,
+				error: {
+					code: "workspace-unavailable",
+					message: "IMO auth global workspace is unavailable",
+					command: this.config.command
+				}
+			};
+		}
+		return {
+			ok: true,
+			value: {
+				cwd,
+				key: JSON.stringify(["global", cwd])
+			}
+		};
 	}
-	finalizePrepare(key, pending, result) {
-		if (this.#disposed || pending.epoch !== this.#epoch) return authLifecycleError(AUTH_SERVICE_DISPOSED_CODE, this.config.command);
-		if (pending.invalidated || (this.#generations.get(key) ?? 0) !== pending.generation) return authLifecycleError(AUTH_PREPARE_INVALIDATED_CODE, this.config.command);
-		if (result.ok) this.replaceCache(key, result.value);
-		return result;
+	ensureGlobalCwd() {
+		if (this.#globalCwd === void 0) this.#globalCwd = mkdtempSync(join(tmpdir(), "icomposer-auth-global-"));
+		return this.#globalCwd;
 	}
-	replaceCache(key, entry) {
-		const previous = this.#cache.get(key);
-		if (previous !== void 0) previous.cell.revoked = true;
-		this.#cache.set(key, entry);
+	isPrivateGlobalCwd(cwd) {
+		const stat$1 = lstatSync(cwd);
+		if (!stat$1.isDirectory()) return false;
+		const entries = readdirSync(cwd, { withFileTypes: true });
+		return entries.every((entry) => entry.name !== ".insuremo");
 	}
-	async executePrepare(profile, env, signal) {
+	async listProfilesAt(scope, signal) {
+		const args = [
+			"auth",
+			"profile",
+			"list",
+			"--format",
+			"json"
+		];
+		const run = await runCapture(this.ctx.subprocess, {
+			command: this.config.command,
+			args,
+			timeoutMs: this.config.timeoutMs,
+			signal,
+			cwd: scope.cwd
+		});
+		if (!run.ok) return {
+			ok: false,
+			error: authRunError(run.error, this.config.command, "profile list")
+		};
+		let parsed;
+		try {
+			parsed = JSON.parse(run.value.stdout.text);
+		} catch {
+			return authParseError(this.config.command, "profile list", run.value.stdoutDigest, run.value.stderrDigest);
+		}
+		if (!Array.isArray(parsed)) return authParseError(this.config.command, "profile list", run.value.stdoutDigest, run.value.stderrDigest);
+		const profiles = sanitizeProfiles(parsed);
+		return {
+			ok: true,
+			value: {
+				profiles,
+				stdoutDigest: run.value.stdoutDigest
+			}
+		};
+	}
+	async defaultProfileAt(scope, signal) {
+		const args = [
+			"auth",
+			"default-profile",
+			"get"
+		];
+		const run = await runCapture(this.ctx.subprocess, {
+			command: this.config.command,
+			args,
+			timeoutMs: this.config.timeoutMs,
+			signal,
+			cwd: scope.cwd
+		});
+		if (!run.ok) return {
+			ok: false,
+			error: authRunError(run.error, this.config.command, "default profile")
+		};
+		const profileName = parseDefaultProfile(run.value.stdout.text);
+		if (profileName === void 0) return authParseError(this.config.command, "default profile", run.value.stdoutDigest, run.value.stderrDigest);
+		return {
+			ok: true,
+			value: {
+				profileName,
+				stdoutDigest: run.value.stdoutDigest
+			}
+		};
+	}
+	async executePrepare(profile, env, scope, signal) {
 		const args = [
 			"auth",
 			"prepare",
@@ -28351,7 +29684,8 @@ var ImoAuthService = class extends Service {
 			command: this.config.command,
 			args,
 			timeoutMs: this.config.timeoutMs,
-			signal
+			signal,
+			cwd: scope.cwd
 		});
 		if (!run.ok) return {
 			ok: false,
@@ -28375,7 +29709,7 @@ var ImoAuthService = class extends Service {
 		const gateway = rawString(parsed, "gateway");
 		const tenantDomain = rawString(parsed, "tenant_domain");
 		const source = rawString(parsed, "source");
-		const scope = rawString(parsed, "scope");
+		const scopeName = rawString(parsed, "scope");
 		const userSourceId = rawString(parsed, "user_source_id");
 		const secret = Object.freeze({
 			accessToken,
@@ -28388,7 +29722,7 @@ var ImoAuthService = class extends Service {
 			...gateway === void 0 ? {} : { gateway },
 			...tenantDomain === void 0 ? {} : { tenantDomain },
 			...source === void 0 ? {} : { source },
-			...scope === void 0 ? {} : { scope },
+			...scopeName === void 0 ? {} : { scope: scopeName },
 			...userSourceId === void 0 ? {} : { userSourceId }
 		});
 		const view = Object.freeze({
@@ -28401,13 +29735,13 @@ var ImoAuthService = class extends Service {
 			gateway: safeEndpoint(gateway) ?? null,
 			tenantDomain: safeTenantDomain(tenantDomain) ?? null,
 			source: source ?? null,
-			scope: scope ?? null,
+			scope: scopeName ?? null,
 			userSourceId: userSourceId ?? null
 		});
 		return {
 			ok: true,
 			value: {
-				key: authCacheKey(profile, env),
+				key: authCacheKey(profile, env, scope.key),
 				profile,
 				env,
 				secret,
@@ -28417,7 +29751,64 @@ var ImoAuthService = class extends Service {
 			}
 		};
 	}
+	clearCache() {
+		this.#disposed = true;
+		this.#epoch += 1;
+		for (const entry of this.#cache.values()) entry.cell.revoked = true;
+		for (const pending of this.#inflight.values()) pending.invalidated = true;
+		this.#cache.clear();
+		this.#inflight.clear();
+		this.#pendingMeta.clear();
+		this.#generations.clear();
+		this.#fastCacheEpoch += 1;
+		this.#listCache.clear();
+		this.#listInflight.clear();
+		this.#defaultCache.clear();
+		this.#defaultInflight.clear();
+		const owned = this.#globalCwd;
+		this.#globalCwd = void 0;
+		return owned === void 0 ? Promise.resolve() : removeOwnedEmptyDirectory(owned);
+	}
+	finalizePrepare(key, pending, result) {
+		if (this.#disposed || pending.epoch !== this.#epoch) return authLifecycleError(AUTH_SERVICE_DISPOSED_CODE, this.config.command);
+		if (pending.invalidated || (this.#generations.get(key) ?? 0) !== pending.generation) return authLifecycleError(AUTH_PREPARE_INVALIDATED_CODE, this.config.command);
+		if (result.ok) this.replaceCache(key, result.value);
+		return result;
+	}
+	replaceCache(key, entry) {
+		const previous = this.#cache.get(key);
+		if (previous !== void 0) previous.cell.revoked = true;
+		this.#cache.set(key, entry);
+	}
 };
+function compareProfilePriority(left, right) {
+	const leftRank = profileScopeRank(left);
+	const rightRank = profileScopeRank(right);
+	if (leftRank !== rightRank) return leftRank - rightRank;
+	return leftRank === 2 ? 0 : left.profileName.localeCompare(right.profileName);
+}
+function profileScopeRank(profile) {
+	return profile.scope === "workspace" ? 0 : profile.scope === "global" ? 1 : 2;
+}
+/** Keep the CLI's project-over-global identity rule even for old CLI output. */
+function sanitizeProfiles(rows) {
+	const byName = /* @__PURE__ */ new Map();
+	for (const row of rows) {
+		const profile = profileView(row);
+		if (profile === null) continue;
+		const previous = byName.get(profile.profileName);
+		if (previous === void 0 || profileScopeRank(profile) < profileScopeRank(previous)) byName.set(profile.profileName, profile);
+	}
+	return [...byName.values()].sort(compareProfilePriority);
+}
+async function removeOwnedEmptyDirectory(cwd) {
+	try {
+		const stat$1 = await lstat(cwd);
+		if (!stat$1.isDirectory()) return;
+		if ((await readdir(cwd)).length !== 0) return;
+		await rmdir(cwd);
+	} catch {}
+}
 
 //#endregion
 //#region ../insuremo-service/src/auth/environment.ts
@@ -29240,7 +30631,7 @@ async function snapshotInventory(skills, signal) {
 		const allowedRoot = await resolveAllowedSkillRoot(root);
 		for (const item of validation.value.items) {
 			if (signal?.aborted) return failure$2("cancelled", "skill inventory operation was cancelled");
-			if (!item.valid || !names.includes(item.name)) continue;
+			if (!item.valid && !isFormatDiagnostic(item.diagnostic?.code) || !names.includes(item.name)) continue;
 			const manifest = await resolveSkillPath(join(item.path, "SKILL.md"), root, allowedRoot);
 			if (manifest.canonical === void 0) continue;
 			try {
@@ -29277,6 +30668,9 @@ function diffInventory(before, after) {
 		removed: [...removed].sort((left, right) => left.localeCompare(right)),
 		updated: [...updated].sort((left, right) => left.localeCompare(right))
 	};
+}
+function isFormatDiagnostic(code) {
+	return code !== void 0 && (code.startsWith("frontmatter-") || code === "skill-file-too-large");
 }
 function allowedRootOf(skills) {
 	const value = skills.skillsAllowedRoot;
@@ -29462,6 +30856,18 @@ const SKILLS_TOOL_COMMAND = "npx";
 const SKILLS_TOOL_PACKAGE = "@insuremo/skills-tool";
 const SKILLS_TOOL_REGISTRY = IMO_REGISTRY;
 const MAX_PREVIEW_NAMES = 100;
+/** Read-only discovery argv for the trusted source; `-l` never mutates a store. */
+function skillCatalogArgs() {
+	return [
+		"-y",
+		`--registry=${SKILLS_TOOL_REGISTRY}`,
+		SKILLS_TOOL_PACKAGE,
+		"add",
+		SKILLS_TOOL_SOURCE,
+		"-l",
+		"--skip-update-check"
+	];
+}
 const ANSI_ESCAPE = /\u001B(?:\][^\u0007]*(?:\u0007|\u001B\\)|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 const BOX_DECORATION = /[┌┐└┘─━│┃┏┓┗┛╭╮╰╯═║╔╗╚╝╴╵╶╷]/gu;
 async function previewSkillAction(ctx, skills, activation, action, config$1, signal) {
@@ -29500,6 +30906,25 @@ async function previewSkillAction(ctx, skills, activation, action, config$1, sig
 				}
 			});
 			return runFailure(run, command === SKILLS_TOOL_COMMAND);
+		}
+		const catalogInstall = action.kind === SKILL_INSTALL_KIND && action.source.type === "alias" && action.source.value === SKILLS_TOOL_SOURCE;
+		if (catalogInstall) {
+			if (run.value.stdout.truncated) return failure$1("catalog-unavailable", "the trusted Skills catalog could not be verified");
+			const parsed = parseSkillCatalogOutput(run.value.stdout.text);
+			if (!parsed.ok) return failure$1("catalog-unavailable", "the trusted Skills catalog could not be verified");
+			const candidateNames$1 = parsed.value.skills.map((entry) => entry.name);
+			if (action.skills.some((name$8) => !candidateNames$1.includes(name$8))) return failure$1("catalog-selection-invalid", "the selected Skill is not in the current trusted catalog");
+			return {
+				ok: true,
+				value: {
+					kind: action.kind,
+					scope: action.scope,
+					before: before.value,
+					activation: activationSnapshot,
+					candidateNames: candidateNames$1,
+					stdoutDigest: run.value.stdoutDigest
+				}
+			};
 		}
 		const candidateNames = parsePreviewNames(run.value.stdout.text);
 		return {
@@ -29549,7 +30974,8 @@ async function previewSkillAction(ctx, skills, activation, action, config$1, sig
 	};
 }
 function actionCommand(action, defaultCommand) {
-	return action.kind === SKILL_UPDATE_KIND || action.kind === SKILL_INSTALL_KIND && action.source.type === "scenario" ? SKILLS_TOOL_COMMAND : defaultCommand;
+	const catalogInstall = action.kind === SKILL_INSTALL_KIND && action.source.type === "alias" && action.source.value === SKILLS_TOOL_SOURCE;
+	return action.kind === SKILL_UPDATE_KIND || action.kind === SKILL_INSTALL_KIND && (action.source.type === "scenario" || catalogInstall) ? SKILLS_TOOL_COMMAND : defaultCommand;
 }
 function executionArgs(action) {
 	if (action.kind === SKILL_INSTALL_KIND) return installArgs(action, false);
@@ -29574,17 +31000,16 @@ function executionArgs(action) {
 }
 function installArgs(action, preview) {
 	const source = action.source;
-	if (source.type === "scenario") return [
+	if (source.type === "scenario" || source.type === "alias" && source.value === SKILLS_TOOL_SOURCE) return [
 		"-y",
 		`--registry=${SKILLS_TOOL_REGISTRY}`,
 		SKILLS_TOOL_PACKAGE,
 		"add",
-		"insuremo-skills",
+		SKILLS_TOOL_SOURCE,
 		"-g",
 		"-a",
 		action.agent,
-		"-s",
-		source.value,
+		...source.type === "scenario" ? ["-s", source.value] : action.skills.flatMap((skill) => ["-s", skill]),
 		...preview ? ["-l"] : ["-y"],
 		"--skip-update-check"
 	];
@@ -29906,6 +31331,7 @@ const EMPTY_DIFF = Object.freeze({
 	removed: [],
 	updated: []
 });
+const MAX_CATALOG_CACHE_KEYS = 4;
 let skillActionsStateSlot;
 function skillActionsStateFor(_receiver) {
 	if (skillActionsStateSlot === void 0) throw new Error("skill actions state uninitialized");
@@ -29924,6 +31350,8 @@ var ImoSkillActionsService = class extends Service {
 	#activation;
 	#controller;
 	#operationLog;
+	#catalogCache = /* @__PURE__ */ new Map();
+	#catalogInFlight = /* @__PURE__ */ new Map();
 	constructor(ctx, config$1 = {}) {
 		super(ctx, "imoSkillActions");
 		const resolved$1 = resolveConfig(config$1);
@@ -29944,34 +31372,211 @@ var ImoSkillActionsService = class extends Service {
 		this.#operationLog = ctx.get("operationLog");
 		this.request = this.request.bind(this);
 		this.execute = this.execute.bind(this);
+		this.getCatalog = this.getCatalog.bind(this);
+		this.refreshCatalog = this.refreshCatalog.bind(this);
+		this.installCatalogSkill = this.installCatalogSkill.bind(this);
+		this.runDirect = this.runDirect.bind(this);
 		this.status = this.status.bind(this);
-		ctx.set("imoSkillActions", Object.freeze({
+		const catalogFace = Object.create(null);
+		Object.defineProperties(catalogFace, {
+			getCatalog: {
+				value: (signal) => this.getCatalog(signal),
+				enumerable: false
+			},
+			refreshCatalog: {
+				value: (signal, force) => this.refreshCatalog(signal, force),
+				enumerable: false
+			},
+			installCatalogSkill: {
+				value: (name$8, signal) => this.installCatalogSkill(name$8, signal),
+				enumerable: false
+			}
+		});
+		Object.freeze(catalogFace);
+		const face = Object.assign(Object.create(catalogFace), {
 			request: (input, signal) => this.request(input, signal),
 			execute: (operationId$1, signal) => this.execute(operationId$1, signal),
 			runDirect: (input, signal) => this.runDirect(input, signal),
 			status: () => this.status()
-		}));
+		});
+		ctx.set("imoSkillActions", Object.freeze(face));
 		this.ctx.effect(() => () => {
 			skillActionsStateFor(this).disposed = true;
 			skillActionsStateFor(this).pending.clear();
 			skillActionsStateFor(this).journal.clear();
 			skillActionsStateFor(this).running = null;
+			this.#catalogCache.clear();
+			for (const flight of this.#catalogInFlight.values()) flight.controller.abort();
+			this.#catalogInFlight.clear();
 		}, "imoSkillActions.state");
+	}
+	/**
+	* Cache-only catalog read. This is intentionally separate from refresh so a
+	* browser GET cannot make npx download/execute a package or contact a
+	* registry implicitly.
+	*/
+	async getCatalog(signal) {
+		if (signal?.aborted) return resultFailure("cancelled", "Skills catalog read was cancelled");
+		if (skillActionsStateFor(this).disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
+		const cached$1 = this.#catalogCache.get(this.catalogCacheKey());
+		if (cached$1 !== void 0 && cached$1.expiresAtMs > Date.now()) return {
+			ok: true,
+			value: cached$1.snapshot
+		};
+		return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable; refresh it explicitly");
+	}
+	/** Explicit, bounded/coalesced source discovery used by the UI refresh action. */
+	async refreshCatalog(signal, force = true) {
+		if (skillActionsStateFor(this).running !== null) return resultFailure("busy", "another skill action is already running");
+		return this.loadCatalog(signal, force);
+	}
+	/**
+	* Single-skill install face. The exact name must be present in a fresh
+	* server-side catalog before any install preview or mutation is spawned.
+	*/
+	async installCatalogSkill(name$8, signal) {
+		if (signal?.aborted) return executionFailure("cancelled", "skill install was cancelled");
+		if (!isSkillName(name$8)) return executionFailure("invalid-skill-name", "skill name is invalid");
+		return this.runDirect({
+			kind: SKILL_INSTALL_KIND,
+			source: {
+				type: "alias",
+				value: SKILLS_TOOL_SOURCE
+			},
+			agent: "universal",
+			skills: [name$8]
+		}, signal);
+	}
+	async loadCatalog(signal, force) {
+		if (signal?.aborted) return resultFailure("cancelled", "Skills catalog read was cancelled");
+		if (skillActionsStateFor(this).disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
+		const key = this.catalogCacheKey();
+		const cached$1 = this.#catalogCache.get(key);
+		if (!force && cached$1 !== void 0 && cached$1.expiresAtMs > Date.now()) return {
+			ok: true,
+			value: cached$1.snapshot
+		};
+		let flight = this.#catalogInFlight.get(key);
+		if (flight === void 0) {
+			const controller = new AbortController();
+			const promise = this.fetchCatalog(controller.signal, key).catch(() => resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable"));
+			flight = {
+				key,
+				controller,
+				promise,
+				waiters: 0
+			};
+			this.#catalogInFlight.set(key, flight);
+			promise.finally(() => {
+				if (this.#catalogInFlight.get(key) === flight) this.#catalogInFlight.delete(key);
+			}).catch(() => void 0);
+		}
+		return this.awaitCatalogFlight(flight, signal);
+	}
+	async awaitCatalogFlight(flight, signal) {
+		flight.waiters += 1;
+		try {
+			if (signal === void 0) return await flight.promise;
+			if (signal.aborted) return resultFailure("cancelled", "Skills catalog read was cancelled");
+			return await new Promise((resolve$1) => {
+				let settled = false;
+				const finish = (value) => {
+					if (settled) return;
+					settled = true;
+					signal.removeEventListener("abort", onAbort);
+					resolve$1(value);
+				};
+				const onAbort = () => finish(resultFailure("cancelled", "Skills catalog read was cancelled"));
+				signal.addEventListener("abort", onAbort, { once: true });
+				flight.promise.then(finish, () => finish(resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable")));
+			});
+		} finally {
+			flight.waiters -= 1;
+			if (flight.waiters === 0 && this.#catalogInFlight.get(flight.key) === flight) flight.controller.abort();
+		}
+	}
+	catalogCacheKey() {
+		return process.env.HOME ?? process.env.USERPROFILE ?? "<default-home>";
+	}
+	async fetchCatalog(signal, cacheKey) {
+		const run = await runCaptureDetailed(this.ctx.subprocess, {
+			command: SKILLS_TOOL_COMMAND,
+			args: skillCatalogArgs(),
+			timeoutMs: Math.min(this.#config.timeoutMs, SKILL_CATALOG_TIMEOUT_MS),
+			signal,
+			env: {
+				CI: "true",
+				FORCE_COLOR: "0",
+				TERM: "dumb"
+			}
+		});
+		if (!run.ok) {
+			const emptyOutput = run.error.code === "non-zero-exit" && isEmptySkillCatalogOutput(run.detail?.stdout ?? "");
+			if (!emptyOutput) return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable");
+			const snapshot$1 = buildSkillCatalog({
+				skills: [],
+				foundCount: 0
+			});
+			this.cacheCatalog(cacheKey, snapshot$1);
+			return {
+				ok: true,
+				value: snapshot$1
+			};
+		}
+		if (run.value.stdout.truncated) return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable");
+		const parsed = parseSkillCatalogOutput(run.value.stdout.text);
+		if (!parsed.ok) return resultFailure("catalog-unavailable", "the trusted Skills catalog could not be verified");
+		const snapshot = buildSkillCatalog(parsed.value);
+		this.cacheCatalog(cacheKey, snapshot);
+		return {
+			ok: true,
+			value: snapshot
+		};
+	}
+	cacheCatalog(cacheKey, snapshot) {
+		this.#catalogCache.delete(cacheKey);
+		this.#catalogCache.set(cacheKey, {
+			snapshot,
+			expiresAtMs: Date.parse(snapshot.expiresAt)
+		});
+		while (this.#catalogCache.size > MAX_CATALOG_CACHE_KEYS) {
+			const oldest = this.#catalogCache.keys().next().value;
+			if (oldest === void 0) break;
+			this.#catalogCache.delete(oldest);
+		}
+	}
+	async validateCatalogInstall(action, signal) {
+		if (action.kind !== SKILL_INSTALL_KIND || action.source.type !== "alias" || action.source.value !== SKILLS_TOOL_SOURCE) return {
+			ok: true,
+			value: action
+		};
+		if (action.skills.length !== 1) return resultFailure("catalog-selection-invalid", "exactly one catalog Skill must be selected");
+		const catalog = await this.loadCatalog(signal, false);
+		if (!catalog.ok) return catalog;
+		const known = new Set(catalogSkillNames(catalog.value));
+		if (action.skills.some((name$8) => !known.has(name$8))) return resultFailure("catalog-selection-invalid", "the selected Skill is not in the current trusted catalog");
+		return {
+			ok: true,
+			value: action
+		};
 	}
 	async request(input, signal) {
 		if (signal?.aborted) return resultFailure("cancelled", "skill action request was cancelled");
 		if (skillActionsStateFor(this).disposed) return resultFailure("service-disposed", "IMO skill action service is disposed");
 		const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
 		if (!normalized.ok) return normalized;
-		const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
+		const catalogValidated = await this.validateCatalogInstall(normalized.value, signal);
+		if (!catalogValidated.ok) return catalogValidated;
+		const action = catalogValidated.value;
+		const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, action, this.#config, signal);
 		if (!preview.ok) return preview;
 		if (signal?.aborted) return resultFailure("cancelled", "skill action request was cancelled");
-		const paramsDigest = skillActionParamsDigest(normalized.value);
+		const paramsDigest = skillActionParamsDigest(action);
 		let record;
 		try {
 			record = await this.#operationLog.append({
-				requestId: `skills:${normalized.value.kind}:${Date.now()}`,
-				kind: normalized.value.kind,
+				requestId: `skills:${action.kind}:${Date.now()}`,
+				kind: action.kind,
 				paramsDigest,
 				artifactRefs: []
 			});
@@ -29979,8 +31584,8 @@ var ImoSkillActionsService = class extends Service {
 			return resultFailure("record-failed", "could not record skill action request");
 		}
 		skillActionsStateFor(this).pending.set(record.id, {
-			kind: normalized.value.kind,
-			input: normalized.value,
+			kind: action.kind,
+			input: action,
 			preview: preview.value,
 			paramsDigest
 		});
@@ -29988,7 +31593,7 @@ var ImoSkillActionsService = class extends Service {
 			ok: true,
 			value: {
 				operationId: record.id,
-				kind: normalized.value.kind,
+				kind: action.kind,
 				paramsDigest,
 				preview: preview.value
 			}
@@ -30000,20 +31605,23 @@ var ImoSkillActionsService = class extends Service {
 		if (signal?.aborted) return executionFailure("cancelled", "skill action was cancelled", "");
 		const normalized = normalizeSkillAction(input, this.#config.allowedGitHosts);
 		if (!normalized.ok) return normalized;
-		if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", "");
+		if (skillActionsStateFor(this).running !== null || this.#catalogInFlight.size > 0) return executionFailure("busy", "another skill action is already running", "");
 		const operationId$1 = `direct:${normalized.value.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 		skillActionsStateFor(this).running = {
 			operationId: operationId$1,
 			kind: normalized.value.kind
 		};
 		try {
-			const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, normalized.value, this.#config, signal);
+			const catalogValidated = await this.validateCatalogInstall(normalized.value, signal);
+			if (!catalogValidated.ok) return executionFailure(catalogValidated.error.code, catalogValidated.error.message);
+			const action = catalogValidated.value;
+			const preview = await previewSkillAction(this.ctx, this.#skills, this.#activation, action, this.#config, signal);
 			if (!preview.ok) return preview;
 			const pending = {
-				kind: normalized.value.kind,
-				input: normalized.value,
+				kind: action.kind,
+				input: action,
 				preview: preview.value,
-				paramsDigest: skillActionParamsDigest(normalized.value)
+				paramsDigest: skillActionParamsDigest(action)
 			};
 			return await this.executeDirectKernel(operationId$1, pending, signal);
 		} finally {
@@ -30193,6 +31801,7 @@ var ImoSkillActionsService = class extends Service {
 		const diff = after === void 0 ? EMPTY_DIFF : diffInventory(before, after);
 		const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
 		const status = run.ok ? "completed" : changed ? "partial-failure" : "failed";
+		this.#catalogCache.clear();
 		if (status === "completed") failureDiagnosis.clear("skill");
 		const stdoutDigest = run.ok ? run.value.stdoutDigest : run.error.stdoutDigest ?? EMPTY_DIGEST;
 		const stderrDigest = run.ok ? run.value.stderrDigest : run.error.stderrDigest ?? EMPTY_DIGEST;
@@ -30278,6 +31887,8 @@ var ImoSkillActionsService = class extends Service {
 		const pending = skillActionsStateFor(this).pending.get(operationId$1);
 		if (pending === void 0) return executionFailure("missing-pending-input", "skill action parameters are unavailable; re-request the action", operationId$1);
 		if (record.kind !== pending.kind || record.paramsDigest !== pending.paramsDigest || record.paramsDigest !== skillActionParamsDigest(pending.input)) return executionFailure("operation-params-mismatch", "skill action operation parameters do not match", operationId$1);
+		const catalogValidated = await this.validateCatalogInstall(pending.input, signal);
+		if (!catalogValidated.ok) return executionFailure(catalogValidated.error.code, catalogValidated.error.message, operationId$1);
 		if (skillActionsStateFor(this).running !== null) return executionFailure("busy", "another skill action is already running", operationId$1);
 		skillActionsStateFor(this).running = {
 			operationId: operationId$1,
@@ -30465,6 +32076,7 @@ var ImoSkillActionsService = class extends Service {
 		const diff = after === void 0 ? EMPTY_DIFF : diffInventory(before, after);
 		const changed = diff.added.length + diff.removed.length + diff.updated.length > 0;
 		const status = run.ok ? "completed" : changed ? "partial-failure" : "failed";
+		this.#catalogCache.clear();
 		if (status === "completed") failureDiagnosis.clear("skill");
 		const stdoutDigest = run.ok ? run.value.stdoutDigest : run.error.stdoutDigest ?? EMPTY_DIGEST;
 		const stderrDigest = run.ok ? run.value.stderrDigest : run.error.stderrDigest ?? EMPTY_DIGEST;
@@ -30657,21 +32269,39 @@ __export(src_exports$6, {
 	SKILLS_TOOL_COMMAND: () => SKILLS_TOOL_COMMAND,
 	SKILLS_TOOL_PACKAGE: () => SKILLS_TOOL_PACKAGE,
 	SKILLS_TOOL_REGISTRY: () => SKILLS_TOOL_REGISTRY,
+	SKILLS_TOOL_SOURCE: () => SKILLS_TOOL_SOURCE,
 	SKILL_ACTION_COMPLETED_EVENT: () => SKILL_ACTION_COMPLETED_EVENT,
 	SKILL_ACTION_FAILED_EVENT: () => SKILL_ACTION_FAILED_EVENT,
 	SKILL_ACTIVATION_CHANGED_EVENT: () => SKILL_ACTIVATION_CHANGED_EVENT,
 	SKILL_ACTIVATION_DOMAIN_NAME: () => SKILL_ACTIVATION_DOMAIN_NAME,
 	SKILL_ACTIVATION_KIND: () => SKILL_ACTIVATION_KIND,
+	SKILL_CATALOG_DESCRIPTION_MAX: () => SKILL_CATALOG_DESCRIPTION_MAX,
+	SKILL_CATALOG_MAX_ENTRIES: () => SKILL_CATALOG_MAX_ENTRIES,
+	SKILL_CATALOG_OUTPUT_LIMIT_BYTES: () => SKILL_CATALOG_OUTPUT_LIMIT_BYTES,
+	SKILL_CATALOG_PATH: () => SKILL_CATALOG_PATH,
+	SKILL_CATALOG_SCHEMA_VERSION: () => SKILL_CATALOG_SCHEMA_VERSION,
+	SKILL_CATALOG_TIMEOUT_MS: () => SKILL_CATALOG_TIMEOUT_MS,
+	SKILL_CATALOG_TTL_MS: () => SKILL_CATALOG_TTL_MS,
 	SKILL_INSTALL_KIND: () => SKILL_INSTALL_KIND,
 	SKILL_REMOVE_KIND: () => SKILL_REMOVE_KIND,
 	SKILL_UPDATE_KIND: () => SKILL_UPDATE_KIND,
+	WORKSPACE_ID_PATTERN: () => WORKSPACE_ID_PATTERN,
 	activeProfileDomain: () => activeProfileDomain,
 	apply: () => apply,
+	buildSkillCatalog: () => buildSkillCatalog,
+	catalogSkillNames: () => catalogSkillNames,
 	default: () => src_default$1,
 	inject: () => inject$1,
 	invalidateInsuremoSkillCatalog: () => invalidateInsuremoSkillCatalog,
+	isEmptySkillCatalogOutput: () => isEmptySkillCatalogOutput,
 	name: () => name$1,
-	resolveConfig: () => resolveConfig
+	parseCatalogOutput: () => parseCatalogOutput,
+	parseSkillCatalogOutput: () => parseSkillCatalogOutput,
+	parseWorkspaceId: () => parseWorkspaceId,
+	resolveConfig: () => resolveConfig,
+	resolveWorkspace: () => resolveWorkspace,
+	skillCatalogArgs: () => skillCatalogArgs,
+	workspaceScopeKey: () => workspaceScopeKey
 });
 /** Services required by this Host-only package. */
 const inject$1 = [
@@ -30679,6 +32309,7 @@ const inject$1 = [
 	"operationLog",
 	"skills",
 	"storageDomain",
+	"workspaceRegistry",
 	"webServer",
 	"agents"
 ];
@@ -30720,8 +32351,14 @@ function apply(ctx, config$1 = {}) {
 	ctx.plugin(ImoActiveProfileService, {});
 	ctx.plugin(ImoAuthActionsService, merged);
 	ctx.plugin(ImoOverviewService, merged);
-	ctx.plugin(InsuremoSkillProviderService, {});
-	ctx.plugin(InsuremoAgentSkillMaskService, {});
+	ctx.plugin(InsuremoSkillProviderService, {
+		skillOverlayEnabled: merged.skillOverlayEnabled,
+		skillOverlayNames: merged.skillOverlayNames
+	});
+	ctx.plugin(InsuremoAgentSkillMaskService, {
+		skillOverlayEnabled: merged.skillOverlayEnabled,
+		skillOverlayNames: merged.skillOverlayNames
+	});
 	ctx.plugin(ImoProfileContextService, {});
 }
 var src_default$1 = ImoCliService;
