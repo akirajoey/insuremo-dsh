@@ -23,6 +23,8 @@ interface DirectoryPicker { capability(): { kind: string; pick?: (signal: AbortS
 export interface NativeFilePicker { pick(signal: AbortSignal): Promise<string | null>; }
 export interface ExplainRoutesConfig { readonly nativeFilePicker?: NativeFilePicker; }
 interface Scheduler { cancelJob(jobId: string): Promise<boolean>; poke(): void; }
+interface SchedulerStatusFace { status?(): { readonly maxConcurrent: number; readonly inFlight: number }; }
+interface ExplainConfigFace { readonly maxConcurrent: number; setMaxConcurrent(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number } } | { ok: false; code: string }>; }
 interface WebServer { register(route: { kind: "prefix"; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }): () => void; }
 
 type Located = { readonly root: string; readonly job: ExplainJobRecord };
@@ -64,7 +66,7 @@ export async function normalizeNativePickedTarget(root: string, selected: unknow
 }
 
 export class ExplainRoutesService extends Service {
-  static inject = ["webServer", "workspaceBinding", "iciEngine", "llm", "iciExplainScheduler"] as const;
+  static inject = ["webServer", "workspaceBinding", "iciEngine", "llm", "iciExplainScheduler", "iciExplainConfig"] as const;
   #dispose: (() => void) | undefined;
   #nativeFilePicker: NativeFilePicker | undefined;
   constructor(ctx: Context, config: ExplainRoutesConfig = {}) { super(ctx, "iciExplainRoutes" as never); this.#nativeFilePicker = config.nativeFilePicker; }
@@ -107,6 +109,12 @@ export class ExplainRoutesService extends Service {
     }
     return output;
   }
+  private schedulerInfo(): { readonly maxConcurrent: number; readonly inFlight: number } {
+    const scheduler = this.ctx.get("iciExplainScheduler") as SchedulerStatusFace | undefined;
+    const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined;
+    const live = scheduler?.status?.();
+    return { maxConcurrent: live?.maxConcurrent ?? config?.maxConcurrent ?? 4, inFlight: live?.inFlight ?? 0 };
+  }
   private async getJob(located: Located, res: ServerResponse): Promise<void> {
     let prepare: any; try { prepare = await loadPrepare(located.root, located.job.prepareArtifactPath); } catch { fail(res, 409, "prepare-invalidated"); return; }
     const final = await readValidatedExplainFinal(located.root, located.job.apiName, located.job.workspaceId);
@@ -119,6 +127,7 @@ export class ExplainRoutesService extends Service {
       referenceTarget: referenceTargetOf(located.job),
       sourceBytes: prepare.sources.reduce((sum: number, ref: any) => sum + (ref.readable ? ref.bytes : 0), 0),
       providers: await this.providers(),
+      scheduler: this.schedulerInfo(),
       consent: "The background AI will read only the selected workspace-relative reference target and send selected source excerpts and directory material to the chosen model."
     });
   }
@@ -133,7 +142,7 @@ export class ExplainRoutesService extends Service {
       const artifactPath = final?.final?.prepareId === job.prepareId && final.artifactPath.endsWith(`${job.jobId}.json`) ? final.artifactPath : undefined;
       jobs.push({ jobId: job.jobId, apiName: job.apiName, status: job.status, revision: job.revision, provider: job.provider, model: job.model, childSessionId: job.childSessionId, startedAt: job.startedAt, finishedAt: job.finishedAt, ...(artifactPath === undefined ? {} : { artifactPath }), ...(job.error === undefined ? {} : { error: job.error }), promptBaseBytes: promptBytes, sourceBytes: jobSourceBytes });
     }
-    ok(res, { batch: located.batch, jobs, providers: await this.providers(), summary: { promptBaseBytes, sourceBytes, maxPromptBaseBytes, jobCount: jobs.length } });
+    ok(res, { batch: located.batch, jobs, providers: await this.providers(), scheduler: this.schedulerInfo(), summary: { promptBaseBytes, sourceBytes, maxPromptBaseBytes, jobCount: jobs.length } });
   }
   private async batchNativePick(located: BatchLocated, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
     if (!located.jobs.some(job => job.status === "awaiting-input" || job.status === "scheduled")) { fail(res, 409, "revision-conflict"); return; }
@@ -284,8 +293,22 @@ export class ExplainRoutesService extends Service {
     try { const result = await engine.explainPrepare({ workspaceId: located.job.workspaceId, query: located.job.apiName }, signal); if (!result.ok || result.value === undefined) { const code = result.error?.code ?? "storage-error"; fail(res, statusCode(code), code); return; } ok(res, { jobId: result.value.jobId, status: result.value.jobStatus, prepareArtifactPath: result.value.artifactPath }); }
     catch { fail(res, 500, "storage-error"); }
   }
+  /** TASK-102: the single Host-wide concurrency setting endpoint (same-origin + action header). */
+  private async settings(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== "POST" || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
+    if (typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "invalid-input"); return; }
+    const body = await readBody(req);
+    if (body === null) { fail(res, 413, "input-too-large"); return; }
+    if (!hasOnly(body, ["maxConcurrent"])) { fail(res, 422, "invalid-input"); return; }
+    const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined;
+    if (config === undefined) { fail(res, 500, "storage-error"); return; }
+    const result = await config.setMaxConcurrent(body.maxConcurrent);
+    if (!result.ok) { fail(res, result.code === "invalid-input" ? 422 : 500, result.code); return; }
+    ok(res, { ...result.value, ...this.schedulerInfo() });
+  }
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost"); const suffix = url.pathname.slice(EXPLAIN_ROUTES_PREFIX.length).replace(/^\//, ""); const parts = suffix.split("/").filter(Boolean);
+    if (parts.length === 1 && parts[0] === "settings") { await this.settings(req, res); return; }
     const isBatch = parts[0] === "batches"; const isJobScope = parts[0] === "jobs"; const id = isBatch || isJobScope ? parts[1] : parts[0]; const action = isBatch || isJobScope ? parts[2] : parts[1];
     if (!id || !action || !/^[a-f0-9]{16}$/.test(id)) { fail(res, 404, "job-missing"); return; }
     if (isBatch) {

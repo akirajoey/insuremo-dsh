@@ -87,6 +87,14 @@ describe("TASK-056 batch ICI toolview", () => {
   it("TASK-060 report rows show session, provider/model, times, and error without absolute paths", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus("failed")), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(/AlphaAPI/)).not.toBeNull());
+    // TASK-102: compact rows keep the API name, status, elapsed time, and a short
+    // error; provider/model, session, times, and full paths live behind Details.
+    expect(view.container.textContent ?? "").not.toContain("mvp/mvp-model");
+    expect(view.container.textContent ?? "").toContain("model-failed");
+    view.getAllByRole("button", { name: zh["explain.details"] })[0]!.click();
+    await vi.waitFor(() => expect(view.getAllByRole("button", { name: zh["explain.hideDetails"] })).toHaveLength(1));
+    view.getAllByRole("button", { name: zh["explain.details"] })[0]!.click();
+    await vi.waitFor(() => expect(view.container.textContent ?? "").toContain("mvp/mvp-model"));
     const container = view.container.textContent ?? "";
     expect(container).toContain("mvp/mvp-model");
     expect(container).toContain(zh["explain.session"]);

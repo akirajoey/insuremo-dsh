@@ -30,3 +30,16 @@ button:disabled, select:disabled, input:disabled { cursor: not-allowed; opacity:
 .runMeta { margin: 4px 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .session { cursor: pointer; user-select: all; }
 .batchJobRow { margin: 4px 0; overflow-wrap: anywhere; }
+.scheduler { display: grid; gap: 4px; margin: 8px 0; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; }
+.scheduler .field { margin: 0; }
+.scheduler input[type="number"] { width: 5.5em; min-width: 0; }
+.jobLine { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; overflow-wrap: anywhere; }
+.jobName { overflow-wrap: anywhere; word-break: break-word; }
+.detailsToggle { margin-left: 6px; padding: 0 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 4px; color: var(--dsw-alias-label-secondary); background: transparent; cursor: pointer; font-size: 12px; }
+.detailsBody { margin: 4px 0 6px 12px; padding: 4px 8px; border-left: 2px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.detailsBody p { margin: 2px 0; overflow-wrap: anywhere; word-break: break-word; }
+.path { overflow-wrap: anywhere; word-break: break-word; }
+.pagination { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.pagination button { min-height: 24px; padding: 2px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); cursor: pointer; }
+.pagination span { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.batchStats { margin: 4px 0; color: var(--dsw-alias-label-secondary); font-size: 12px; overflow-wrap: anywhere; }

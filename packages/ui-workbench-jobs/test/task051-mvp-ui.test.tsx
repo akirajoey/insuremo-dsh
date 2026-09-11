@@ -61,6 +61,10 @@ describe("TASK-053 slash-qualified catalog models", () => {
     const runStatus = (state: string) => ({ ok: true, result: { job: { jobId, workspaceId: "custom", apiName: "CustomAPI", provider: "custom", model: "custom-model", folderPath: "ref_doc", status: state, revision: 2, childSessionId: sessionId, startedAt, finishedAt }, summary: { nodes: 1, edges: 0, sourceFiles: 1, readableSources: 1, sourceBytes: 128, promptBaseBytes: 512, truncated: false }, providers: [{ id: "custom", models: [] }] } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/jobs/${jobId}/status`) ? new Response(JSON.stringify(runStatus("final")), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 })); vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderRoot(); await vi.waitFor(() => expect(view.queryByText(zh["status.final"])).not.toBeNull());
+    // TASK-102: run metadata is folded by default and remains fully readable behind Details.
+    expect(view.container.textContent ?? "").not.toContain("custom/custom-model");
+    view.getByRole("button", { name: zh["explain.details"] }).click();
+    await vi.waitFor(() => expect(view.container.textContent ?? "").toContain("custom/custom-model"));
     const container = view.container.textContent ?? "";
     expect(container).toContain("custom/custom-model");
     expect(container).toContain(zh["explain.session"]);

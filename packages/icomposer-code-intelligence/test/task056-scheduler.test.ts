@@ -10,8 +10,12 @@ import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
 import ToolRuntime from "@deepseek-ai/dsh-tools";
 import AgentRegistry from "@deepseek-ai/dsh-agent";
 import AgentLoop from "@deepseek-ai/dsh-agent-loop";
+import { Storage } from "@deepseek-ai/dsh-storage";
+import { DomainFacility } from "@deepseek-ai/dsh-storage-domain";
+import { JsonStorageBackend } from "@deepseek-ai/dsh-storage-json";
 import { buildGraph } from "../src/graph.ts";
 import { ExplainScheduler } from "../src/explain-scheduler.ts";
+import { ExplainConfigService } from "../src/explain-config.ts";
 import { computeGraphDigest, createJobRecord, prepareExplain, readJobRecord, updateJobRecord } from "../src/explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "../src/engine-version.ts";
 
@@ -30,8 +34,19 @@ async function fixture() {
 }
 async function realHarness(adapter: TwoJobAdapter) { const ctx: any = new Context(); await ctx.plugin(LlmRuntime); await ctx.plugin(SessionStore); await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime); await ctx.plugin(AgentRegistry); await ctx.plugin(AgentLoop, { agents: [] }); ctx.llm.registerAdapter(["mvp"], adapter); return ctx; }
 
-test("TASK-056 scheduler drains two scheduled jobs in order without concurrent children", async () => {
-  const fx = await fixture(); const adapter = new TwoJobAdapter(); const ctx: any = await realHarness(adapter); const parent = ctx.agentLoop.create(SessionId("task056-batch-parent"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); ctx.provide("workspaceBinding", { list: async () => ({ ok: true, value: [{ workspaceId: "batch", canonicalPath: fx.root }] }), get: async () => ({ ok: true, value: { canonicalPath: fx.root } }) });
+/** TASK-102: the scheduler requires the real config service over an isolated storage domain. */
+async function mountExplainConfig(ctx: any): Promise<{ storageRoot: string; backend: JsonStorageBackend }> {
+  const storageRoot = await mkdtemp(join(tmpdir(), "task056-storage-"));
+  const storageFiber = ctx.plugin(Storage as never); await storageFiber.await();
+  const backend = new JsonStorageBackend(join(storageRoot, "storage"));
+  ctx.storage.backend.register("json", backend);
+  ctx.provide("storageDomain", new DomainFacility(ctx as never, { backend: "json" }));
+  const configFiber = ctx.plugin(ExplainConfigService as never); await configFiber.await();
+  return { storageRoot, backend };
+}
+
+test("TASK-056/TASK-102 scheduler serializes two scheduled jobs under cap 1 with real config storage", async () => {
+  const fx = await fixture(); const adapter = new TwoJobAdapter(); const ctx: any = await realHarness(adapter); const { storageRoot, backend } = await mountExplainConfig(ctx); const parent = ctx.agentLoop.create(SessionId("task056-batch-parent"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); ctx.provide("workspaceBinding", { list: async () => ({ ok: true, value: [{ workspaceId: "batch", canonicalPath: fx.root }] }), get: async () => ({ ok: true, value: { canonicalPath: fx.root } }) });
   const scheduled = []; for (const job of fx.jobs) scheduled.push(await updateJobRecord(fx.root, job.jobId, job.revision, { status: "scheduled", notBefore: new Date().toISOString() })); void scheduled;
   const fiber: any = await ctx.plugin(ExplainScheduler); await fiber.await(); try { for (let i = 0; i < 400; i++) { const rows = await Promise.all(fx.jobs.map(job => readJobRecord(fx.root, job.jobId))); if (rows.every(row => row?.status === "final")) break; await new Promise(resolve => setTimeout(resolve, 5)); } assert.equal((await readJobRecord(fx.root, fx.jobs[0].jobId))?.status, "final"); assert.equal((await readJobRecord(fx.root, fx.jobs[1].jobId))?.status, "final"); assert.equal(adapter.calls, 6); assert.equal(adapter.maxActiveStreams, 1); } finally { await fiber.dispose(); parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
 });

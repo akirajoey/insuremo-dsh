@@ -63,3 +63,19 @@ declare module "@deepseek-ai/dsh-jobs" {
   }
   export interface JobRegistry { start(spec: JobStart): string; }
 }
+
+declare module "@deepseek-ai/dsh-storage-domain" {
+  export interface DomainGlobalSpec<G> { readonly schema: { parse(value: unknown): G }; readonly initial: G; }
+  export interface DomainTableSpec<K extends string = string, V = unknown> { readonly valueSchema: unknown; readonly __key?: K; }
+  export interface DomainSpec {
+    readonly name: string;
+    readonly version: number;
+    readonly global?: DomainGlobalSpec<unknown>;
+    readonly tables: Record<string, DomainTableSpec>;
+  }
+  export interface DomainGlobal<G> { get(): G; set(value: G): Promise<void>; }
+  export interface Domain<S extends DomainSpec = DomainSpec> { readonly global: DomainGlobal<unknown>; close(): Promise<void>; }
+  export interface DomainFacility { open<S extends DomainSpec>(spec: S): Promise<Domain<S>>; }
+  export function defineDomain<S extends DomainSpec>(spec: S): S;
+  export function domainTable<K extends string, V>(schema: unknown): DomainTableSpec<K, V>;
+}

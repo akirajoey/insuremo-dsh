@@ -8,6 +8,7 @@ import {
 import { withExplainFileLock, writeExplainFile } from "@icomposer/workbench-contracts/ici-explain";
 import { graphBaseDir, legacyGraphBaseDir, readManifest } from "./storage.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
+import { EXPLAIN_DEFAULT_CONCURRENCY } from "./explain-config.ts";
 
 interface AgentLike { readonly id?: string; readonly ctx?: unknown; readonly options?: { provider?: string; model?: string }; whenIdle(): Promise<void>; runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>; }
 interface ChildAgent { readonly id: string; readonly options?: { provider?: string; model?: string }; followup(message: unknown): void; whenIdle(): Promise<void>; cancel(cause: unknown): void; }
@@ -15,6 +16,7 @@ interface AgentHandle { readonly agent: ChildAgent; dispose(): Promise<void>; }
 interface AgentsFace { roots?(): readonly AgentLike[]; create?(options: Record<string, unknown>): Promise<AgentHandle>; withInitiator?<T>(agent: AgentLike, operation: () => T): T; }
 interface LlmExplainFace { listProviders(): readonly { id: string }[]; resolveModelInfo?(provider: string, model: string, signal?: AbortSignal): Promise<unknown>; }
 interface BindingFace { list(): Promise<{ ok: boolean; value?: readonly { workspaceId: string; canonicalPath: string }[] }>; get(id: string): Promise<{ ok: boolean; value?: { canonicalPath: string } }>; }
+interface ExplainConfigFace { readonly maxConcurrent: number; onChange(listener: (maxConcurrent: number) => void): () => void; }
 
 export const MAX_EXPLAIN_PROMPT_BYTES = 256 * 1024;
 const MAX_FLOW_ITEMS = 64;
@@ -28,6 +30,30 @@ const SUBMIT_REPAIR = "schema-invalid: submit exactly technical/business strings
 const SECRET_PATTERN = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
 const ABSOLUTE_PATH_PATTERN = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
 const explainJobTails = new Map<string, Promise<void>>();
+/** Child Explain agents are created one at a time per composition; concurrent create is not proven safe. */
+const explainChildCreationTails = new WeakMap<object, Promise<unknown>>();
+function serializeChildCreation<T>(key: object, operation: () => Promise<T>): Promise<T> {
+  const prior = explainChildCreationTails.get(key) ?? Promise.resolve();
+  const task = prior.then(operation, operation);
+  explainChildCreationTails.set(key, task.then(() => undefined, () => undefined));
+  return task;
+}
+/**
+ * TASK-102: per-composition registry of live Explain child sessions. The
+ * WeakMap keys it to the composition context (no module-global lifetime), and
+ * a child is registered BEFORE `agents.create` so it can never be observed as
+ * a driver root, with every exit path (create failure, abort, throw, dispose)
+ * unregistering it.
+ */
+const explainChildSessions = new WeakMap<object, Set<string>>();
+function explainChildRegistry(ctx: Context): Set<string> {
+  let registry = explainChildSessions.get(ctx);
+  if (registry === undefined) { registry = new Set<string>(); explainChildSessions.set(ctx, registry); }
+  return registry;
+}
+function registerExplainChild(ctx: Context, sessionId: string): void { explainChildRegistry(ctx).add(sessionId); }
+function unregisterExplainChild(ctx: Context, sessionId: string): void { explainChildRegistry(ctx).delete(sessionId); }
+function isExplainChildRoot(ctx: Context, agent: unknown): boolean { const id = (agent as { readonly id?: unknown } | null)?.id; return typeof id === "string" && explainChildRegistry(ctx).has(id); }
 async function withExplainJobTransaction<T>(root: string, jobId: string, task: () => Promise<T>): Promise<T> { const key = `${root}\0${jobId}`; const previous = explainJobTails.get(key) ?? Promise.resolve(); let release!: () => void; const current = new Promise<void>(resolve => { release = resolve; }); explainJobTails.set(key, current); await previous; try { return await task(); } finally { release(); if (explainJobTails.get(key) === current) explainJobTails.delete(key); } }
 async function currentGraphManifest(root: string, workspaceId: string): Promise<{ engineVersion?: string; sourceFingerprint?: string; graphDigest?: string } | null> { return readManifest(graphBaseDir(root, workspaceId), legacyGraphBaseDir(root, workspaceId)); }
 async function assertFreshJob(root: string, job: ExplainJobRecord): Promise<Awaited<ReturnType<typeof loadPrepare>>> { const prepare = await loadPrepare(root, job.prepareArtifactPath); const graph = await currentGraphManifest(root, job.workspaceId); if (!graph || job.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || graph.engineVersion !== ICI_ENGINE_VERSION || graph.sourceFingerprint !== job.sourceFingerprint || graph.graphDigest !== job.graphDigest || prepare.manifest.sourceFingerprint !== job.sourceFingerprint || prepare.manifest.graphDigest !== job.graphDigest) throw new Error("stale-snapshot"); return prepare; }
@@ -63,7 +89,17 @@ async function runDedicatedAgent(ctx: Context, root: string, job: Awaited<Return
     if (typeof childCtx.on === "function") childCtx.on("llm/stream", (options: unknown, next: () => AsyncIterable<any>) => { if (explainRequestBytes(options) > MAX_EXPLAIN_PROMPT_BYTES) { toolFailure = true; toolFailureReason = "input-too-large"; childRef?.cancel("tool-failed"); throw new Error("input-too-large"); } return monitoredChildStream(next(), error => { const message = error instanceof Error ? error.message : "stream-error"; if (message === "stream-aborted") { streamAborted = true; return; } toolFailure = true; toolFailureReason = message; childRef?.cancel("tool-failed"); }); }, { prepend: true });
     childCtx.systemPrompt.section({ name: `ici-explain-child:${job.jobId}`, order: 120, text: `This is a dedicated read-only ICI explanation child. Only ici_explain_list, ici_explain_read, ici_explain_submit are available. Workspace-relative reference target is ${JSON.stringify(target)}${target.kind === "none" ? "; no optional reference selected; use prepared source ranges; do not call ici_explain_list or ici_explain_read; submit only" : "; use ici_explain_list/read only if needed; do not require both; then submit"}. Evidence must be string[] with relative path#N or path#N-M (#, never :). Never use absolute paths or shell/network/write tools.` });
   };
-  const childSessionId = randomUUID(); const create = (): Promise<AgentHandle> => agents.create!({ sessionId: childSessionId, meta: { cwd: root, ...(parent?.id ? { parentSession: parent.id } : {}), origin: "subagent", delegationDepth: 1 }, agentOptions: { provider: job.provider!, model: job.model!, maxTokens: 4096 }, setup, signal }); const handle = parent && agents.withInitiator ? await agents.withInitiator(parent, create) : await create();
+  const childSessionId = randomUUID();
+  registerExplainChild(ctx, childSessionId);
+  let handle: AgentHandle;
+  try {
+    const create = (): Promise<AgentHandle> => agents.create!({ sessionId: childSessionId, meta: { cwd: root, ...(parent?.id ? { parentSession: parent.id } : {}), origin: "subagent", delegationDepth: 1 }, agentOptions: { provider: job.provider!, model: job.model!, maxTokens: 4096 }, setup, signal });
+    handle = await serializeChildCreation(ctx, () => parent && agents.withInitiator ? agents.withInitiator(parent, create) : create());
+  } catch (error) {
+    // Create failure / abort / throw: the child never became live.
+    unregisterExplainChild(ctx, childSessionId);
+    throw error;
+  }
   const child = handle.agent; childRef = child; const abortChild = (): void => { try { child.cancel("cancelled"); } catch { /* disposal below */ } }; signal.addEventListener("abort", abortChild, { once: true });
   try {
     const waitForTurn = async (): Promise<{ kind: "submitted"; value: { technical: string; business: string; flow: string[]; evidence: string[] } } | { kind: "idle" } | { kind: "aborted" }> => {
@@ -92,10 +128,11 @@ async function runDedicatedAgent(ctx: Context, root: string, job: Awaited<Return
     if (outcome.kind !== "submitted") throw new Error(outcome.kind === "aborted" ? "stream-aborted" : streamAborted ? "stream-aborted" : toolFailureReason ?? "model-failed");
     try { child.cancel("cancelled"); } catch { /* stop after submit */ }
     return { analysis: outcome.value, folderReads, childSessionId };
-  } finally { signal.removeEventListener("abort", abortChild); try { child.cancel("cancelled"); } catch { /* already idle */ } await handle.dispose(); }
+  } finally { signal.removeEventListener("abort", abortChild); try { child.cancel("cancelled"); } catch { /* already idle */ } try { await handle.dispose(); } finally { unregisterExplainChild(ctx, childSessionId); } }
 }
 
 export async function processConfirmedJob(llm: LlmExplainFace, root: string, jobId: string, signal: AbortSignal, ctx?: Context, parent?: AgentLike): Promise<void> {
+
   const started = await readJobRecord(root, jobId); if (!started || !["scheduled", "confirmed"].includes(started.status)) return;
   if (!started.provider || !started.model) { await updateJobRecord(root, jobId, started.revision, { status: "failed", error: "confirmation-invalid" }).catch(() => undefined); return; }
   let registered = false; try { registered = llm.listProviders().some(provider => provider.id === started.provider); if (registered && llm.resolveModelInfo) await llm.resolveModelInfo(started.provider, started.model, signal); } catch { registered = false; }
@@ -118,18 +155,111 @@ export async function processConfirmedJob(llm: LlmExplainFace, root: string, job
 }
 
 export class ExplainScheduler extends Service {
-  static inject = ["agents", "llm", "workspaceBinding"] as const;
-  #attached = new WeakSet<object>(); #requested = new WeakSet<object>(); #runs = new WeakMap<object, Promise<void>>(); #waiting = new WeakSet<object>(); #controllers = new Map<string, AbortController>(); #inflight = new Set<Promise<void>>(); #disposePromise?: Promise<void>; #timers = new Map<string, ReturnType<typeof setTimeout>>(); #timerTargets = new Map<string, number>(); #recovered = new Set<string>(); #disposed = false;
-  constructor(ctx: Context) { super(ctx, "iciExplainScheduler" as never); this.cancelJob = this.cancelJob.bind(this); this.poke = this.poke.bind(this); }
-  protected [Service.init](): void { this.ctx.effect(() => () => this.dispose(), "iciExplainScheduler.dispose"); void this.attachRoots(); const on = (this.ctx as unknown as { on(event: string, listener: () => void): () => boolean }).on.bind(this.ctx); for (const event of ["agent/idle", "agent/status", "agent/created"]) try { on(event, () => void this.attachRoots()); } catch { /* optional */ } }
-  private async attachRoots(): Promise<void> { if (this.#disposed) return; const roots = (this.ctx.get("agents") as AgentsFace | undefined)?.roots?.() ?? []; const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; if (binding) { const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); if (listed.ok) for (const row of listed.value ?? []) { if (!this.#recovered.has(row.canonicalPath)) { this.#recovered.add(row.canonicalPath); await markRunningJobsInterrupted(row.canonicalPath); } await this.armScheduled(row.canonicalPath); } } for (const agent of roots) { if (this.#attached.has(agent)) continue; this.#attached.add(agent); this.requestDrive(agent); } }
+  static inject = ["agents", "llm", "workspaceBinding", "iciExplainConfig"] as const;
+  /** One global fill loop: every drive source funnels here, so concurrent roots can never over-fill. */
+  private filling: Promise<void> | undefined; private fillRequested = false;
+  /** TASK-102: reserved capacity, keyed `${canonicalRoot}\0${jobId}`, reserved BEFORE any async preflight. */
+  private readonly inFlight = new Map<string, AbortController>();
+  /** One-shot idle wakes, deduplicated per user root and never awaited by the fill loop. */
+  private readonly idleWakes = new WeakSet<object>();
+  /** All live job tasks, awaited before disposal completes. */
+  private readonly tasks = new Set<Promise<void>>();
+  private configDispose: (() => void) | undefined; private disposePromise?: Promise<void>; private readonly timers = new Map<string, ReturnType<typeof setTimeout>>(); private readonly timerTargets = new Map<string, number>(); private readonly recovered = new Set<string>(); private disposed = false;
+  constructor(ctx: Context) { super(ctx, "iciExplainScheduler" as never); this.cancelJob = this.cancelJob.bind(this); this.poke = this.poke.bind(this); this.status = this.status.bind(this); this.dispose = this.dispose.bind(this); }
+  protected [Service.init](): void { this.ctx.effect(() => () => this.dispose(), "iciExplainScheduler.dispose"); void this.attachRoots(); const on = (this.ctx as unknown as { on(event: string, listener: () => void): () => boolean }).on.bind(this.ctx); for (const event of ["agent/idle", "agent/status", "agent/created"]) try { on(event, () => void this.attachRoots()); } catch { /* optional */ } const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined; if (config !== undefined) this.configDispose = config.onChange(() => { if (!this.disposed) this.poke(); }); }
+
+  /** Current effective cap and reserved in-flight count for status payloads. */
+  status(): { readonly maxConcurrent: number; readonly inFlight: number } { return { maxConcurrent: this.maxConcurrent(), inFlight: this.inFlight.size }; }
+  private maxConcurrent(): number { const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined; return config?.maxConcurrent ?? EXPLAIN_DEFAULT_CONCURRENCY; }
+  /** Real user roots only: Explain children are registered by session id before creation. */
+  private userRoots(): AgentLike[] { const roots = (this.ctx.get("agents") as AgentsFace | undefined)?.roots?.() ?? []; return roots.filter(agent => !isExplainChildRoot(this.ctx, agent)); }
+  private async attachRoots(): Promise<void> { if (this.disposed) return; const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; if (binding) { const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); if (listed.ok) for (const row of listed.value ?? []) { if (!this.recovered.has(row.canonicalPath)) { this.recovered.add(row.canonicalPath); await markRunningJobsInterrupted(row.canonicalPath); } await this.armScheduled(row.canonicalPath); } } this.requestDrive(); }
   private async armScheduled(root: string): Promise<void> { for (const job of await listActiveJobs(root)) if (job.status === "scheduled" && job.notBefore) this.armTimer(job); }
-  private armTimer(job: ExplainJobRecord): void { const target = Date.parse(job.notBefore ?? ""); if (!Number.isFinite(target)) return; const delay = Math.min(MAX_TIMER_MS, Math.max(0, target - Date.now())); const existing = this.#timers.get(job.jobId); if (existing && this.#timerTargets.get(job.jobId) === target) return; if (existing) clearTimeout(existing); const timer = setTimeout(() => { this.#timers.delete(job.jobId); this.#timerTargets.delete(job.jobId); this.poke(); }, delay); this.#timers.set(job.jobId, timer); this.#timerTargets.set(job.jobId, target); }
-  requestDrive(agent: AgentLike): void { if (this.#disposed) return; this.#requested.add(agent); if (this.#runs.has(agent)) return; const run = this.drain(agent).finally(() => { this.#runs.delete(agent); if (this.#requested.has(agent)) this.requestDrive(agent); }); this.#runs.set(agent, run); }
-  private async drain(agent: AgentLike): Promise<void> { while (this.#requested.has(agent) && !this.#disposed) { this.#requested.delete(agent); await this.driveOnce(agent); } }
-  private async driveOnce(agent: AgentLike): Promise<void> { const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; const llm = this.ctx.get("llm") as LlmExplainFace | undefined; if (!binding || !llm) return; const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); if (!listed.ok) return; let job: ExplainJobRecord | undefined; for (const row of listed.value ?? []) { const candidate = (await listActiveJobs(row.canonicalPath)).find(item => ["scheduled", "confirmed"].includes(item.status)); if (candidate?.notBefore && Date.parse(candidate.notBefore) > Date.now()) { this.armTimer(candidate); continue; } if (candidate && !this.#controllers.has(candidate.jobId)) { job = candidate; break; } } if (!job) return; const resolved = await binding.get(job.workspaceId); if (!resolved.ok || !resolved.value) return; try { await agent.whenIdle(); } catch { return; } if (this.#disposed) return; try { await agent.runMaintenance(async signal => { const controller = new AbortController(); this.#controllers.set(job!.jobId, controller); const relay = (): void => controller.abort(); signal.addEventListener("abort", relay, { once: true }); const run = processConfirmedJob(llm, resolved.value!.canonicalPath, job!.jobId, controller.signal, this.ctx, agent).catch(() => undefined).finally(() => { signal.removeEventListener("abort", relay); this.#controllers.delete(job!.jobId); this.#inflight.delete(run); }); this.#inflight.add(run); if (this.#disposed) controller.abort(); }); } catch { /* busy; next idle */ } finally { this.rearmAtNextIdle(agent); } }
-  private rearmAtNextIdle(agent: AgentLike): void { if (this.#disposed || this.#waiting.has(agent)) return; this.#waiting.add(agent); void agent.whenIdle().then(() => { this.#waiting.delete(agent); this.requestDrive(agent); }, () => { this.#waiting.delete(agent); }); }
-  async cancelJob(jobId: string): Promise<boolean> { this.#controllers.get(jobId)?.abort(); const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; if (!binding) return false; const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); for (const row of listed.value ?? []) { const cancelled = await withExplainJobTransaction(row.canonicalPath, jobId, async () => { for (let attempt = 0; attempt < 20; attempt++) { const record = await readJobRecord(row.canonicalPath, jobId); if (!record) return false; if (record.status === "cancelled") return true; if (!["awaiting-input", "scheduled", "confirmed", "running"].includes(record.status)) return false; const updated = await updateJobRecord(row.canonicalPath, jobId, record.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); if (updated) return true; await new Promise(resolve => setTimeout(resolve, 5)); } return (await readJobRecord(row.canonicalPath, jobId))?.status === "cancelled"; }); if (cancelled) { const timer = this.#timers.get(jobId); if (timer) clearTimeout(timer); this.#timers.delete(jobId); this.#timerTargets.delete(jobId); } if (cancelled || (await readJobRecord(row.canonicalPath, jobId))?.status === "final") return cancelled; } return false; }
-  poke(): void { if (this.#disposed) return; const roots = (this.ctx.get("agents") as AgentsFace | undefined)?.roots?.() ?? []; for (const agent of roots) this.requestDrive(agent); }
-  dispose(): Promise<void> { if (this.#disposePromise) return this.#disposePromise; this.#disposed = true; for (const controller of this.#controllers.values()) controller.abort(); for (const timer of this.#timers.values()) clearTimeout(timer); this.#timers.clear(); this.#timerTargets.clear(); this.#disposePromise = (async () => { while (this.#inflight.size > 0) await Promise.all([...this.#inflight]); this.#controllers.clear(); })(); return this.#disposePromise; }
+  private armTimer(job: ExplainJobRecord): void { const target = Date.parse(job.notBefore ?? ""); if (!Number.isFinite(target)) return; const delay = Math.min(MAX_TIMER_MS, Math.max(0, target - Date.now())); const existing = this.timers.get(job.jobId); if (existing && this.timerTargets.get(job.jobId) === target) return; if (existing) clearTimeout(existing); const timer = setTimeout(() => { this.timers.delete(job.jobId); this.timerTargets.delete(job.jobId); this.poke(); }, delay); this.timers.set(job.jobId, timer); this.timerTargets.set(job.jobId, target); }
+  requestDrive(): void { if (this.disposed) return; this.scheduleFill(); }
+  private scheduleFill(): void { if (this.filling !== undefined) { this.fillRequested = true; return; } this.filling = this.fillLoop().finally(() => { this.filling = undefined; if (this.fillRequested) { this.fillRequested = false; this.scheduleFill(); } }); }
+  /** Pick the next claimable job globally; futures arm their timer and never block due work. */
+  private async pickClaimable(binding: BindingFace): Promise<ExplainJobRecord | undefined> { const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); if (!listed.ok) return undefined; for (const row of listed.value ?? []) { const actives = await listActiveJobs(row.canonicalPath); for (const item of actives) { if (!["scheduled", "confirmed"].includes(item.status)) continue; if (item.notBefore && Date.parse(item.notBefore) > Date.now()) { this.armTimer(item); continue; } if (this.inFlight.has(`${row.canonicalPath}\0${item.jobId}`)) continue; return item; } } return undefined; }
+  /**
+   * One global serial fill loop. Each pass picks a job, re-resolves its root,
+   * reverifies capacity/disposal/record state after EVERY await, then reserves
+   * synchronously and tries the user roots in order. A root that refuses
+   * `runMaintenance` is busy; when every root is busy the pass releases its
+   * reservation and arms one-shot idle wakes instead of polling.
+   */
+  private async fillLoop(): Promise<void> {
+    while (!this.disposed) {
+      this.fillRequested = false;
+      if (this.inFlight.size >= this.maxConcurrent()) return;
+      const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined;
+      const llm = this.ctx.get("llm") as LlmExplainFace | undefined;
+      if (!binding || !llm) return;
+      const roots = this.userRoots();
+      if (roots.length === 0) return;
+      const claim = await this.pickClaimable(binding);
+      if (this.disposed) return;
+      if (claim === undefined) return;
+      if (this.inFlight.size >= this.maxConcurrent()) return;
+      const resolved = await binding.get(claim.workspaceId);
+      if (this.disposed) return;
+      if (this.inFlight.size >= this.maxConcurrent()) return;
+      if (!resolved.ok || !resolved.value) return;
+      const canonicalRoot = resolved.value.canonicalPath;
+      const latest = await readJobRecord(canonicalRoot, claim.jobId);
+      if (this.disposed) return;
+      if (!latest || !["scheduled", "confirmed"].includes(latest.status)) continue;
+      if (this.inFlight.size >= this.maxConcurrent()) return;
+      const key = `${canonicalRoot}\0${claim.jobId}`;
+      if (this.inFlight.has(key)) continue;
+      const controller = new AbortController();
+      // Capacity check -> reservation is atomic: no await sits between them.
+      this.inFlight.set(key, controller);
+      if (this.tryStartOn(roots, { llm, canonicalRoot, jobId: claim.jobId, controller, key })) continue;
+      // Every user root is busy: give the slot back and wait for a real idle edge.
+      this.inFlight.delete(key);
+      this.armIdleWakes(roots);
+      return;
+    }
+  }
+  /** Try the roots in order; `runMaintenance` throws synchronously while busy. */
+  private tryStartOn(roots: readonly AgentLike[], pending: { llm: LlmExplainFace; canonicalRoot: string; jobId: string; controller: AbortController; key: string }): boolean {
+    for (const agent of roots) {
+      if (this.disposed || pending.controller.signal.aborted || this.inFlight.get(pending.key) !== pending.controller) return false;
+      let kicked = false;
+      try {
+        void agent.runMaintenance(async (signal) => {
+          // Kickoff only: returning here releases the maintenance lock, so the
+          // user session stays responsive while the dedicated child runs.
+          if (this.disposed || pending.controller.signal.aborted || this.inFlight.get(pending.key) !== pending.controller) return;
+          const relay = (): void => pending.controller.abort();
+          signal.addEventListener("abort", relay, { once: true });
+          const run: Promise<void> = processConfirmedJob(pending.llm, pending.canonicalRoot, pending.jobId, pending.controller.signal, this.ctx, agent).catch(() => undefined).finally(() => {
+            signal.removeEventListener("abort", relay);
+            this.inFlight.delete(pending.key);
+            this.tasks.delete(run);
+            if (!this.disposed) this.requestDrive();
+          });
+          this.tasks.add(run);
+          if (this.disposed) pending.controller.abort();
+          kicked = true;
+        });
+      } catch { continue; }
+      if (!kicked) return false;
+      return true;
+    }
+    return false;
+  }
+  /** One-shot, deduplicated idle wake per busy root (maintenance emits no status event). */
+  private armIdleWakes(roots: readonly AgentLike[]): void {
+    for (const agent of roots) {
+      if (this.disposed) return;
+      if (this.idleWakes.has(agent)) continue;
+      this.idleWakes.add(agent);
+      void agent.whenIdle().then(() => { this.idleWakes.delete(agent); if (!this.disposed) this.requestDrive(); }, () => { this.idleWakes.delete(agent); });
+    }
+  }
+
+  async cancelJob(jobId: string): Promise<boolean> { for (const [key, controller] of this.inFlight) if (key.endsWith(`\0${jobId}`)) controller.abort(); const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; if (!binding) return false; const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); for (const row of listed.value ?? []) { this.inFlight.get(`${row.canonicalPath}\0${jobId}`)?.abort(); const cancelled = await withExplainJobTransaction(row.canonicalPath, jobId, async () => { for (let attempt = 0; attempt < 20; attempt++) { const record = await readJobRecord(row.canonicalPath, jobId); if (!record) return false; if (record.status === "cancelled") return true; if (!["awaiting-input", "scheduled", "confirmed", "running"].includes(record.status)) return false; const updated = await updateJobRecord(row.canonicalPath, jobId, record.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); if (updated) return true; await new Promise(resolve => setTimeout(resolve, 5)); } return (await readJobRecord(row.canonicalPath, jobId))?.status === "cancelled"; }); if (cancelled) { const timer = this.timers.get(jobId); if (timer) clearTimeout(timer); this.timers.delete(jobId); this.timerTargets.delete(jobId); } if (cancelled || (await readJobRecord(row.canonicalPath, jobId))?.status === "final") return cancelled; } return false; }
+  poke(): void { if (this.disposed) return; this.requestDrive(); }
+  dispose(): Promise<void> { if (this.disposePromise) return this.disposePromise; this.disposed = true; this.configDispose?.(); this.configDispose = undefined; for (const controller of this.inFlight.values()) controller.abort(); for (const timer of this.timers.values()) clearTimeout(timer); this.timers.clear(); this.timerTargets.clear(); this.disposePromise = (async () => { while (this.tasks.size > 0) await Promise.all([...this.tasks]); this.inFlight.clear(); })(); return this.disposePromise; }
 }

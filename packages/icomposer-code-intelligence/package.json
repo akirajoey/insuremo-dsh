@@ -25,6 +25,7 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-native-command": "*",
+    "@deepseek-ai/dsh-storage-domain": "*",
     "@icomposer/workspace-binding": "*",
     "@icomposer/workbench-contracts": "*",
     "@icomposer/icomposer-catalog": "*"

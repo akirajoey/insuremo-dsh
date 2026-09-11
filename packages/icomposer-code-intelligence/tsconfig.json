@@ -7,6 +7,7 @@
     "paths": {
       "@deepseek-ai/cordis": ["src/harness-shims.d.ts"],
       "@deepseek-ai/dsh-workspace": ["src/harness-shims.d.ts"],
+      "@deepseek-ai/dsh-storage-domain": ["src/harness-shims.d.ts"],
       "@icomposer/workbench-contracts": ["packages/workbench-contracts/src/index.ts"],
       "@icomposer/workbench-contracts/ici-explain": ["packages/workbench-contracts/src/ici-explain.ts"],
     }
