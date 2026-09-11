@@ -103,3 +103,25 @@ describe("trusted available Skills picker", () => {
     expect((await view.findByRole("alert")).textContent).toContain(zh.skillsCatalogUnavailable);
   });
 });
+
+describe("TASK-106 catalog parser bounds", () => {
+  it("accepts multi-line descriptions up to 4096 and rejects what the host rejects", async () => {
+    const { parseSkillCatalog } = await import("../src/client/overview.ts");
+    const base = {
+      schemaVersion: "1", status: "ready", source: "insuremo-skills",
+      fetchedAt: "2099-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:01:00.000Z",
+      entries: [{ type: "skill", name: "alpha-skill", description: "line one\nline two", group: "General" }],
+    };
+    const parsed = parseSkillCatalog({ ok: true, result: base });
+    expect(parsed?.entries[0]?.description).toBe("line one\nline two");
+    // The real 1.1.2 capture tops out at 1622 characters, well above the old 500 bound.
+    const long = { ...base, entries: [{ type: "skill", name: "alpha-skill", description: "x".repeat(1622) }] };
+    expect(parseSkillCatalog({ ok: true, result: long })?.entries[0]?.description.length).toBe(1622);
+    const atBound = { ...base, entries: [{ type: "skill", name: "alpha-skill", description: "x".repeat(4096) }] };
+    expect(parseSkillCatalog({ ok: true, result: atBound })?.entries[0]?.description.length).toBe(4096);
+    const overBound = { ...base, entries: [{ type: "skill", name: "alpha-skill", description: "x".repeat(4097) }] };
+    expect(parseSkillCatalog({ ok: true, result: overBound })).toBeNull();
+    const control = { ...base, entries: [{ type: "skill", name: "alpha-skill", description: "bad\u0001control" }] };
+    expect(parseSkillCatalog({ ok: true, result: control })).toBeNull();
+  });
+});

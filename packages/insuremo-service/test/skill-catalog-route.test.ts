@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Context } from "@deepseek-ai/cordis";
-import { mountSkillCatalogRoute } from "../src/overview/skill-catalog-route.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { mountSkillCatalogRoute, sanitizeSkillCatalogSnapshot } from "../src/overview/skill-catalog-route.ts";
 import { mountWriteRoutes } from "../src/overview/write-routes.ts";
 import { SKILL_CATALOG_PATH } from "../src/overview/paths.ts";
 import type { SkillCatalogSnapshot } from "../src/skill-actions/catalog.ts";
@@ -146,4 +148,64 @@ test("catalog refresh is explicit POST and single-skill install revalidates exac
     assert.equal(JSON.parse(mixed.body).ok, false);
     assert.equal(directInputs.length, 1);
   } finally { disposeWrite(); disposeRead(); }
+});
+
+const REAL_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/skills-catalog-1.1.2-real.txt", import.meta.url));
+
+test("TASK-106 regression: the real 1.1.2 catalog snapshot passes the output sanitizer", async () => {
+  const { parseSkillCatalogOutput, buildSkillCatalog } = await import("../src/skill-actions/catalog.ts");
+  const parsed = parseSkillCatalogOutput(readFileSync(REAL_FIXTURE_PATH, "utf8"));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const snapshot = buildSkillCatalog(parsed.value);
+  const sanitized = sanitizeSkillCatalogSnapshot(snapshot);
+  assert.ok(sanitized, "multi-line descriptions must survive the route sanitizer");
+  assert.equal(sanitized.entries.filter(entry => entry.type === "skill").length, 36);
+  const wrapped = sanitized.entries.find(entry => entry.type === "skill" && entry.description.includes("\n"));
+  assert.ok(wrapped, "a wrapped description stays multi-line");
+  assert.equal(JSON.stringify(sanitized).includes("/Users/"), false);
+});
+
+test("TASK-106 regression: the refresh route returns the real catalog instead of catalog-unavailable", async () => {
+  const { parseSkillCatalogOutput, buildSkillCatalog } = await import("../src/skill-actions/catalog.ts");
+  const parsed = parseSkillCatalogOutput(readFileSync(REAL_FIXTURE_PATH, "utf8"));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const snapshot = buildSkillCatalog(parsed.value);
+  const ctx = new Context();
+  const server = webServer();
+  ctx.provide("webServer" as never, server as never);
+  ctx.provide("imoSkillActions" as never, {
+    getCatalog: async () => ({ ok: true, value: snapshot }),
+    refreshCatalog: async () => ({ ok: true, value: snapshot }),
+  } as never);
+  const disposeRead = mountSkillCatalogRoute(ctx as never);
+  const disposeWrite = mountWriteRoutes(ctx as never);
+  try {
+    const read = response();
+    server.routes.get(SKILL_CATALOG_PATH)!(request(), read as ServerResponse);
+    await read.done;
+    const readBody = JSON.parse(read.body);
+    assert.equal(readBody.ok, true);
+    assert.equal(readBody.result.entries.filter((entry: { type: string }) => entry.type === "skill").length, 36);
+
+    const refresh = response();
+    server.routes.get("/api/icomposer-workbench/insuremo/overview/actions/skill-catalog-refresh")!(request("POST", JSON.stringify({ force: true }), writeHeaders()), refresh as ServerResponse);
+    await refresh.done;
+    const refreshBody = JSON.parse(refresh.body);
+    assert.equal(refreshBody.ok, true, "the refresh must not answer catalog-unavailable for the real capture");
+    assert.equal(refreshBody.result.entries.filter((entry: { type: string }) => entry.type === "skill").length, 36);
+  } finally { disposeWrite(); disposeRead(); }
+});
+
+test("TASK-106: a description with an LF survives, other control characters still reject", async () => {
+  const { sanitizeSkillCatalogSnapshot } = await import("../src/overview/skill-catalog-route.ts");
+  const base = {
+    schemaVersion: "1" as const, status: "ready" as const, source: "insuremo-skills" as const,
+    fetchedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2026-01-01T00:01:00.000Z",
+    entries: [{ type: "skill" as const, name: "alpha-skill", description: "line one\nline two" }],
+  };
+  assert.ok(sanitizeSkillCatalogSnapshot(base));
+  assert.equal(sanitizeSkillCatalogSnapshot({ ...base, entries: [{ type: "skill", name: "alpha-skill", description: "bad\u0001control" }] }), undefined);
+  assert.equal(sanitizeSkillCatalogSnapshot({ ...base, entries: [{ type: "skill", name: "alpha-skill", description: "x".repeat(4097) }] }), undefined);
 });

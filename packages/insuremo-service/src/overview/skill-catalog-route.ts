@@ -111,8 +111,14 @@ function isScenario(value: unknown): value is SkillScenario {
   return typeof value === "string" && SKILL_SCENARIOS.includes(value as SkillScenario);
 }
 
+/**
+ * TASK-106: a description may contain the parser's own LF paragraph separators
+ * (TASK-104 joins wrapped lines with "\n"); other control characters reject.
+ * The bound is the shared SKILL_CATALOG_DESCRIPTION_MAX so the parser and this
+ * output sanitizer cannot drift again.
+ */
 function safeDescription(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= SKILL_CATALOG_DESCRIPTION_MAX && !/[\u0000-\u001F\u007F]/u.test(value);
+  return typeof value === "string" && value.length > 0 && value.length <= SKILL_CATALOG_DESCRIPTION_MAX && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value);
 }
 
 function safeGroup(value: unknown): value is string {

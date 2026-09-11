@@ -120,6 +120,13 @@ export interface ImoOverviewView {
 export const OVERVIEW_URL = "/api/icomposer-workbench/insuremo/overview" as const;
 export const SKILL_CATALOG_URL = `${OVERVIEW_URL}/skill-catalog` as const;
 const MAX_CATALOG_ENTRIES = 128 + 5; // source cap plus the fixed scenario rows
+/**
+ * TASK-106: keep this in lock-step with the host parser's
+ * SKILL_CATALOG_DESCRIPTION_MAX (4096). The earlier 500 bound predated
+ * TASK-104's real 1.1.2 capture (max 1622) and rejected every wrapped
+ * description; LF is the parser's paragraph separator and stays allowed.
+ */
+const MAX_CATALOG_DESCRIPTION = 4096;
 
 /** Rebuild a fresh view from only the allowlisted fields; `null` on garbage. */
 export function parseOverview(value: unknown): ImoOverviewView | null {
@@ -261,7 +268,7 @@ export function parseSkillCatalog(value: unknown): SkillCatalogView | null {
 }
 
 function catalogDescription(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 && value.length <= 500 && !/[\u0000-\u001F\u007F]/u.test(value) ? value : undefined;
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_CATALOG_DESCRIPTION && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value) ? value : undefined;
 }
 
 function catalogName(value: unknown, scenario: boolean): string | undefined {

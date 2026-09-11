@@ -12,6 +12,7 @@ import {
 } from "../src/skill-actions/catalog.ts";
 import { skillCatalogArgs, SKILLS_TOOL_PACKAGE, SKILLS_TOOL_REGISTRY } from "../src/skill-actions/preview.ts";
 import { withFixture } from "./support/skill-actions-fixture.ts";
+import { failureDiagnosis } from "../src/diagnosis.ts";
 
 const REGISTRY_FLAG = `--registry=${SKILLS_TOOL_REGISTRY}`;
 
@@ -238,4 +239,70 @@ test("buildSkillCatalog keeps scenario entries fixed and never exposes source pa
   assert.equal(built.entries[0]?.type, "scenario");
   assert.equal(JSON.stringify(built).includes("/"), false);
   assert.equal(built.expiresAt, new Date(60_000).toISOString());
+});
+
+test("TASK-106: a failed catalog refresh records a bounded redacted diagnosis", async () => {
+  await withFixture([], async fx => {
+    try {
+      fx.state.previewError = { exitCode: 1, stderr: "registry unreachable https://user:secret@example.test/skills" };
+      const result = await fx.actions.refreshCatalog(undefined, true);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.error.code, "catalog-unavailable");
+      const diagnosis = failureDiagnosis.snapshot("skill");
+      assert.ok(diagnosis, "a failed catalog run must be diagnosable");
+      assert.equal(diagnosis.operation, "skill-catalog");
+      assert.equal(diagnosis.exitCode, 1);
+      assert.equal(diagnosis.commands.some(line => line.includes("@insuremo/skills-tool") && line.includes("insuremo-skills") && line.includes("-l")), true);
+      assert.equal(diagnosis.registry.includes("public.insuremo.com"), true);
+      assert.equal(diagnosis.stderr.includes("user:secret"), false, "credentials in stderr stay redacted");
+      assert.equal(diagnosis.error?.code, "non-zero-exit");
+    } finally {
+      fx.state.previewError = null;
+      failureDiagnosis.clear("skill");
+    }
+  });
+});
+
+test("TASK-106: an unresolvable npx stays diagnosable as tool-unavailable", async () => {
+  await withFixture([], async fx => {
+    try {
+      fx.state.npxMissing = true;
+      const result = await fx.actions.refreshCatalog(undefined, true);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.error.code, "catalog-unavailable");
+      const diagnosis = failureDiagnosis.snapshot("skill");
+      assert.ok(diagnosis);
+      assert.equal(diagnosis.operation, "skill-catalog");
+      assert.equal(diagnosis.error?.code, "not-found");
+    } finally {
+      fx.state.npxMissing = false;
+      failureDiagnosis.clear("skill");
+    }
+  });
+});
+
+test("TASK-106: the catalog child gets only the deterministic env overlay, never ambient secrets", async () => {
+  await withFixture([], async fx => {
+    fx.state.installPreview = CATALOG_OUTPUT;
+    const previousKey = process.env.AIGW_SSAPOC_INSUREMO_API_KEY;
+    const previousPath = process.env.PATH;
+    process.env.AIGW_SSAPOC_INSUREMO_API_KEY = "must-not-reach-the-child";
+    process.env.PATH = "/usr/bin:/bin";
+    try {
+      assert.equal((await fx.actions.refreshCatalog(undefined, true)).ok, true);
+      const index = fx.state.invocations.findIndex(args => args.includes("@insuremo/skills-tool"));
+      assert.ok(index >= 0);
+      const env = fx.state.spawnEnvs[index];
+      // The harness merges this map onto its scrubbed parent env, so the service
+      // must never spread process.env here: explicit entries survive the scrub.
+      assert.deepEqual(env, { CI: "true", FORCE_COLOR: "0", TERM: "dumb" });
+      assert.equal(Object.keys(env ?? {}).includes("AIGW_SSAPOC_INSUREMO_API_KEY"), false);
+      assert.equal(Object.keys(env ?? {}).includes("PATH"), false);
+    } finally {
+      if (previousKey === undefined) delete process.env.AIGW_SSAPOC_INSUREMO_API_KEY;
+      else process.env.AIGW_SSAPOC_INSUREMO_API_KEY = previousKey;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
 });

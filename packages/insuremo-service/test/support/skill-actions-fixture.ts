@@ -29,6 +29,8 @@ export interface ScriptedState {
   /** Fail the next `skills list --json` read (used to simulate a downstream recovery failure). */
   failNextList: boolean;
   invocations: string[][];
+  /** Explicit env of every recorded spawn (undefined when the caller passed none). */
+  spawnEnvs: Array<Record<string, string> | undefined>;
   errorLine: string;
   /** Manual-runtime hook: leave the skills-tool preview (-l) spawn pending. */
   hangPreview?: boolean;
@@ -71,6 +73,7 @@ export function scripted(state: ScriptedState, root: string): SubprocessRuntime 
   function spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
     const args = [...spec.argv.slice(1)];
     state.invocations.push([...args]);
+    state.spawnEnvs.push(spec.env === undefined ? undefined : { ...spec.env });
     let stdout = "";
     let stderr = "";
     let exitCode: number | null = 0;
@@ -237,6 +240,7 @@ export async function openFixture(
     previewError: null,
     failNextList: false,
     invocations: [],
+    spawnEnvs: [],
     errorLine: "fail",
   };
   for (const name of initial) applyInstall(state, root, name);

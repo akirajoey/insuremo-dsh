@@ -3,6 +3,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { isSkillName } from "@deepseek-ai/dsh-skill";
 import { Config, resolveConfig, type Config as ImoConfig } from "../config.ts";
 import { failureDiagnosis } from "../diagnosis.ts";
+import { SKILLS_TOOL_REGISTRY } from "./preview.ts";
 import { digest, runCaptureDetailed } from "../run.ts";
 import type { ImoSkillActivation, ImoSkillActivationSnapshot, SkillActivationController } from "../skill-activation.ts";
 import { skillActivationControllerFor } from "../skill-activation.ts";
@@ -224,6 +225,23 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
       env: { CI: "true", FORCE_COLOR: "0", TERM: "dumb" },
     });
     if (!run.ok) {
+      // TASK-106: a catalog failure must be diagnosable like the preview/install
+      // failures. The entry stays memory-only and its streams go through the
+      // same diagnosis redaction/clipping contract as every other skill failure.
+      failureDiagnosis.record({
+        kind: "skill",
+        operation: "skill-catalog",
+        commands: [`${SKILLS_TOOL_COMMAND} ${skillCatalogArgs().join(" ")}`],
+        exitCode: run.error.exitCode ?? null,
+        streams: {
+          stdout: run.detail?.stdout ?? "",
+          stderr: run.detail?.stderr ?? "",
+          stdoutLossy: run.detail?.stdoutLossy ?? false,
+          stderrLossy: run.detail?.stderrLossy ?? false,
+        },
+        registry: SKILLS_TOOL_REGISTRY,
+        error: { code: run.error.code, message: run.error.message },
+      });
       const emptyOutput = run.error.code === "non-zero-exit" && isEmptySkillCatalogOutput(run.detail?.stdout ?? "");
       if (!emptyOutput) return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable");
       const snapshot = buildSkillCatalog({ skills: [], foundCount: 0 });
