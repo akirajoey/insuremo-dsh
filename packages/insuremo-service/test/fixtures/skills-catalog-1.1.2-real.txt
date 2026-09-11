@@ -1,0 +1,414 @@
+
+[38;5;250m███████╗██╗  ██╗██╗██╗     ██╗     ███████╗[0m
+[38;5;248m██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝[0m
+[38;5;245m███████╗█████╔╝ ██║██║     ██║     ███████╗[0m
+[38;5;243m╚════██║██╔═██╗ ██║██║     ██║     ╚════██║[0m
+[38;5;240m███████║██║  ██╗██║███████╗███████╗███████║[0m
+[38;5;238m╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝[0m
+
+[90m┌[39m  [46m[30m skills [39m[49m
+[90m│[39m
+[90m│[39m  [2mTip: use the --yes (-y) and --global (-g) flags to install without prompts.[22m
+[?25l[90m│[39m
+[32m◇[39m  Source: https://gitlab.insuremo.com/insuremo-public/insuremo-skills.git
+[?25h[32m◇[39m  [33mGit host unreachable — using npm registry (@insuremo/skills)[39m
+[?25h[?25l[90m│[39m
+[35m◒[39m  Fetching skills from npm registry...
+[999D[J[32m◇[39m  Package resolved: @insuremo/skills@1.3.7
+[?25h[?25l[90m│[39m
+
+[999D[J[35m◒[39m  Discovering skills...
+[999D[J[32m◇[39m  Found [32m36[39m skills
+[?25h
+[90m│[39m
+[32m◇[39m  [1mAvailable Skills[22m
+[1mIcomposer Batch[22m
+[90m│[39m
+[90m│[39m    [36micomposer-batch[39m
+[90m│[39m
+[90m│[39m      [2mIComposer Spring Batch job skill. Create, update, and generate Groovy code
+[90m│[39m  for iComposer BatchJob / BatchStep / BatchStepItem, then push to the server.
+[90m│[39m  
+[90m│[39m  Use when:
+[90m│[39m  - the user wants to create or update an iComposer batch (Spring Batch job)
+[90m│[39m  - the user describes a batch in natural language ("每天凌晨读取过期保单...")
+[90m│[39m  - the user provides a YAML manifest describing a batch
+[90m│[39m  - the user wants to generate Reader/Processor/Writer/Tasklet/Listener code
+[90m│[39m  - the user wants to push a batch to the server and optionally test-run it
+[90m│[39m  
+[90m│[39m  Do NOT use when:
+[90m│[39m  - the user wants RESTful API / Function CRUD (use icomposer-code-manager + icomposer-dev)
+[90m│[39m  - the user wants config tables / products / rules (use insuremo-config)
+[90m│[39m  [22m
+
+[1mIcomposer Code Manager[22m
+[90m│[39m
+[90m│[39m    [36micomposer-code-manager[39m
+[90m│[39m
+[90m│[39m      [2mIComposer code management CLI. Use for loading APIs/Functions with metadata, downloading SDK swagger, and pushing code with version handling. Manages the load, edit, and push workflow. IMPORTANT: Version conflicts require user confirmation; AI must NOT auto-resolve them.
+[90m│[39m  Runs in an ISOLATED subagent (context: fork) — cannot see conversation history. Caller MUST pass CONCRETE file paths/operations as args; resolve any fuzzy references (e.g. "the file we just edited") before invoking.
+[90m│[39m  [22m
+
+[1mIcomposer Data Model[22m
+[90m│[39m
+[90m│[39m    [36micomposer-data-model[39m
+[90m│[39m
+[90m│[39m      [2mIComposer data model generator. Converts JSON samples and Java VOs into
+[90m│[39m  OpenAPI component schemas (the `content` of iComposer `groovy-data-model`
+[90m│[39m  assets) and writes them to the code-manager path convention. Pure generator:
+[90m│[39m  makes ZERO HTTP calls. Push is handled by `icomposer-code-manager`.
+[90m│[39m  
+[90m│[39m  Use when:
+[90m│[39m  - generating a data model schema from a JSON sample or Java VO
+[90m│[39m  - authoring/validating the swagger `content` for an iComposer data model
+[90m│[39m  Do NOT use for: pushing to server (use icomposer-code-manager), or the
+[90m│[39m  Global Data Dictionary `/v1/mgmt/model` (different concept).
+[90m│[39m  [22m
+
+[1mIcomposer Dev[22m
+[90m│[39m
+[90m│[39m    [36micomposer-dev[39m
+[90m│[39m
+[90m│[39m      [2mIComposer development assistant for InsureMO Groovy API/Function work.
+[90m│[39m  
+[90m│[39m  Use when: writing/modifying iComposer RESTful APIs or Service Functions; choosing
+[90m│[39m  SDK calls, utility classes, or templates; preparing push commands for
+[90m│[39m  `/icomposer-code-manager` (this skill does not push); running `check`; debugging
+[90m│[39m  via `test`/TestLog.
+[90m│[39m  
+[90m│[39m  Do NOT use for: general InsureMO docs (use `insuremo-deep-search`); CodeTable/
+[90m│[39m  DataTable/products/Rule V1 config (use `insuremo-config`).
+[90m│[39m  
+[90m│[39m  Never `Read` `knowledge/sdk/` or `knowledge/utils/` JSON — use subcommands.
+[90m│[39m  [22m
+
+[1mInsuremo Aipaas[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-aipaas[39m
+[90m│[39m
+[90m│[39m      [2mCreate, modify, and use InsureMO AI PaaS agents programmatically — covers agent CRUD, tool registration with parameters, KB file upload (pdf/docx/xlsx/md/json/yml/csv/html/txt), MCP server registration, attaching KBs/tools/MCPs to agents, real-time SSE chat, and client-side multi-agent workflow orchestration (sequential / concurrent patterns inspired by Microsoft Agent Framework). Use when (1) the user wants to spin up or update an AI PaaS agent without clicking through the portal, (2) automating KB ingestion or tool registration, (3) exporting an agent's full snapshot (data.json + KB files), (4) running multi-agent workflows defined in YAML/JSON, (5) the user mentions "AI PaaS", "agent on portal", "ai-agt/", "ai-qa-service", "multi-agent workflow", "agent orchestration", or pastes URLs containing /api/mo-re/ai-agent-service or /api/mo-re/ai-qa-service.[22m
+
+[1mInsuremo Audit Helper[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-audit-helper[39m
+[90m│[39m
+[90m│[39m      [2mUse when user needs to query audit records, audit logs, audit trail, or operation history;
+[90m│[39m  search for who did what and when; debug operations using trace IDs; create/register
+[90m│[39m  audit modules or transactions; set up audit tracking for new services; generate
+[90m│[39m  audit log reports or audit trail reports; investigate suspicious activity; who changed what and when.
+[90m│[39m  
+[90m│[39m  Also use when user mentions: audit, audit log, audit record, audit trail, operation log,
+[90m│[39m  审计, 操作记录, module, transaction, business code, trace_id, create module, create
+[90m│[39m  transaction, 创建模块, 创建事务, audit metadata, audit setup, 审计配置, who did what,
+[90m│[39m  operation history, audit log report, audit trail report, audit warn level, imo audit.
+[90m│[39m  
+[90m│[39m  Do not use for generic financial audit report templates unless the user explicitly asks for InsureMO audit logs/trails.
+[90m│[39m  [22m
+
+[1mInsuremo Auth[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-auth[39m
+[90m│[39m
+[90m│[39m      [2m[DEPRECATED — prefer insuremo-auth-cli] InsureMO OAuth2 authentication with browser-based login flow, supporting multiple environments and profile management. This skill is retained only because many existing InsureMO skills still depend on it for token management. Do NOT select it on your own initiative for new authentication work — use insuremo-auth-cli instead. Only use this skill when (1) the user explicitly names insuremo-auth, or (2) another InsureMO skill invokes it for authentication. When it is used, treat user-provided URLs as environment hints only: infer the canonical environment from the hostname, then always generate the login URL from this skill's configured environment host instead of the original page URL.
+[90m│[39m  [22m
+
+[1mInsuremo Dataio[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-dataio[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO DataIO assistant for import/export package planning, DataIO route
+[90m│[39m  classification, endpoint discovery, package-scope preflight, deploy task/step
+[90m│[39m  diagnostics, git repository/history inspection, import-report/data-change
+[90m│[39m  reads, and bundled module-specific DataIO scripts.
+[90m│[39m  [22m
+
+[1mInsuremo Dd Config[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-dd-config[39m
+[90m│[39m
+[90m│[39m      [2mManage Data Dictionary (DD) fields, bindings, and code tables on the InsureMO platform. Use when (1) user asks to search, create, or update DD fields, (2) user mentions "data dictionary", "DD field", "field binding", "policy field", "codetable", "code table", (3) user wants to inspect DD object structures or field definitions, (4) user needs to configure field bindings for a product or any other context, or (5) user wants to look up code table values. This skill covers DD field CRUD, field binding management, and code table queries.
+[90m│[39m  [22m
+
+[1mInsuremo Deep Search[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-deep-search[39m
+[90m│[39m
+[90m│[39m      [2mAI-powered search for InsureMO platform documentation and source code. Use when (1) querying InsureMO APIs, SDKs, or business logic, (2) searching configuration data (products, rules, tables), (3) looking up iComposer functions/APIs, (4) finding code samples, or (5) user mentions "deep search".[22m
+
+[1mInsuremo Design With Eric[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-design-with-eric[39m
+[90m│[39m
+[90m│[39m      [2mInsurance capability-driven API design skill for InsureMO / IComposer before coding.
+[90m│[39m  
+[90m│[39m  Use when user wants to design, scope, review, or refine an API or workflow; provides insurance business requirements, journeys, or capability needs and wants APIs derived; asks for use cases, composition matrix, API spec, flowchart, sequence diagram, pseudocode, handoff, or design review; wants to revise files under docs/designs/; says "先规划一下再写代码" or "设计一个新API"; or is designing product, new business, underwriting, policy servicing, claims, finance / BCP, sales channel, reinsurance, or shared business APIs.
+[90m│[39m  
+[90m│[39m  Do not use when user wants code implementation, debugging, tests, deployment, runtime behavior, method signatures, SDK usage discovery, or existing API/function lookup. Route those to icomposer-dev or insuremo-deep-search as appropriate.
+[90m│[39m  [22m
+
+[1mInsuremo Design With Tony[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-design-with-tony[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO application design skill for developers, business analysts, and architects. Produces a single design.md combining requirements and functional design. Design focuses on API design and SDK functions - architecture and NFRs are handled by InsureMO platform. Use when: (1) Designing a new InsureMO application or feature, (2) Planning iComposer API design for an insurance use case, (3) Designing UI for InsureMO (greenfield SPA or
+[90m│[39m      enhancement to Easy PA/BCP/Claim), (4) Planning product configuration changes,
+[90m│[39m      (5) Need to figure out which InsureMO SDK functions to use for a business requirement,
+[90m│[39m      (6) Deriving a policy JSON model for policy/proposal transactions.
+[90m│[39m  Coordinates with insuremo-deep-search, icomposer-dev, and insuremo-uic skills.
+[90m│[39m  [22m
+
+[1mInsuremo Devops Helper[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-devops-helper[39m
+[90m│[39m
+[90m│[39m      [2mManage InsureMO CI/CD pipelines, service deployments, and runtime status via `imo devops` CLI: list services, list environments, list tenants, trigger CI builds, trigger CD deployments, check build status, check pod running status, get pod logs. Also use when the user wants to deploy code, check if a service is running, view build logs, roll back a deployment, or troubleshoot a crashed service — even if they don't explicitly say "devops".
+[90m│[39m  
+[90m│[39m  IMPORTANT: This skill handles CLI-based CI/CD and runtime operations only. Do NOT trigger for application code changes, API development, or configuration editing — those are code tasks, not deployment operations.
+[90m│[39m  [22m
+
+[1mInsuremo Gi Bcp Query[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-gi-bcp-query[39m
+[90m│[39m
+[90m│[39m      [2mQuery InsureMO BCP (Billing/Collection/Payment or Refund) transaction records via the bcp-core API. Use this skill whenever the user wants to look up, inspect, or trace BCP transaction data — including BizTransactions, Collections, Payments or Refunds, Suspense entries, Offsets, GL records, Voucher details, Commission records, Settlements, and ARAP entries. Trigger on keywords like "bcp transaction", "biz transaction", "collection", "payment", "refund", "suspense", "offset", "voucher", "GL entry", "receipt no", "payment no", "refund no", "commission", "settlement", "arap", "fee type", "policy no", "claim no", "proposal no", or any request to retrieve financial transaction details from the InsureMO BCP module.
+[90m│[39m  [22m
+
+[1mInsuremo Gi Pa Query[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-gi-pa-query[39m
+[90m│[39m
+[90m│[39m      [2mQuery policy and endorsement data from InsureMO GI/PA system. Use when (1) user needs to retrieve policy information by policyId, policyCode, or policyNo, (2) user needs to query endorsement/endo data by endoId or endoCode, (3) user needs to get policy fee info for new business or endorsements, (4) user needs to load policy other info (underwriting info), (5) user needs to query endorsement history, (6) user needs advanced policy search with flexible conditions (product code, status, date range, etc.), or (7) user needs to look up code table values for search fields. This skill supports both policy-centric queries (proposal, pa modules) and endorsement-centric queries (endo module), plus advanced search with dynamic conditions.
+[90m│[39m  [22m
+
+[1mInsuremo Gi Policy Sample Create[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-gi-policy-sample-create[39m
+[90m│[39m
+[90m│[39m      [2mCreate sample policy data for GI (General Insurance) products on the InsureMO platform, and open the Policy API Test workbench. Use when (1) user asks to generate or create sample policy data, (2) user mentions "policy sample", "sample policy", "test policy", "policy data generation", (3) user needs to create mock policy records for testing or demonstration purposes, (4) user wants to bulk-generate policy samples for GI products, (5) user asks to "open the Policy API Test" / "open Policy API Sample config page", (6) user wants to pull, list, or view the policy samples / API samples of a specific product (e.g. "load samples for product TBTI", "show me the policy sample list", "the latest ready sample"), or (7) user wants to run an API chain end-to-end — create, attach, validate, calculate, underwrite, save, and issue a policy, or run the EasyPA flow APIs. Covers policy creation with configurable coverage, insured items, and product-specific fields.
+[90m│[39m  [22m
+
+[1mInsuremo Gi Product Config[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-gi-product-config[39m
+[90m│[39m
+[90m│[39m      [2mCreate and set up GI (General Insurance) products on the InsureMO platform, including Technical Products and Market Products with their element trees (coverages, risks, benefits, limits, clauses, etc.). Use when (1) user asks to create, set up, or configure a GI product, (2) user mentions "create product", "new product", "product setup", "technical product", "market product", "product element tree", (3) user wants to add coverages, risks, or benefits to a product, (4) user needs to build a product from scratch or generate a product payload, (5) user wants to inspect or validate an existing product's element structure, or (6) user wants to work with product plans — mentions "plan", "product plan", "plan code", "plan configuration", searching/loading/copying/deleting plans, creating or updating a plan, configuring plan coverages, sum insured or limit/deductible defaults on a plan, submitting a plan, or plan packages such as Silver/Gold/Platinum tiers. This skill covers the full product creation lifecycle: payload generation, product CRUD, element tree management, validation, and product plan configuration. It does NOT cover DD generation, publication, or adapter/package flows; route those to focused Product, DataIO, or deep-search workflows.
+[90m│[39m  [22m
+
+[1mInsuremo Gi Product Config Design With Merlin[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-gi-product-config-design-with-merlin[39m
+[90m│[39m
+[90m│[39m      [2mProduct configuration design skill for InsureMO — transforms a product spec
+[90m│[39m  document into 11 structured configuration design documents that map product
+[90m│[39m  features to InsureMO's definition modules: Product Structure, Data
+[90m│[39m  Dictionary, Plan, iTable, Rating, Rule, Claims, Reinsurance, Agency/Channel,
+[90m│[39m  Proposal UI, and Endorsement. Can also generate an interactive HTML mockup
+[90m│[39m  of the policy data-entry screen from the design output.
+[90m│[39m  
+[90m│[39m  Use when the user provides a product specification (product requirements
+[90m│[39m  document, insurance product spec, product feature list), wants to design
+[90m│[39m  InsureMO product configuration, asks to create a product config design doc,
+[90m│[39m  says "设计产品配置" or "分析产品需求并出配置方案", or needs to map a
+[90m│[39m  product spec to InsureMO config resources before implementation.
+[90m│[39m  
+[90m│[39m  Do not use for runtime InsureMO config CRUD (route to the relevant config
+[90m│[39m  skill: `insuremo-gi-product-config` for product tree + DD,
+[90m│[39m  `insuremo-itables` for tables, `insuremo-gi-rating-config` for rating,
+[90m│[39m  `insuremo-rule-config` for rules), API design tasks (route to
+[90m│[39m  insuremo-design-with-eric), or code implementation (route to icomposer-dev).
+[90m│[39m  [22m
+
+[1mInsuremo Gi Rating Config[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-gi-rating-config[39m
+[90m│[39m
+[90m│[39m      [2mConfigure and manage GI (General Insurance) rating factors, rating tables, and rating algorithms on the InsureMO platform. Use when (1) user asks to create, update, or view rating configurations, (2) user mentions "rating config", "rating factor", "rating table", "rate table", "premium calculation", (3) user needs to set up or modify rating algorithms for GI products, or (4) user wants to query or test existing rating configurations. Covers rating factor definitions, lookup tables, formula configurations, and rating step management.
+[90m│[39m  [22m
+
+[1mInsuremo Ics Base[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-ics-base[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO ICS base configuration assistant for shared configuration resources:
+[90m│[39m  modules, groups, messages, i18n UI labels, context master data, Search
+[90m│[39m  support, Numbering, Workday, Upload, Currency, language
+[90m│[39m  metadata, local cache utilities, and other foundational metadata helpers.
+[90m│[39m  
+[90m│[39m  Use when managing foundational ICS base configuration resources or bundled
+[90m│[39m  scripts for module/group governance, message and i18n authoring, context
+[90m│[39m  metadata, search support, numbering, workday calendars, upload
+[90m│[39m  structure configuration, currency catalogs/settings/exchange rates, active
+[90m│[39m  language lookup, local skill cache cleanup, tenant/user/resource metadata,
+[90m│[39m  or other shared base lookups. Do not use this skill for iTables, DataIO
+[90m│[39m  package movement, Rating, Rule V1/V2, Product, Data Dictionary, Workflow,
+[90m│[39m  Batch V2, Country, Audit Log, URP security administration, DSL Script or
+[90m│[39m  Config Snippet maintenance, or other specialized domain work; route those
+[90m│[39m  to focused skills or explicit future owners.
+[90m│[39m  [22m
+
+[1mInsuremo Ics Config History[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-ics-config-history[39m
+[90m│[39m
+[90m│[39m      [2mQuery InsureMO configuration audit logs to track who changed what and when. Use this skill when users need: audit log queries, configuration change history, operation records, modification tracking, traceId lookup, entity lookup, or to answer "who modified this config". Handles upload history and DataIO report downloads. Default query range is last 3 months. Trigger keywords: audit log, change history, configuration history, modification record, who changed, traceId, entity, upload history, DataIO report, operation tracking.
+[90m│[39m  [22m
+
+[1mInsuremo Ihub[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-ihub[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO iHub integration development skill — the complete, single entry point for authoring, validating, testing, and publishing iHub rules (validators, transformers, routers, switches, header transformers) in Rego. Covers offline Rego/iHub/OPA semantics, builtin/reference/example lookup, error diagnosis, validate/test against the tv-service reference backend; AND portal sync I/O — list/pull/push integrations and branches, pull-rule/push-rule by id, and remote-eval against the live tenant. Authenticates via the shared insuremo-auth-cli skill. Use this skill for any iHub task; it routes internally between offline-semantics and portal-I/O rather than splitting across multiple skills.
+[90m│[39m  [22m
+
+[1mInsuremo Itables[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-itables[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO iTables assistant for the focused CodeTable, DataTable, Configuration Table as RateTable, CodeTable translation, and GlobalParameter surface. Use for iTables discovery, runtime lookup, authoring preflight, CodeTable translation safety, RecordUsage scope checks, DataIO route planning, rules/API-capability guidance, and direct access to the bundled iTables module scripts.
+[90m│[39m  [22m
+
+[1mInsuremo Log[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-log[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO application log query and tail assistant using the native `imo log` CLI. Use when the user wants to search, filter, tail, or export application logs or API access logs from any InsureMO environment. Also use when investigating errors, trace IDs, service behavior, log levels, or time-range log patterns. Handles time range parsing (relative and absolute), Lucene query syntax, output formatting, field selection, base64 decode, and log export. Delegates authentication to `insuremo-auth-cli`.
+[90m│[39m  [22m
+
+[1mInsuremo Mcp Server Helper[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-mcp-server-helper[39m
+[90m│[39m
+[90m│[39m      [2mHelp users understand, configure, and operate InsureMO MCP Server — Server/Tool/Prompt configuration through the `imo mcp` CLI or the MCP Configure console, the paired iComposer APIs that implement the tools, MCP client setup, runtime call logs, and migration off the legacy DataTable configuration. Use this skill whenever the user mentions MCP tools, MCP server, MCP prompts, tool/prompt/server configuration in MCP context, `imo mcp`, MCP client configuration, MCP call logs, the mcp_tools_list DataTable, or wants to develop iComposer APIs for MCP, even if they don't explicitly say "MCP Server".[22m
+
+[1mInsuremo Output Service Helper[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-output-service-helper[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO Output Service skill — combines HTML-to-Handlebars template conversion, Word-to-Template conversion, JSON-to-HTML template generation (AI-assisted), and Output Service operations (template upload, print task generation, result retrieval).
+[90m│[39m  
+[90m│[39m  Use when user needs to: convert static HTML to Handlebars template, reverse engineer a filled HTML/Word document back into a reusable template, convert a filled Word docx to a Word Docgen template, generate an HTML template from JSON data, upload templates to InsureMO, generate print tasks (PDF/HTML/Word/Excel/CSV), download print results, or do the full workflow from HTML/Word/JSON → template → upload → generate → download.
+[90m│[39m  
+[90m│[39m  Also use when user mentions: Handlebars template, Jasper report, document generation, PDF generation, print template, Word document generation, Word template, docx template, word docgen, JSON to HTML template, generate template from JSON, HTML to template conversion, template upload, print task, batch PDF generation, document template development.
+[90m│[39m  
+[90m│[39m  Also triggers on phrases like: policy print template, policy PDF template, policy document template, endorsement template, print template, list templates, query templates, what templates are available, template list, upload template, download PDF, generate PDF, document template, generate template from JSON, generate HTML from JSON.
+[90m│[39m  
+[90m│[39m  Use this skill even if the user doesn't explicitly mention "Output Service" — any request involving template creation, conversion, uploading, PDF/Word/Excel generation from templates, or generating an HTML template from JSON data should trigger this skill.
+[90m│[39m  [22m
+
+[1mInsuremo Playbook Manager[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-auth-cli[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO authentication through the `imo auth` CLI instead of bundled skill scripts. Use when an InsureMO task needs portal OAuth login, token preparation, profile inspection, logout, tenant-specific authentication, remote environment token derivation, manual SSH/remote login, or recovery from 401 errors and the user wants the repository-standard `imo auth` command flow. Also use when replacing or avoiding the legacy `insuremo-auth` Node helper script while still returning `access_token`, `gateway`, `domain`, `tenant_code`, and `tenant_domain` for downstream InsureMO API calls. Always run `imo auth` directly in the shell — never wrap prepare/login/remote in Python or Node helpers from this skill.
+[90m│[39m  [22m
+[90m│[39m
+[90m│[39m    [36minsuremo-playbook-manager[39m
+[90m│[39m
+[90m│[39m      [2mCreate and manage API Playbooks on InsureMO platform. A Playbook is a curated collection of related APIs with markdown documentation that describes the integration flow, key concepts, and usage patterns. Use this skill when: (1) Creating a new API Playbook from any API documentation (swagger/OpenAPI spec, Postman collection, plain text API docs, etc.), (2) Creating a Playbook with a markdown header describing API relationships and usage flow, (3) Managing Playbook metadata and associated API items, (4) Converting API documentation into structured Playbooks, (5) Users mention "playbook", "API group", "API collection", or want to organize APIs on InsureMO platform.
+[90m│[39m  [22m
+
+[1mInsuremo Rule Config[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-rule-config[39m
+[90m│[39m
+[90m│[39m      [2mInsurance rule generation and management assistant.
+[90m│[39m  Use when:
+[90m│[39m  (1) user asks to create/write/generate an insurance business rule
+[90m│[39m  (2) user provides a business requirement for rule engine
+[90m│[39m  (3) user mentions "rule config", "rule writer", "create rule", "generate rule"
+[90m│[39m  (4) user wants to manage, test, search rules (V1 & V2)
+[90m│[39m  (5) user wants to create, update, or search V1 rule groups
+[90m│[39m  (6) user mentions "business condition", "rule condition", or "LabelData" — these all refer to the same concept
+[90m│[39m  Given query + category + ruleVersion + domainId/moduleId,
+[90m│[39m  fetches context via the DSL generate skill and generates
+[90m│[39m  a complete Groovy rule script locally. Also supports rule CRUD,
+[90m│[39m  rule testing with trace analysis, and V1 group management.
+[90m│[39m  [22m
+
+[1mInsuremo Rule Dsl Generate[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-rule-dsl-generate[39m
+[90m│[39m
+[90m│[39m      [2mAI-powered insurance rule DSL generation assistant.
+[90m│[39m  Use when:
+[90m│[39m  (1) user asks to generate or write a rule DSL script from business requirements
+[90m│[39m  (2) user wants to create rule scripts with data model fields, DSL operators, rate tables, and messages
+[90m│[39m  (3) user mentions "rule DSL", "generate rule script", "rule writer", "rule generation"
+[90m│[39m  (4) user wants step-by-step rule script generation with AI field extraction and mapping
+[90m│[39m  (5) user needs to analyze data model usage, message usage, or rate table usage for rules
+[90m│[39m  Make sure to use this skill whenever the user asks about generating rule code or rule DSL,
+[90m│[39m  even if they don't explicitly mention "DSL". Also use when user mentions "write rule",
+[90m│[39m  "create rule script", "rule code generation", or "AI rule writer".
+[90m│[39m  [22m
+
+[1mInsuremo Skill Manager[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-skill-manager[39m
+[90m│[39m
+[90m│[39m      [2mInsureMO Skill Manager, supports installation, update, and querying of skills in the InsureMO skill repository. Use cases: (1) When you need to install InsureMO skills; (2) When you need to update installed InsureMO skills; (3) When you need to query the list of available InsureMO skills; (4) When you need to verify if the installed skills are valid.
+[90m│[39m  [22m
+
+[1mInsuremo Uic[22m
+[90m│[39m
+[90m│[39m    [36minsuremo-uic[39m
+[90m│[39m
+[90m│[39m      [2mManage InsureMO UI Connector (UIC) page lifecycle via `imo uic` CLI: init, create, push (deploy to UIC server), pull (download from UIC server), search, exchange-code, history, share, resource discovery, API metadata fetching, file upload/list. Also use when building a dashboard, admin tool, or custom hosted InsureMO page with the `imo uic` CLI.
+[90m│[39m  IMPORTANT: This skill handles CLI deployment operations only. Do NOT trigger when the user asks to modify page content or update data displayed on a page — that means edit the HTML/JS code, not run CLI commands. Do NOT trigger on generic "git pull" / "git push" — only trigger when the context is InsureMO UIC pages (e.g. "pull the UIC page", "push page to server", "imo uic").
+[90m│[39m  [22m
+
+[1mProject Doc Manager[22m
+[90m│[39m
+[90m│[39m    [36mproject-doc-manager[39m
+[90m│[39m
+[90m│[39m      [2mManage project documentation with AI-assisted writing, review, and maintenance. Use when users need to create, update, organize, or review project documentation including README files, API docs, architecture docs, changelogs, and user guides. Supports documentation quality checks, structure optimization, and cross-document consistency.[22m
+
+[1mSkill Creator[22m
+[90m│[39m
+[90m│[39m    [36mskill-creator[39m
+[90m│[39m
+[90m│[39m      [2mCreate new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.[22m
+
+[1mUsing Insuremo Skills[22m
+[90m│[39m
+[90m│[39m    [36musing-insuremo-skills[39m
+[90m│[39m
+[90m│[39m      [2mGuide for discovering and using InsureMO skills correctly. Use when starting any InsureMO-related conversation, when a user asks "what skills do I have", "how to do X with InsureMO", or when you detect the user is working on InsureMO platform tasks (iComposer development, configuration, API calls, UI Connector, documentation, skill management, authentication). Also use when you are unsure which InsureMO skill applies to the current task — check here first before responding.
+[90m│[39m  [22m
+
+[1mGeneral[22m
+[90m│[39m
+[90m│[39m    [36micomposer-code[39m
+[90m│[39m
+[90m│[39m      [2mIComposer all-in-one skill for InsureMO Groovy work: write, review, and push
+[90m│[39m  RESTful APIs / Service Functions, generate data models, build Spring Batch jobs.
+[90m│[39m  
+[90m│[39m  SUPERSEDES icomposer-dev, icomposer-code-manager, icomposer-data-model,
+[90m│[39m  icomposer-batch, icomposer-reviewer — for ANY iComposer code task, prefer
+[90m│[39m  this skill over those legacy ones (they are kept for rollback only).
+[90m│[39m  
+[90m│[39m  Use when:
+[90m│[39m  - writing/modifying iComposer RESTful APIs or Service Functions; choosing SDK
+[90m│[39m    calls, utility classes, or templates; running check/test debugging
+[90m│[39m  - loading/pushing/diffing/releasing API/Function/Model code to the server.
+[90m│[39m    IMPORTANT: version conflicts require user confirmation; never auto-resolve
+[90m│[39m  - generating a data-model schema from a JSON sample / Java VO / NL / swagger
+[90m│[39m  - creating/updating an iComposer Spring Batch job (YAML manifest or NL
+[90m│[39m    description; Reader/Processor/Writer/Tasklet/Listener codegen; push/test-run)
+[90m│[39m  - reviewing iComposer Groovy code (quality, correctness, security, performance,
+[90m│[39m    Chinese-comment translation)
+[90m│[39m  
+[90m│[39m  Do NOT use for: general InsureMO docs (use `insuremo-deep-search`); CodeTable/
+[90m│[39m  DataTable/products/Rule V1 config (use `insuremo-config`); the Global Data
+[90m│[39m  Dictionary `/v1/mgmt/model` (different concept).
+[90m│[39m  
+[90m│[39m  Never `Read` `knowledge/sdk/` or `knowledge/utils/` JSON — use dev CLI subcommands.
+[90m│[39m  
+[90m│[39m  On hosts supporting `context: fork` this runs in an ISOLATED subagent that
+[90m│[39m  cannot see conversation history — the caller MUST pass the complete task
+[90m│[39m  (operation + concrete target path) as invocation args; resolve fuzzy
+[90m│[39m  references (e.g. "the file we just edited") before invoking.
+[90m│[39m  [22m
+
+[90m│[39m
+[90m└[39m  Use --skill <name> to install specific skills
+

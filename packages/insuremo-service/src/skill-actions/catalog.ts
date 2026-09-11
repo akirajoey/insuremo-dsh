@@ -7,7 +7,14 @@ export const SKILLS_TOOL_SOURCE = "insuremo-skills" as const;
 export const SKILL_CATALOG_OUTPUT_LIMIT_BYTES = 64 * 1024;
 /** Keep the cache and every response finite even when a source grows unexpectedly. */
 export const SKILL_CATALOG_MAX_ENTRIES = 128;
-export const SKILL_CATALOG_DESCRIPTION_MAX = 500;
+/**
+ * Description bound. The real 1.1.2 macOS capture (`add -l`, 36 skills) measures
+ * a maximum joined description of 1618 characters; the Windows capture wraps the
+ * same descriptions as single long lines (14 rows above 500). 4096 keeps roughly
+ * 2.5x headroom for longer future descriptions while staying bounded — an
+ * over-limit description is still rejected (fail closed).
+ */
+export const SKILL_CATALOG_DESCRIPTION_MAX = 4096;
 export const SKILL_CATALOG_TTL_MS = 60_000;
 export const SKILL_CATALOG_TIMEOUT_MS = 15_000;
 export const SKILL_CATALOG_SCHEMA_VERSION = "1" as const;
@@ -48,9 +55,55 @@ export type CatalogParseResult =
 
 const ANSI_ESCAPE = /\u001B(?:\](?:[^\u0007\u001B]|\u001B(?=\\))*\u0007|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
-const MESSAGE_PREFIX = /^\s*[│|]\s{2,}/u;
+const ERASE_SEQUENCE = /^\u001B\[[0-9;]*[JK]/u;
+const CURSOR_HOME = /^\u001B\[[0-9]*D/u;
+/**
+ * Assemble terminal output into logical lines.
+ *
+ * clack's spinner rewrites one visual line with `\r`/`ESC[<n>D` followed by
+ * `ESC[K`/`ESC[J`; stripping those bytes would concatenate the erased spinner
+ * text with the replacement text ("Found 36 skills" glued to the previous
+ * fragment), so erasure INVALIDATES the pending visual line instead: the
+ * carriage return resets it and an erase sequence drops it. A physical `\n`
+ * terminates the logical line either way.
+ */
+export function assembleLogicalLines(output: string): string[] {
+  const lines: string[] = [];
+  let buffer = "";
+  for (let index = 0; index < output.length; index += 1) {
+    const char = output[index];
+    if (char === "\r") {
+      if (output[index + 1] === "\n") {
+        lines.push(buffer);
+        buffer = "";
+        index += 1;
+        continue;
+      }
+      buffer = "";
+      continue;
+    }
+    if (char === "\n") {
+      lines.push(buffer);
+      buffer = "";
+      continue;
+    }
+    if (char === "\u001B") {
+      const rest = output.slice(index);
+      const erase = ERASE_SEQUENCE.exec(rest) ?? CURSOR_HOME.exec(rest);
+      if (erase !== null) {
+        if (ERASE_SEQUENCE.test(erase[0])) buffer = "";
+        index += erase[0].length - 1;
+        continue;
+      }
+    }
+    buffer += char;
+  }
+  if (buffer.length > 0) lines.push(buffer);
+  return lines;
+}
+const MESSAGE_PREFIX = /^\s*([│|┃└┌├─])(\s{2,})/u;
 const PREFIXES = /^(?:[┌└│|—]\s*|T(?=\s)\s*)/u;
-const INDICATOR = /^[◇◆●•*oO0◒◐◓◑x>!▲■]\s{1,}/u;
+const INDICATOR = /^[◇◆●•*oO0◒◐◓◑x>!▲■✔✓]\s{1,}/u;
 const FOUND = /^Found\s+([0-9]{1,4})\s+skills?$/u;
 const FOOTER = "Use --skill <name> to install specific skills";
 const EMPTY_STATUS = "No skills found";
@@ -90,7 +143,7 @@ export function parseSkillCatalogOutput(output: string): CatalogParseResult {
   if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > SKILL_CATALOG_OUTPUT_LIMIT_BYTES) {
     return { ok: false, reason: "oversized" };
   }
-  const lines = output.replace(/\r\n?/gu, "\n").split("\n").map(cleanLine);
+  const lines = assembleLogicalLines(output).map(cleanLine);
   const markerIndexes = lines
     .map((line, index) => (lineText(line) === MARKER ? index : -1))
     .filter(index => index >= 0);
@@ -98,7 +151,7 @@ export function parseSkillCatalogOutput(output: string): CatalogParseResult {
   const markerIndex = markerIndexes[0]!;
 
   const footerIndexes = lines
-    .map((line, index) => (messageText(line) === FOOTER ? index : -1))
+    .map((line, index) => (messageOf(line)?.text === FOOTER ? index : -1))
     .filter(index => index >= 0);
   if (footerIndexes.length !== 1 || footerIndexes[0]! <= markerIndex) return { ok: false, reason: "format" };
   const footerIndex = footerIndexes[0]!;
@@ -117,11 +170,12 @@ export function parseSkillCatalogOutput(output: string): CatalogParseResult {
   }
 
   // Validate the part before the marker as well. In particular, an npm/git
-  // log accidentally written to stdout must not be mistaken for a catalog.
+  // log accidentally written to stdout must not be mistaken for a catalog,
+  // and the clack ASCII logo is accepted only by its bounded glyph shape.
   for (const line of lines.slice(0, markerIndex)) {
     const text = lineText(line);
     if (text.length === 0) continue;
-    if (!PREAMBLE_ALLOWED.some(pattern => pattern.test(text))) return { ok: false, reason: "format" };
+    if (!PREAMBLE_ALLOWED.some(pattern => pattern.test(text)) && !isLogoLine(text)) return { ok: false, reason: "format" };
   }
 
   for (const line of lines.slice(footerIndex + 1)) {
@@ -132,40 +186,66 @@ export function parseSkillCatalogOutput(output: string): CatalogParseResult {
   const names = new Set<string>();
   let currentGroup: string | undefined;
   let pendingName: string | undefined;
+  let descriptionLines: string[] = [];
   let sawFooter = false;
+
+  // Finish the pending row, if any. A name without a description is malformed,
+  // and so is a description that is empty/oversized/control-bearing after the
+  // paragraph separators are trimmed.
+  const flushSkill = (): boolean => {
+    if (pendingName === undefined) return true;
+    const description = descriptionLines.join("\n").trim();
+    if (descriptionLines.length === 0 || !validDescription(description) || skills.length >= SKILL_CATALOG_MAX_ENTRIES) return false;
+    names.add(pendingName);
+    skills.push({
+      type: "skill",
+      name: pendingName,
+      description,
+      ...(currentGroup === undefined ? {} : { group: currentGroup }),
+    });
+    pendingName = undefined;
+    descriptionLines = [];
+    return true;
+  };
 
   for (let index = markerIndex + 1; index <= footerIndex; index += 1) {
     const line = lines[index] ?? "";
     const text = lineText(line);
-    if (text.length === 0) continue;
-    const message = messageText(line);
+    if (text.length === 0) {
+      // Separators inside a description are paragraph breaks; the trailing break
+      // before the next group/name is trimmed by flushSkill().
+      if (pendingName !== undefined) descriptionLines.push("");
+      continue;
+    }
+    const message = messageOf(line);
     if (message !== undefined) {
-      if (message === FOOTER) {
-        if (pendingName !== undefined) return { ok: false, reason: "format" };
+      if (message.text === FOOTER) {
+        if (!flushSkill()) return { ok: false, reason: "format" };
         sawFooter = true;
         continue;
       }
       if (sawFooter) return { ok: false, reason: "format" };
-      if (pendingName === undefined) {
-        if (!validSkillName(message) || names.has(message)) return { ok: false, reason: "format" };
-        pendingName = message;
-      } else {
-        if (!validDescription(message) || skills.length >= SKILL_CATALOG_MAX_ENTRIES) return { ok: false, reason: "format" };
-        names.add(pendingName);
-        skills.push({
-          type: "skill",
-          name: pendingName,
-          description: message,
-          ...(currentGroup === undefined ? {} : { group: currentGroup }),
-        });
-        pendingName = undefined;
+      if (message.text.length === 0) {
+        if (pendingName !== undefined) descriptionLines.push("");
+        continue;
       }
+      // A name row is the only shape with the name indent AND a kebab name.
+      // The real 1.1.2 stream also emits description continuations at the same
+      // indent, so the name test is content-based as well as shape-based.
+      if (message.indent === 4 && validSkillName(message.text)) {
+        if (!flushSkill()) return { ok: false, reason: "format" };
+        if (names.has(message.text)) return { ok: false, reason: "format" };
+        pendingName = message.text;
+        continue;
+      }
+      if (message.indent !== 2 && message.indent !== 4 && message.indent !== 6) return { ok: false, reason: "format" };
+      if (pendingName === undefined) return { ok: false, reason: "format" };
+      descriptionLines.push(message.text);
       continue;
     }
-    // Only plain, bounded group headings are accepted between message pairs.
-    // Any unknown prefixed/log line therefore fails closed instead of being
-    // ignored as decoration.
-    if (sawFooter || pendingName !== undefined || !validGroup(text)) return { ok: false, reason: "format" };
+    // Only plain, bounded group headings are accepted between skills; a heading
+    // completing a pending skill must still carry a valid description.
+    if (sawFooter || !flushSkill() || !validGroup(text)) return { ok: false, reason: "format" };
     currentGroup = text;
   }
 
@@ -178,7 +258,7 @@ export function parseSkillCatalogOutput(output: string): CatalogParseResult {
 /** Recognize only the documented 1.1.2 empty-source failure envelope. */
 export function isEmptySkillCatalogOutput(output: string): boolean {
   if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > SKILL_CATALOG_OUTPUT_LIMIT_BYTES) return false;
-  const lines = output.replace(/\r\n?/gu, "\n").split("\n").map(cleanLine);
+  const lines = assembleLogicalLines(output).map(cleanLine);
   let foundStatus = 0;
   let foundDetail = 0;
   for (const line of lines) {
@@ -186,7 +266,7 @@ export function isEmptySkillCatalogOutput(output: string): boolean {
     if (text.length === 0) continue;
     if (text === EMPTY_STATUS) { foundStatus += 1; continue; }
     if (text === EMPTY_DETAIL) { foundDetail += 1; continue; }
-    if (!PREAMBLE_ALLOWED.some(pattern => pattern.test(text))) return false;
+    if (!PREAMBLE_ALLOWED.some(pattern => pattern.test(text)) && !isLogoLine(text)) return false;
   }
   return foundStatus === 1 && foundDetail === 1;
 }
@@ -241,10 +321,21 @@ function lineText(value: string): string {
   return text;
 }
 
-/** Return payload text only for the exact clack message prefix used by 1.1.2. */
-function messageText(value: string): string | undefined {
+/** Return the clack message payload and its indent for the 1.1.2 decoration set. */
+function messageOf(value: string): { readonly text: string; readonly indent: number } | undefined {
   const match = MESSAGE_PREFIX.exec(value);
-  return match === null ? undefined : value.slice(match[0].length).trim();
+  return match === null ? undefined : { text: value.slice(match[0].length).trim(), indent: match[2]!.length };
+}
+
+/**
+ * Bounded clack ASCII-logo line: box-drawing/block glyphs and spaces only,
+ * with a hard length bound. The real 1.1.2 logo is six such lines above the
+ * `skills` badge; anything with other characters is not a logo line.
+ */
+const LOGO_GLYPHS = /^[\s\u2500-\u257F\u2580-\u259F]+$/u;
+const LOGO_MAX_LENGTH = 200;
+function isLogoLine(text: string): boolean {
+  return text.length > 0 && text.length <= LOGO_MAX_LENGTH && /[^\s]/u.test(text) && LOGO_GLYPHS.test(text);
 }
 
 function validSkillName(value: string): boolean {
@@ -254,7 +345,8 @@ function validSkillName(value: string): boolean {
 function validDescription(value: string): boolean {
   return value.length > 0
     && value.length <= SKILL_CATALOG_DESCRIPTION_MAX
-    && !/[\u0000-\u001F\u007F]/u.test(value);
+    // Newlines are the parser's own paragraph separators; other control chars reject.
+    && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value);
 }
 
 function validGroup(value: string): boolean {

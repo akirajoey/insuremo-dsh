@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { parseSkillCatalogOutput, buildSkillCatalog, isEmptySkillCatalogOutput, SKILLS_TOOL_SOURCE } from "../src/skill-actions/catalog.ts";
+import {
+  assembleLogicalLines,
+  buildSkillCatalog,
+  isEmptySkillCatalogOutput,
+  parseSkillCatalogOutput,
+  SKILL_CATALOG_DESCRIPTION_MAX,
+  SKILLS_TOOL_SOURCE,
+} from "../src/skill-actions/catalog.ts";
 import { skillCatalogArgs, SKILLS_TOOL_PACKAGE, SKILLS_TOOL_REGISTRY } from "../src/skill-actions/preview.ts";
 import { withFixture } from "./support/skill-actions-fixture.ts";
 
@@ -44,7 +53,8 @@ test("catalog parser accepts the observed 1.1.2 add -l envelope and strips ANSI"
 
 test("catalog parser fails closed on logs, malformed rows, duplicates, count drift, and empty output", () => {
   assert.equal(parseSkillCatalogOutput("npm warn unexpected\n" + CATALOG_OUTPUT).ok, false);
-  assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("|      Beta helper", "|      Beta helper\n|      unexpected")).ok, false);
+  assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("|      Beta helper", "|      Beta helper\n../unexpected")).ok, false);
+  assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("|      Beta helper", "|      Beta helper\n|   odd-indent")).ok, false);
   assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("|    beta-skill", "|    alpha-skill")).ok, false);
   assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("Found 2 skills", "Found 3 skills")).ok, false);
   assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace(/Available Skills[\s\S]*$/, "Available Skills\n|  Use --skill <name> to install specific skills\n")).ok, false);
@@ -148,6 +158,79 @@ test("approved single-skill execution revalidates after TTL and never uses an ex
   } finally {
     Date.now = originalNow;
   }
+});
+
+const REAL_FIXTURE_PATH = fileURLToPath(new URL("./fixtures/skills-catalog-1.1.2-real.txt", import.meta.url));
+
+test("TASK-104 catalog parser accepts the real 1.1.2 macOS capture with all 36 skills", () => {
+  const raw = readFileSync(REAL_FIXTURE_PATH, "utf8");
+  const parsed = parseSkillCatalogOutput(raw);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.value.foundCount, 36);
+  assert.equal(parsed.value.skills.length, 36);
+  assert.equal(new Set(parsed.value.skills.map(skill => skill.name)).size, 36);
+  assert.equal(parsed.value.skills[0]?.name, "icomposer-batch");
+  assert.equal(parsed.value.skills[0]?.group, "Icomposer Batch");
+  const groups = [...new Set(parsed.value.skills.map(skill => skill.group))];
+  assert.equal(groups.length, 35, "35 real group headings (the General tail)");
+  assert.equal(groups.at(-1), "General");
+  // Multi-line descriptions are joined with newlines and stay under the bound.
+  const lengths = parsed.value.skills.map(skill => skill.description.length);
+  assert.equal(Math.max(...lengths), 1622, "measured maximum from the real capture");
+  assert.ok(parsed.value.skills.every(skill => skill.description.length <= SKILL_CATALOG_DESCRIPTION_MAX));
+  assert.ok(parsed.value.skills.some(skill => skill.description.includes("\n")), "wrapped descriptions are preserved");
+  // No absolute host path may survive parsing.
+  assert.equal(JSON.stringify(parsed.value).includes("/Users/"), false);
+});
+
+test("TASK-104 fix 1: a box-drawing footer (└) is recognized instead of failing closed", () => {
+  const parsed = parseSkillCatalogOutput(CATALOG_OUTPUT.replace("|  Use --skill", "└  Use --skill"));
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.value.skills.length, 2);
+});
+
+test("TASK-104 fix 2: CR + erase sequences invalidate the spinner line instead of concatenating it", () => {
+  const spinner = "◒  Fetching skills from npm registry...";
+  const rewrite = `\r\u001b[999D\u001b[J✔  Found 2 skills`;
+  const output = CATALOG_OUTPUT.replace("o  Found 2 skills", `${spinner}${rewrite}`);
+  const parsed = parseSkillCatalogOutput(output);
+  assert.equal(parsed.ok, true, "the rewritten line must parse as the Found line");
+  if (parsed.ok) assert.equal(parsed.value.foundCount, 2);
+  assert.deepEqual(assembleLogicalLines(`spinner text${rewrite}`), ["✔  Found 2 skills"]);
+  assert.deepEqual(assembleLogicalLines(`stale\r\u001b[999D\u001b[Jfresh`), ["fresh"]);
+});
+
+test("TASK-104 fix 3: the bounded clack ASCII logo is accepted while unknown decoration is not", () => {
+  const logo = [
+    "███████╗██╗  ██╗██╗██╗     ██╗     ███████╗",
+    "██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝",
+    "███████╗█████╔╝ ██║██║     ██║     ███████╗",
+    "╚════██║██╔═██╗ ██║██║     ██║     ╚════██║",
+    "███████║██║  ██╗██║███████╗███████╗███████║",
+    "╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝",
+  ].join("\n");
+  const withLogo = `${logo}\n${CATALOG_OUTPUT}`;
+  assert.equal(parseSkillCatalogOutput(withLogo).ok, true);
+  assert.equal(parseSkillCatalogOutput(`${logo}\nNOT A LOGO\n${CATALOG_OUTPUT}`).ok, false);
+  assert.equal(parseSkillCatalogOutput(`${"█".repeat(201)}\n${CATALOG_OUTPUT}`).ok, false);
+});
+
+test("TASK-104 fix 4: description bound follows the measured real maximum with margin and still rejects overflow", () => {
+  assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("Alpha helper", "A".repeat(800))).ok, true);
+  assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("Alpha helper", "A".repeat(SKILL_CATALOG_DESCRIPTION_MAX))).ok, true);
+  assert.equal(parseSkillCatalogOutput(CATALOG_OUTPUT.replace("Alpha helper", "A".repeat(SKILL_CATALOG_DESCRIPTION_MAX + 1))).ok, false);
+  // Multi-line continuation rows accumulate into one description.
+  const wrapped = CATALOG_OUTPUT.replace("|      Beta helper", "|      Beta helper\n|  continued line");
+  const parsed = parseSkillCatalogOutput(wrapped);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.value.skills[1]?.description, "Beta helper\ncontinued line");
+});
+
+test("TASK-104 empty-envelope check tolerates the logo and erase shapes", () => {
+  const empty = `████████╗███╗\r\u001b[999D\u001b[Jo  No skills found\n|  No valid skills found. Skills require a SKILL.md with name and description.\n`;
+  assert.equal(isEmptySkillCatalogOutput(empty), true);
+  assert.equal(isEmptySkillCatalogOutput(`${empty}|  unexpected trailing`), false);
 });
 
 test("buildSkillCatalog keeps scenario entries fixed and never exposes source paths", () => {
