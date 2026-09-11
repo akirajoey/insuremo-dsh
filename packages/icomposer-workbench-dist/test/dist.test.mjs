@@ -53,7 +53,7 @@ test("host entry aggregates nine packages in dependency order with union inject"
     assert.ok(source.includes(name === "verify" || name === "code-intelligence" ? alias : `as ${alias}`), `aggregate missing import for ${name}`);
   }
   // APPLY order (P0): service first, then registries, then imoAuth injectors
-  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "IcomposerVerifyService", "IciContextService", "IciEngineService", "IcomposerVerifyToolService", "write"];
+  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "IcomposerVerifyService", "IciContextService", "IciEngineService", "ExplainConfigService", "ExplainScheduler", "ExplainRoutesService", "IcomposerVerifyToolService", "write"];
   let lastApply = -1;
   for (const alias of applyOrder) {
     const idx = source.indexOf(`ctx.plugin(${alias} as never`);
@@ -67,6 +67,13 @@ test("host entry aggregates nine packages in dependency order with union inject"
     const injectorApply = source.indexOf(`ctx.plugin(${injector} as never`);
     assert.ok(serviceApply >= 0 && injectorApply > serviceApply, `${injector} must mount after insuremo-service (imoAuth)`);
   }
+  // TASK-105 FIX: ExplainConfigService (iciExplainConfig) mounts BEFORE the
+  // explain scheduler/routes, or both stay dormant and every explain route 404s.
+  const configApply = source.indexOf("ctx.plugin(ExplainConfigService as never");
+  const schedulerApply = source.indexOf("ctx.plugin(ExplainScheduler as never");
+  const explainRoutesApply = source.indexOf("ctx.plugin(ExplainRoutesService as never");
+  assert.ok(configApply >= 0, "aggregate must mount ExplainConfigService");
+  assert.ok(configApply < schedulerApply && schedulerApply < explainRoutesApply, "explain config must mount first");
   // write still after code-intelligence
   const writeApply = source.indexOf("ctx.plugin(write as never");
   const iciApply = source.indexOf("ctx.plugin(IciEngineService as never");

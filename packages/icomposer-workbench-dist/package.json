@@ -38,7 +38,7 @@
     "build": "node ../../scripts/clean-dist-lib.mjs && tsdown",
     "prepare": "pnpm run build",
     "typecheck": "pnpm run build && node --check lib/index.js && node --check lib/client.js",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs && node --import tsx --test test/*.test.ts"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",

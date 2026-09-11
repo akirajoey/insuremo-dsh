@@ -756,6 +756,7 @@ packages:
     peerDependencies:
       '@deepseek-ai/cordis': '*'
       '@deepseek-ai/dsh-native-command': '*'
+      '@deepseek-ai/dsh-storage-domain': '*'
       '@icomposer/icomposer-catalog': '*'
       '@icomposer/workbench-contracts': '*'
       '@icomposer/workspace-binding': '*'

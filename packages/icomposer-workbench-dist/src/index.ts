@@ -28,6 +28,7 @@ import { IcomposerVerifyService } from "../../icomposer-verify/src/service.ts";
 import { IcomposerVerifyToolService } from "../../icomposer-verify/src/tool-service.ts";
 import { IciContextService } from "../../icomposer-verify/src/ici-context-service.ts";
 import { IciEngineService } from "../../icomposer-code-intelligence/src/service.ts";
+import { ExplainConfigService } from "../../icomposer-code-intelligence/src/explain-config.ts";
 import { ExplainScheduler } from "../../icomposer-code-intelligence/src/explain-scheduler.ts";
 import { ExplainRoutesService } from "../../icomposer-code-intelligence/src/explain-routes.ts";
 import * as write from "../../icomposer-write/src/index.ts";
@@ -92,6 +93,10 @@ export class WorkbenchDistService extends Service {
     await ctx.plugin(IcomposerVerifyService as never, this.#config.verify);
     await ctx.plugin(IciContextService as never);
     await ctx.plugin(IciEngineService as never);
+    // TASK-105 FIX: the explain services inject `iciExplainConfig`; the configuration
+    // service must mount BEFORE ExplainScheduler (and therefore before the routes),
+    // or both stay dormant and every /api/.../ici/explain/* route 404s.
+    await ctx.plugin(ExplainConfigService as never);
     await ctx.plugin(ExplainScheduler as never);
     await ctx.plugin(ExplainRoutesService as never);
     await ctx.plugin(IcomposerVerifyToolService as never);
