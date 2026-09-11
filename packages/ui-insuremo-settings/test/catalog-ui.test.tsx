@@ -51,7 +51,12 @@ describe("trusted available Skills picker", () => {
     const search = await view.findByRole("searchbox", { name: zh.skillsCatalogSearch });
     expect(await view.findByRole("listbox", { name: zh.skillsCatalogTitle })).toBeTruthy();
     expect(view.queryByRole("combobox")).toBeNull();
-    expect(view.getByText("Audit and search helper")).toBeTruthy();
+    // TASK-108: the row is compact again -- type label + name only; the
+    // description lives in the native hover tooltip instead of inline copy.
+    const row = view.getByRole("option", { name: `${zh.skillsCatalogSkill}: alpha-skill` });
+    expect(row.textContent).toBe(`${zh.skillsCatalogSkill}alpha-skill`);
+    expect(row.getAttribute("title")).toBe("Audit and search helper");
+    expect(view.queryByText("Audit and search helper")).toBeNull();
     fireEvent.change(search, { target: { value: "AUDIT" } });
     expect(view.getByRole("option", { name: `${zh.skillsCatalogSkill}: alpha-skill` })).toBeTruthy();
     fireEvent.change(search, { target: { value: "does-not-exist" } });
@@ -123,5 +128,83 @@ describe("TASK-106 catalog parser bounds", () => {
     expect(parseSkillCatalog({ ok: true, result: overBound })).toBeNull();
     const control = { ...base, entries: [{ type: "skill", name: "alpha-skill", description: "bad\u0001control" }] };
     expect(parseSkillCatalog({ ok: true, result: control })).toBeNull();
+  });
+});
+
+describe("TASK-108 compact catalog rows", () => {
+  const renderCard = async (entries: readonly Record<string, unknown>[]) => {
+    const payload = { ...catalog, entries };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("skill-catalog-refresh")) return new Response(JSON.stringify({ ok: true, result: payload }), { status: 200 });
+      if (url.includes("skill-catalog")) return new Response(JSON.stringify({ ok: true, result: payload }), { status: 200 });
+      return new Response(JSON.stringify(overview), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<InsuremoCard t={(key: keyof typeof zh) => zh[key]} onChanged={() => undefined} {...({} as never)} />);
+    (await view.findByRole("button", { name: new RegExp(zh.expand) })).click();
+    await view.findByRole("listbox", { name: zh.skillsCatalogTitle });
+    return view;
+  };
+
+  it("keeps scenario rows on the allowlisted i18n copy and never inlines the description", async () => {
+    const view = await renderCard([
+      { type: "scenario", name: "ask-insuremo", description: "raw server copy that must not render" },
+      { type: "skill", name: "alpha-skill", description: "Audit and search helper", group: "General" },
+    ]);
+    const scenario = view.getByRole("option", { name: `${zh.skillsCatalogScenario}: ask-insuremo` });
+    expect(scenario.textContent).toBe(`${zh.skillsCatalogScenario}ask-insuremo`);
+    expect(scenario.getAttribute("title")).toBe(zh.skillsCatalogDescriptionAsk);
+    const skill = view.getByRole("option", { name: `${zh.skillsCatalogSkill}: alpha-skill` });
+    expect(skill.textContent).toBe(`${zh.skillsCatalogSkill}alpha-skill`);
+    expect(skill.getAttribute("title")).toBe("Audit and search helper");
+    expect(view.queryByText("raw server copy that must not render")).toBeNull();
+    expect(view.queryByText("Audit and search helper")).toBeNull();
+  });
+
+  it("collapses paragraph LFs into a single-line tooltip, bounds it, and still searches the full description", async () => {
+    const full = `Short summary.\nWrapped second line   with   runs. ${"detail ".repeat(80)}needle-tail marker`;
+    const view = await renderCard([{ type: "skill", name: "long-skill", description: full, group: "General" }]);
+    const row = view.getByRole("option", { name: `${zh.skillsCatalogSkill}: long-skill` });
+    const title = row.getAttribute("title") ?? "";
+    expect(title.startsWith("Short summary. Wrapped second line with runs.")).toBe(true);
+    expect(title.includes("\n")).toBe(false);
+    expect(title.length).toBeLessThanOrEqual(400);
+    expect(title.endsWith("\u2026")).toBe(true);
+    expect(title.includes("needle-tail")).toBe(false);
+    // Search semantics are untouched: the untruncated description still matches.
+    fireEvent.change(view.getByRole("searchbox", { name: zh.skillsCatalogSearch }), { target: { value: "needle-tail" } });
+    expect(view.getByRole("option", { name: `${zh.skillsCatalogSkill}: long-skill` })).toBeTruthy();
+    expect(view.queryByText(zh.skillsCatalogNoMatch)).toBeNull();
+  });
+
+  it("keeps all 41 real-shaped rows in server order, each as label + name", async () => {
+    const scenarioNames = ["icomposer-full-stack", "icomposer-coding-lite", "icomposer-api-design", "uic-developer", "ask-insuremo"];
+    const scenarios = scenarioNames.map(name => ({ type: "scenario", name, description: `server copy for ${name}` }));
+    const skills = Array.from({ length: 36 }, (_, index) => ({
+      type: "skill", name: `skill-${String(index + 1).padStart(2, "0")}`, description: `description ${index + 1}`, group: "General",
+    }));
+    const view = await renderCard([...scenarios, ...skills]);
+    const options = view.getAllByRole("option");
+    expect(options).toHaveLength(41);
+    expect(options.map(option => option.getAttribute("data-catalog-entry"))).toEqual([
+      ...scenarioNames.map(name => `scenario:${name}`),
+      ...skills.map(skill => `skill:${skill.name}`),
+    ]);
+    options.forEach((option, index) => {
+      const isScenario = index < scenarioNames.length;
+      const name = isScenario ? scenarioNames[index]! : skills[index - scenarioNames.length]!.name;
+      expect(option.textContent).toBe(`${isScenario ? zh.skillsCatalogScenario : zh.skillsCatalogSkill}${name}`);
+      expect(option.getAttribute("title")).toBeTruthy();
+    });
+  });
+
+  it("never splits an astral character at the tooltip cap", async () => {
+    const view = await renderCard([{ type: "skill", name: "emoji-skill", description: `${"y".repeat(398)}\u{1F600}tail`, group: "General" }]);
+    const title = view.getByRole("option", { name: `${zh.skillsCatalogSkill}: emoji-skill` }).getAttribute("title") ?? "";
+    expect(title.endsWith("\u2026")).toBe(true);
+    expect(title.length).toBe(399);
+    // encodeURIComponent throws on a lone surrogate, so this proves the pair was not cut.
+    expect(() => encodeURIComponent(title)).not.toThrow();
   });
 });

@@ -377,6 +377,16 @@ interface SkillRowState {
   readonly retry?: boolean;
 }
 
+/**
+ * TASK-108: the picker row stays compact (type label + name only), so the
+ * description moves into the row's native tooltip. Tooltips render on one
+ * line, therefore paragraph LFs collapse to spaces and an over-long catalog
+ * description is clipped with an ellipsis. Search still matches the FULL
+ * description (see filteredCatalog) and the host parser keeps all 4096
+ * characters, so nothing becomes unreachable -- only the row copy shrinks.
+ */
+const CATALOG_TOOLTIP_MAX = 400;
+
 /** Allowlisted server scenario ids (TASK-079): no arbitrary agent/source argv. */
 const SKILL_SCENARIOS = [
   "icomposer-full-stack", "icomposer-coding-lite", "icomposer-api-design", "uic-developer", "ask-insuremo",
@@ -527,6 +537,23 @@ class SkillsRegion extends Component<
     if (entry.type !== "scenario") return entry.description;
     const key = SCENARIO_DESCRIPTION_KEYS[entry.name as SkillScenarioId];
     return key === undefined ? entry.description : t(key);
+  }
+
+  /**
+   * Single-line tooltip copy: LFs (the parser's paragraph separator) become
+   * spaces, other whitespace runs collapse, and the result is bounded by
+   * CATALOG_TOOLTIP_MAX. Returns undefined when there is nothing to show so
+   * the row carries no empty title attribute.
+   */
+  private catalogTooltip(entry: SkillCatalogEntryView, t: Translate): string | undefined {
+    const normalized = this.catalogDescription(entry, t).replace(/\s+/gu, " ").trim();
+    if (normalized.length === 0) return undefined;
+    if (normalized.length <= CATALOG_TOOLTIP_MAX) return normalized;
+    let end = CATALOG_TOOLTIP_MAX - 1;
+    const last = normalized.charCodeAt(end - 1);
+    // Never cut between a surrogate pair (emoji/astral text).
+    if (last >= 0xD800 && last <= 0xDBFF) end -= 1;
+    return `${normalized.slice(0, end).trimEnd()}\u2026`;
   }
 
   private filteredCatalog(view: SkillCatalogView, t: Translate): readonly SkillCatalogEntryView[] {
@@ -684,6 +711,7 @@ class SkillsRegion extends Component<
                   className={`${css.catalogOption}${isSelected ? ` ${css.catalogOptionSelected}` : ""}`}
                   aria-selected={isSelected}
                   aria-label={`${entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill")}: ${entry.name}`}
+                  title={this.catalogTooltip(entry, t)}
                   data-catalog-entry={key}
                   disabled={busy}
                   onClick={() => this.setState({ catalogChoice: key, scenarioRun: { phase: "idle" } })}
@@ -701,7 +729,6 @@ class SkillsRegion extends Component<
                     <span className={css.meta}>{entry.type === "scenario" ? t("skillsCatalogScenario") : t("skillsCatalogSkill")}</span>
                     <code>{entry.name}</code>
                   </span>
-                  <span className={css.catalogDescription}>{this.catalogDescription(entry, t)}</span>
                 </button>
               );
             })}

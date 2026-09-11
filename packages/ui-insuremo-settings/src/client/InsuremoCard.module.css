@@ -198,14 +198,14 @@
 .catalogOption {
   appearance: none;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-1);
-  padding: 7px 10px;
+  padding: 6px 10px;
   font: inherit;
   color: var(--dsw-alias-label-primary);
   text-align: left;
@@ -230,14 +230,16 @@
 
 .catalogOptionTop {
   display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 2px 8px;
+  min-width: 0;
 }
 
-.catalogDescription {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 1.45;
+/* A long single-token name may not overflow a narrow card. */
+.catalogOptionTop code {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
