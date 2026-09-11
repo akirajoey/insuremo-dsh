@@ -58,6 +58,13 @@ function ChevronIcon(props) {
 const OVERVIEW_URL$1 = "/api/icomposer-workbench/insuremo/overview";
 const SKILL_CATALOG_URL = `${OVERVIEW_URL$1}/skill-catalog`;
 const MAX_CATALOG_ENTRIES = 133;
+/**
+* TASK-106: keep this in lock-step with the host parser's
+* SKILL_CATALOG_DESCRIPTION_MAX (4096). The earlier 500 bound predated
+* TASK-104's real 1.1.2 capture (max 1622) and rejected every wrapped
+* description; LF is the parser's paragraph separator and stays allowed.
+*/
+const MAX_CATALOG_DESCRIPTION = 4096;
 /** Rebuild a fresh view from only the allowlisted fields; `null` on garbage. */
 function parseOverview(value) {
 	const root = obj(value);
@@ -210,7 +217,7 @@ function parseSkillCatalog(value) {
 	};
 }
 function catalogDescription(value) {
-	return typeof value === "string" && value.length > 0 && value.length <= 500 && !/[\u0000-\u001F\u007F]/u.test(value) ? value : void 0;
+	return typeof value === "string" && value.length > 0 && value.length <= MAX_CATALOG_DESCRIPTION && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value) ? value : void 0;
 }
 function catalogName(value, scenario) {
 	if (typeof value !== "string" || value.length === 0 || value.length > 128) return void 0;
@@ -569,40 +576,40 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"region": "wba9e5d119_region",
+	"meta": "wba9e5d119_meta",
+	"catalogInput": "wba9e5d119_catalogInput",
 	"chevron": "wba9e5d119_chevron",
-	"footer": "wba9e5d119_footer",
-	"controlTrack": "wba9e5d119_controlTrack",
-	"hint": "wba9e5d119_hint",
-	"catalog": "wba9e5d119_catalog",
-	"small": "wba9e5d119_small",
-	"header": "wba9e5d119_header",
+	"controls": "wba9e5d119_controls",
+	"chevronOpen": "wba9e5d119_chevronOpen",
+	"headText": "wba9e5d119_headText",
 	"action": "wba9e5d119_action",
-	"catalogOptionTop": "wba9e5d119_catalogOptionTop",
-	"catalogSearch": "wba9e5d119_catalogSearch",
-	"catalogDescription": "wba9e5d119_catalogDescription",
-	"error": "wba9e5d119_error",
-	"description": "wba9e5d119_description",
-	"select": "wba9e5d119_select",
+	"diagnostic": "wba9e5d119_diagnostic",
 	"card": "wba9e5d119_card",
 	"cardOpen": "wba9e5d119_cardOpen",
-	"headText": "wba9e5d119_headText",
-	"name": "wba9e5d119_name",
-	"toggle": "wba9e5d119_toggle",
-	"body": "wba9e5d119_body",
-	"catalogOption": "wba9e5d119_catalogOption",
-	"catalogOptionSelected": "wba9e5d119_catalogOptionSelected",
+	"catalogDescription": "wba9e5d119_catalogDescription",
 	"refresh": "wba9e5d119_refresh",
-	"diagnostic": "wba9e5d119_diagnostic",
-	"catalogList": "wba9e5d119_catalogList",
-	"catalogTools": "wba9e5d119_catalogTools",
-	"controlThumb": "wba9e5d119_controlThumb",
+	"toggle": "wba9e5d119_toggle",
+	"controlTrack": "wba9e5d119_controlTrack",
+	"catalogSearch": "wba9e5d119_catalogSearch",
+	"select": "wba9e5d119_select",
 	"list": "wba9e5d119_list",
-	"meta": "wba9e5d119_meta",
-	"controls": "wba9e5d119_controls",
-	"pending": "wba9e5d119_pending",
-	"catalogInput": "wba9e5d119_catalogInput",
-	"chevronOpen": "wba9e5d119_chevronOpen"
+	"header": "wba9e5d119_header",
+	"name": "wba9e5d119_name",
+	"footer": "wba9e5d119_footer",
+	"catalogOption": "wba9e5d119_catalogOption",
+	"catalogList": "wba9e5d119_catalogList",
+	"catalog": "wba9e5d119_catalog",
+	"region": "wba9e5d119_region",
+	"catalogOptionSelected": "wba9e5d119_catalogOptionSelected",
+	"catalogOptionTop": "wba9e5d119_catalogOptionTop",
+	"hint": "wba9e5d119_hint",
+	"error": "wba9e5d119_error",
+	"small": "wba9e5d119_small",
+	"catalogTools": "wba9e5d119_catalogTools",
+	"description": "wba9e5d119_description",
+	"body": "wba9e5d119_body",
+	"controlThumb": "wba9e5d119_controlThumb",
+	"pending": "wba9e5d119_pending"
 };
 
 //#endregion
@@ -2159,17 +2166,17 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"railMark": "wb06155adc_railMark",
-	"wordmarkLight": "wb06155adc_wordmarkLight",
-	"wordmarkHost": "wb06155adc_wordmarkHost",
-	"railHost": "wb06155adc_railHost",
-	"dsh": "wb06155adc_dsh",
 	"driver": "wb06155adc_driver",
+	"heroHost": "wb06155adc_heroHost",
 	"wordmarkInner": "wb06155adc_wordmarkInner",
 	"wordmarkDark": "wb06155adc_wordmarkDark",
-	"heroHost": "wb06155adc_heroHost",
+	"wordmarkLight": "wb06155adc_wordmarkLight",
+	"railHost": "wb06155adc_railHost",
 	"wordmark": "wb06155adc_wordmark",
-	"heroMark": "wb06155adc_heroMark"
+	"dsh": "wb06155adc_dsh",
+	"heroMark": "wb06155adc_heroMark",
+	"railMark": "wb06155adc_railMark",
+	"wordmarkHost": "wb06155adc_wordmarkHost"
 };
 
 //#endregion
@@ -2447,9 +2454,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
+	"driver": "wb8730382c_driver",
 	"icon": "wb8730382c_icon",
-	"rowIcons": "wb8730382c_rowIcons",
-	"driver": "wb8730382c_driver"
+	"rowIcons": "wb8730382c_rowIcons"
 };
 
 //#endregion
@@ -2741,19 +2748,19 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
+	"trigger": "wb972d6c20_trigger",
+	"hint": "wb972d6c20_hint",
 	"error": "wb972d6c20_error",
 	"closeMark": "wb972d6c20_closeMark",
-	"row": "wb972d6c20_row",
 	"list": "wb972d6c20_list",
-	"picker": "wb972d6c20_picker",
 	"dot": "wb972d6c20_dot",
-	"label": "wb972d6c20_label",
-	"trigger": "wb972d6c20_trigger",
 	"pickerHeader": "wb972d6c20_pickerHeader",
+	"label": "wb972d6c20_label",
 	"rowName": "wb972d6c20_rowName",
+	"picker": "wb972d6c20_picker",
+	"row": "wb972d6c20_row",
 	"rowMark": "wb972d6c20_rowMark",
-	"groupLabel": "wb972d6c20_groupLabel",
-	"hint": "wb972d6c20_hint"
+	"groupLabel": "wb972d6c20_groupLabel"
 };
 
 //#endregion
@@ -3312,11 +3319,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"row": "wb6cd975b4_row",
 	"kind": "wb6cd975b4_kind",
 	"icon": "wb6cd975b4_icon",
+	"status": "wb6cd975b4_status",
 	"digest": "wb6cd975b4_digest",
-	"status": "wb6cd975b4_status"
+	"row": "wb6cd975b4_row"
 };
 
 //#endregion
@@ -3373,32 +3380,32 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"detailsBody": "wb9e6d40f5_detailsBody",
-	"path": "wb9e6d40f5_path",
-	"session": "wb9e6d40f5_session",
-	"fieldset": "wb9e6d40f5_fieldset",
-	"pagination": "wb9e6d40f5_pagination",
-	"referenceActions": "wb9e6d40f5_referenceActions",
-	"runMeta": "wb9e6d40f5_runMeta",
-	"batchStats": "wb9e6d40f5_batchStats",
-	"selectedReference": "wb9e6d40f5_selectedReference",
-	"scheduler": "wb9e6d40f5_scheduler",
-	"detailsToggle": "wb9e6d40f5_detailsToggle",
 	"done": "wb9e6d40f5_done",
-	"jobLine": "wb9e6d40f5_jobLine",
-	"field": "wb9e6d40f5_field",
-	"card": "wb9e6d40f5_card",
-	"status": "wb9e6d40f5_status",
 	"actions": "wb9e6d40f5_actions",
+	"scheduler": "wb9e6d40f5_scheduler",
+	"detailsBody": "wb9e6d40f5_detailsBody",
+	"status": "wb9e6d40f5_status",
+	"selectedReference": "wb9e6d40f5_selectedReference",
+	"consent": "wb9e6d40f5_consent",
+	"field": "wb9e6d40f5_field",
+	"referenceActions": "wb9e6d40f5_referenceActions",
 	"errorText": "wb9e6d40f5_errorText",
 	"batchJobRow": "wb9e6d40f5_batchJobRow",
-	"consent": "wb9e6d40f5_consent",
-	"summary": "wb9e6d40f5_summary",
+	"batchStats": "wb9e6d40f5_batchStats",
 	"hint": "wb9e6d40f5_hint",
 	"error": "wb9e6d40f5_error",
 	"header": "wb9e6d40f5_header",
+	"card": "wb9e6d40f5_card",
 	"progress": "wb9e6d40f5_progress",
-	"jobName": "wb9e6d40f5_jobName"
+	"summary": "wb9e6d40f5_summary",
+	"session": "wb9e6d40f5_session",
+	"pagination": "wb9e6d40f5_pagination",
+	"fieldset": "wb9e6d40f5_fieldset",
+	"detailsToggle": "wb9e6d40f5_detailsToggle",
+	"runMeta": "wb9e6d40f5_runMeta",
+	"jobName": "wb9e6d40f5_jobName",
+	"path": "wb9e6d40f5_path",
+	"jobLine": "wb9e6d40f5_jobLine"
 };
 
 //#endregion
