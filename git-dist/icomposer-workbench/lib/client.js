@@ -569,40 +569,40 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var InsuremoCard_module_css_default = {
-	"meta": "wba9e5d119_meta",
-	"select": "wba9e5d119_select",
-	"cardOpen": "wba9e5d119_cardOpen",
-	"catalogInput": "wba9e5d119_catalogInput",
 	"region": "wba9e5d119_region",
-	"chevronOpen": "wba9e5d119_chevronOpen",
-	"controlThumb": "wba9e5d119_controlThumb",
-	"footer": "wba9e5d119_footer",
-	"small": "wba9e5d119_small",
-	"controls": "wba9e5d119_controls",
-	"header": "wba9e5d119_header",
-	"list": "wba9e5d119_list",
-	"catalogSearch": "wba9e5d119_catalogSearch",
-	"headText": "wba9e5d119_headText",
-	"refresh": "wba9e5d119_refresh",
-	"body": "wba9e5d119_body",
-	"catalogOptionTop": "wba9e5d119_catalogOptionTop",
-	"catalogDescription": "wba9e5d119_catalogDescription",
-	"catalogOptionSelected": "wba9e5d119_catalogOptionSelected",
-	"pending": "wba9e5d119_pending",
-	"toggle": "wba9e5d119_toggle",
-	"name": "wba9e5d119_name",
-	"catalogTools": "wba9e5d119_catalogTools",
-	"action": "wba9e5d119_action",
 	"chevron": "wba9e5d119_chevron",
-	"catalogOption": "wba9e5d119_catalogOption",
-	"catalog": "wba9e5d119_catalog",
-	"card": "wba9e5d119_card",
+	"footer": "wba9e5d119_footer",
 	"controlTrack": "wba9e5d119_controlTrack",
 	"hint": "wba9e5d119_hint",
-	"diagnostic": "wba9e5d119_diagnostic",
-	"description": "wba9e5d119_description",
+	"catalog": "wba9e5d119_catalog",
+	"small": "wba9e5d119_small",
+	"header": "wba9e5d119_header",
+	"action": "wba9e5d119_action",
+	"catalogOptionTop": "wba9e5d119_catalogOptionTop",
+	"catalogSearch": "wba9e5d119_catalogSearch",
+	"catalogDescription": "wba9e5d119_catalogDescription",
 	"error": "wba9e5d119_error",
-	"catalogList": "wba9e5d119_catalogList"
+	"description": "wba9e5d119_description",
+	"select": "wba9e5d119_select",
+	"card": "wba9e5d119_card",
+	"cardOpen": "wba9e5d119_cardOpen",
+	"headText": "wba9e5d119_headText",
+	"name": "wba9e5d119_name",
+	"toggle": "wba9e5d119_toggle",
+	"body": "wba9e5d119_body",
+	"catalogOption": "wba9e5d119_catalogOption",
+	"catalogOptionSelected": "wba9e5d119_catalogOptionSelected",
+	"refresh": "wba9e5d119_refresh",
+	"diagnostic": "wba9e5d119_diagnostic",
+	"catalogList": "wba9e5d119_catalogList",
+	"catalogTools": "wba9e5d119_catalogTools",
+	"controlThumb": "wba9e5d119_controlThumb",
+	"list": "wba9e5d119_list",
+	"meta": "wba9e5d119_meta",
+	"controls": "wba9e5d119_controls",
+	"pending": "wba9e5d119_pending",
+	"catalogInput": "wba9e5d119_catalogInput",
+	"chevronOpen": "wba9e5d119_chevronOpen"
 };
 
 //#endregion
@@ -2159,17 +2159,17 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var BrandChrome_module_css_default = {
-	"heroHost": "wb06155adc_heroHost",
-	"heroMark": "wb06155adc_heroMark",
-	"wordmarkDark": "wb06155adc_wordmarkDark",
-	"wordmarkHost": "wb06155adc_wordmarkHost",
-	"driver": "wb06155adc_driver",
-	"wordmark": "wb06155adc_wordmark",
+	"railMark": "wb06155adc_railMark",
 	"wordmarkLight": "wb06155adc_wordmarkLight",
+	"wordmarkHost": "wb06155adc_wordmarkHost",
 	"railHost": "wb06155adc_railHost",
-	"wordmarkInner": "wb06155adc_wordmarkInner",
 	"dsh": "wb06155adc_dsh",
-	"railMark": "wb06155adc_railMark"
+	"driver": "wb06155adc_driver",
+	"wordmarkInner": "wb06155adc_wordmarkInner",
+	"wordmarkDark": "wb06155adc_wordmarkDark",
+	"heroHost": "wb06155adc_heroHost",
+	"wordmark": "wb06155adc_wordmark",
+	"heroMark": "wb06155adc_heroMark"
 };
 
 //#endregion
@@ -2447,9 +2447,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var WorkspaceHealth_module_css_default = {
-	"driver": "wb8730382c_driver",
+	"icon": "wb8730382c_icon",
 	"rowIcons": "wb8730382c_rowIcons",
-	"icon": "wb8730382c_icon"
+	"driver": "wb8730382c_driver"
 };
 
 //#endregion
@@ -2741,19 +2741,19 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var ProfilePicker_module_css_default = {
-	"closeMark": "wb972d6c20_closeMark",
-	"groupLabel": "wb972d6c20_groupLabel",
 	"error": "wb972d6c20_error",
+	"closeMark": "wb972d6c20_closeMark",
+	"row": "wb972d6c20_row",
 	"list": "wb972d6c20_list",
-	"rowName": "wb972d6c20_rowName",
-	"trigger": "wb972d6c20_trigger",
-	"pickerHeader": "wb972d6c20_pickerHeader",
-	"rowMark": "wb972d6c20_rowMark",
 	"picker": "wb972d6c20_picker",
 	"dot": "wb972d6c20_dot",
 	"label": "wb972d6c20_label",
-	"hint": "wb972d6c20_hint",
-	"row": "wb972d6c20_row"
+	"trigger": "wb972d6c20_trigger",
+	"pickerHeader": "wb972d6c20_pickerHeader",
+	"rowName": "wb972d6c20_rowName",
+	"rowMark": "wb972d6c20_rowMark",
+	"groupLabel": "wb972d6c20_groupLabel",
+	"hint": "wb972d6c20_hint"
 };
 
 //#endregion
@@ -2773,7 +2773,7 @@ function tooltipOf(profile, fallback) {
 */
 function resolveProfileTarget(sessions, workspaces) {
 	if (sessions.current === void 0) return { kind: "global" };
-	if (workspaces.phase !== "ready" || workspaces.baselinesReady !== true) return { kind: "unavailable" };
+	if (workspaces.phase !== "ready" || workspaces.baselinesReady !== void 0 && workspaces.baselinesReady !== true) return { kind: "unavailable" };
 	const workspace = workspaces.items.find((item) => item.sessionIds.includes(sessions.current));
 	if (workspace === void 0) return { kind: "global" };
 	return {
@@ -3312,11 +3312,11 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var JobNode_module_css_default = {
-	"icon": "wb6cd975b4_icon",
-	"status": "wb6cd975b4_status",
 	"row": "wb6cd975b4_row",
+	"kind": "wb6cd975b4_kind",
+	"icon": "wb6cd975b4_icon",
 	"digest": "wb6cd975b4_digest",
-	"kind": "wb6cd975b4_kind"
+	"status": "wb6cd975b4_status"
 };
 
 //#endregion
@@ -3363,7 +3363,7 @@ function JobNode({ node, t }) {
 
 //#endregion
 //#region \0dsh-css:asset
-const css = ".wb13b81332_card{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);width:100%;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-radius:10px;padding:12px;font-size:13px}.wb13b81332_header{align-items:center;gap:8px;min-height:24px;display:flex}.wb13b81332_status{color:var(--dsw-alias-label-secondary);margin-left:auto;font-size:12px}.wb13b81332_summary,.wb13b81332_hint,.wb13b81332_consent,.wb13b81332_progress,.wb13b81332_done,.wb13b81332_error{margin:8px 0}.wb13b81332_hint{color:var(--dsw-alias-label-tertiary)}.wb13b81332_consent{color:var(--dsw-alias-label-secondary)}.wb13b81332_fieldset{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;gap:6px;margin:8px 0;padding:8px;display:grid}.wb13b81332_fieldset legend{color:var(--dsw-alias-label-secondary)}.wb13b81332_selectedReference{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;margin:0}.wb13b81332_referenceActions{flex-wrap:wrap;gap:8px;display:flex}.wb13b81332_field{align-items:center;gap:8px;margin:8px 0;display:flex}.wb13b81332_field span{min-width:76px;color:var(--dsw-alias-label-secondary)}.wb13b81332_field select{min-width:150px;max-width:100%}.wb13b81332_actions{gap:8px;margin-top:10px;display:flex}.wb13b81332_actions button,.wb13b81332_referenceActions button,.wb13b81332_card>button{border:1px solid var(--dsw-alias-border-l2);min-height:28px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);cursor:pointer;border-radius:6px;padding:4px 12px}.wb13b81332_actions button:first-child{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-active)}button:disabled,select:disabled,input:disabled{cursor:not-allowed;opacity:.55}.wb13b81332_error,.wb13b81332_errorText{color:var(--dsw-alias-state-error-primary)}.wb13b81332_done{color:var(--dsw-alias-state-success-primary);overflow-wrap:anywhere}.wb13b81332_runMeta{color:var(--dsw-alias-label-tertiary);margin:4px 0;font-size:12px}.wb13b81332_session{cursor:pointer;user-select:all}.wb13b81332_batchJobRow{overflow-wrap:anywhere;margin:4px 0}";
+const css = ".wb9e6d40f5_card{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);width:100%;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-radius:10px;padding:12px;font-size:13px}.wb9e6d40f5_header{align-items:center;gap:8px;min-height:24px;display:flex}.wb9e6d40f5_status{color:var(--dsw-alias-label-secondary);margin-left:auto;font-size:12px}.wb9e6d40f5_summary,.wb9e6d40f5_hint,.wb9e6d40f5_consent,.wb9e6d40f5_progress,.wb9e6d40f5_done,.wb9e6d40f5_error{margin:8px 0}.wb9e6d40f5_hint{color:var(--dsw-alias-label-tertiary)}.wb9e6d40f5_consent{color:var(--dsw-alias-label-secondary)}.wb9e6d40f5_fieldset{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;gap:6px;margin:8px 0;padding:8px;display:grid}.wb9e6d40f5_fieldset legend{color:var(--dsw-alias-label-secondary)}.wb9e6d40f5_selectedReference{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;margin:0}.wb9e6d40f5_referenceActions{flex-wrap:wrap;gap:8px;display:flex}.wb9e6d40f5_field{align-items:center;gap:8px;margin:8px 0;display:flex}.wb9e6d40f5_field span{min-width:76px;color:var(--dsw-alias-label-secondary)}.wb9e6d40f5_field select{min-width:150px;max-width:100%}.wb9e6d40f5_actions{gap:8px;margin-top:10px;display:flex}.wb9e6d40f5_actions button,.wb9e6d40f5_referenceActions button,.wb9e6d40f5_card>button{border:1px solid var(--dsw-alias-border-l2);min-height:28px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);cursor:pointer;border-radius:6px;padding:4px 12px}.wb9e6d40f5_actions button:first-child{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-active)}button:disabled,select:disabled,input:disabled{cursor:not-allowed;opacity:.55}.wb9e6d40f5_error,.wb9e6d40f5_errorText{color:var(--dsw-alias-state-error-primary)}.wb9e6d40f5_done{color:var(--dsw-alias-state-success-primary);overflow-wrap:anywhere}.wb9e6d40f5_runMeta{color:var(--dsw-alias-label-tertiary);margin:4px 0;font-size:12px}.wb9e6d40f5_session{cursor:pointer;user-select:all}.wb9e6d40f5_batchJobRow{overflow-wrap:anywhere;margin:4px 0}.wb9e6d40f5_scheduler{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;gap:4px;margin:8px 0;padding:8px;display:grid}.wb9e6d40f5_scheduler .wb9e6d40f5_field{margin:0}.wb9e6d40f5_scheduler input[type=number]{width:5.5em;min-width:0}.wb9e6d40f5_jobLine{overflow-wrap:anywhere;flex-wrap:wrap;align-items:baseline;gap:4px;display:flex}.wb9e6d40f5_jobName{overflow-wrap:anywhere;word-break:break-word}.wb9e6d40f5_detailsToggle{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:4px;margin-left:6px;padding:0 6px;font-size:12px}.wb9e6d40f5_detailsBody{border-left:2px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;margin:4px 0 6px 12px;padding:4px 8px;font-size:12px}.wb9e6d40f5_detailsBody p{overflow-wrap:anywhere;word-break:break-word;margin:2px 0}.wb9e6d40f5_path{overflow-wrap:anywhere;word-break:break-word}.wb9e6d40f5_pagination{align-items:center;gap:8px;margin:6px 0;display:flex}.wb9e6d40f5_pagination button{border:1px solid var(--dsw-alias-border-l2);min-height:24px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);cursor:pointer;border-radius:6px;padding:2px 10px}.wb9e6d40f5_pagination span{color:var(--dsw-alias-label-tertiary);font-size:12px}.wb9e6d40f5_batchStats{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;margin:4px 0;font-size:12px}";
 const tagId = "@icomposer/workbench/IciExplainToolview.module.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 	const tag = document.createElement("style");
@@ -3373,29 +3373,40 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 var IciExplainToolview_module_css_default = {
-	"progress": "wb13b81332_progress",
-	"status": "wb13b81332_status",
-	"fieldset": "wb13b81332_fieldset",
-	"errorText": "wb13b81332_errorText",
-	"selectedReference": "wb13b81332_selectedReference",
-	"hint": "wb13b81332_hint",
-	"field": "wb13b81332_field",
-	"card": "wb13b81332_card",
-	"batchJobRow": "wb13b81332_batchJobRow",
-	"done": "wb13b81332_done",
-	"summary": "wb13b81332_summary",
-	"header": "wb13b81332_header",
-	"error": "wb13b81332_error",
-	"actions": "wb13b81332_actions",
-	"referenceActions": "wb13b81332_referenceActions",
-	"runMeta": "wb13b81332_runMeta",
-	"session": "wb13b81332_session",
-	"consent": "wb13b81332_consent"
+	"detailsBody": "wb9e6d40f5_detailsBody",
+	"path": "wb9e6d40f5_path",
+	"session": "wb9e6d40f5_session",
+	"fieldset": "wb9e6d40f5_fieldset",
+	"pagination": "wb9e6d40f5_pagination",
+	"referenceActions": "wb9e6d40f5_referenceActions",
+	"runMeta": "wb9e6d40f5_runMeta",
+	"batchStats": "wb9e6d40f5_batchStats",
+	"selectedReference": "wb9e6d40f5_selectedReference",
+	"scheduler": "wb9e6d40f5_scheduler",
+	"detailsToggle": "wb9e6d40f5_detailsToggle",
+	"done": "wb9e6d40f5_done",
+	"jobLine": "wb9e6d40f5_jobLine",
+	"field": "wb9e6d40f5_field",
+	"card": "wb9e6d40f5_card",
+	"status": "wb9e6d40f5_status",
+	"actions": "wb9e6d40f5_actions",
+	"errorText": "wb9e6d40f5_errorText",
+	"batchJobRow": "wb9e6d40f5_batchJobRow",
+	"consent": "wb9e6d40f5_consent",
+	"summary": "wb9e6d40f5_summary",
+	"hint": "wb9e6d40f5_hint",
+	"error": "wb9e6d40f5_error",
+	"header": "wb9e6d40f5_header",
+	"progress": "wb9e6d40f5_progress",
+	"jobName": "wb9e6d40f5_jobName"
 };
 
 //#endregion
 //#region ../ui-workbench-jobs/src/client/IciExplainToolview.tsx
 const PREFIX = "/api/icomposer-workbench/ici/explain";
+const PAGE_SIZE = 5;
+const CONCURRENCY_MIN = 1;
+const CONCURRENCY_MAX = 32;
 const SESSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE = new Set([
 	"awaiting-input",
@@ -3527,7 +3538,7 @@ async function getBatchStatus(batchId, signal) {
 		return null;
 	}
 }
-async function postPath(path, body) {
+async function postPath(path, body, signal) {
 	try {
 		const response = await fetch(path, {
 			method: "POST",
@@ -3537,7 +3548,8 @@ async function postPath(path, body) {
 				"X-Workbench-Action": "1",
 				Accept: "application/json"
 			},
-			body: JSON.stringify(body)
+			body: JSON.stringify(body),
+			...signal === void 0 ? {} : { signal }
 		});
 		const value = await response.json().catch(() => null);
 		return value?.ok === true ? {
@@ -3561,6 +3573,13 @@ var IciExplainToolview = class extends react.Component {
 	#pollKey;
 	#initializedJob;
 	#initializedBatch;
+	#capInitialized = false;
+	#capEdited = false;
+	/** Monotonic edit stamp: a reply that lands after a newer keystroke must not replace the draft. */
+	#capEditStamp = 0;
+	/** TASK-102 P2-03: card identity epoch + settings request ownership, so a late reply never lands on another card. */
+	#epoch = 0;
+	#settingsController;
 	#defaults;
 	constructor(props) {
 		super(props);
@@ -3575,7 +3594,11 @@ var IciExplainToolview = class extends react.Component {
 			provider: defaults.provider ?? "",
 			model: defaults.model ?? "",
 			notBefore: "",
-			busy: false
+			busy: false,
+			page: 0,
+			details: {},
+			capDraft: "",
+			capBusy: false
 		};
 	}
 	componentDidMount() {
@@ -3590,6 +3613,11 @@ var IciExplainToolview = class extends react.Component {
 			this.#defaults = defaultModelOf(this.props.block);
 			this.#initializedJob = void 0;
 			this.#initializedBatch = void 0;
+			this.#epoch += 1;
+			this.#settingsController?.abort();
+			this.#settingsController = void 0;
+			this.#capInitialized = false;
+			this.#capEdited = false;
 			this.setState({
 				jobId: nextJobId,
 				batchId: nextBatchId,
@@ -3600,13 +3628,22 @@ var IciExplainToolview = class extends react.Component {
 				model: this.#defaults.model ?? "",
 				notBefore: "",
 				busy: false,
-				localError: void 0
+				localError: void 0,
+				page: 0,
+				details: {},
+				capDraft: "",
+				capBusy: false,
+				capError: void 0,
+				capSaved: void 0
 			}, this.syncPolling);
 			return;
 		}
 		this.syncPolling();
 	}
 	componentWillUnmount() {
+		this.#epoch += 1;
+		this.#settingsController?.abort();
+		this.#settingsController = void 0;
 		this.stopPolling();
 	}
 	text(key) {
@@ -3670,6 +3707,7 @@ var IciExplainToolview = class extends react.Component {
 			if (!next || controller.signal.aborted || this.state.jobId !== jobId) return;
 			const first = this.#initializedJob !== jobId;
 			this.#initializedJob = jobId;
+			const capInit = this.initCapDraft(next.scheduler);
 			this.setState((previous) => {
 				const candidate = next.job.referenceTarget ?? next.referenceTarget;
 				const selectedTarget = validReferenceTarget(candidate) ? candidate : typeof next.job.folderPath === "string" && next.job.folderPath !== "" && validReferenceTarget({
@@ -3684,6 +3722,7 @@ var IciExplainToolview = class extends react.Component {
 				const initialModel = next.job.model ?? (catalog.some((item) => item.id === previous.model) ? previous.model : catalog[0]?.id ?? previous.model ?? "");
 				return {
 					...previous,
+					...capInit,
 					snapshot: next,
 					...first ? {
 						referenceTarget: selectedTarget,
@@ -3707,12 +3746,14 @@ var IciExplainToolview = class extends react.Component {
 			if (!next || controller.signal.aborted || this.state.batchId !== batchId) return;
 			const first = this.#initializedBatch !== batchId;
 			this.#initializedBatch = batchId;
+			const capInit = this.initCapDraft(next.scheduler);
 			this.setState((previous) => {
 				const initialProvider = previous.provider || next.providers[0]?.id || "";
 				const catalog = next.providers.find((item) => item.id === initialProvider)?.models ?? [];
 				const initialModel = catalog.some((item) => item.id === previous.model) ? previous.model : catalog[0]?.id ?? previous.model ?? "";
 				return {
 					...previous,
+					...capInit,
 					batchSnapshot: next,
 					...first ? {
 						provider: initialProvider,
@@ -3926,26 +3967,256 @@ var IciExplainToolview = class extends react.Component {
 			})] }) : null]
 		});
 	}
+	/** Initialize the concurrency draft once; polling never overwrites a user draft. */
+	initCapDraft(scheduler) {
+		if (this.#capInitialized || this.#capEdited || scheduler === void 0 || typeof scheduler.maxConcurrent !== "number") return {};
+		this.#capInitialized = true;
+		return { capDraft: String(scheduler.maxConcurrent) };
+	}
+	maxPage(jobs) {
+		return Math.max(0, Math.ceil(jobs.length / PAGE_SIZE) - 1);
+	}
+	setPage(next, jobs) {
+		this.setState({ page: Math.max(0, Math.min(next, this.maxPage(jobs))) });
+	}
+	toggleDetails(key) {
+		this.setState((previous) => ({ details: {
+			...previous.details,
+			[key]: !previous.details[key]
+		} }));
+	}
+	elapsedText(job) {
+		if (typeof job.startedAt !== "string" || Number.isNaN(Date.parse(job.startedAt))) return "";
+		const end = typeof job.finishedAt === "string" && !Number.isNaN(Date.parse(job.finishedAt)) ? Date.parse(job.finishedAt) : Date.now();
+		const seconds = Math.max(0, Math.round((end - Date.parse(job.startedAt)) / 1e3));
+		const minutes = Math.floor(seconds / 60);
+		return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+	}
+	async applyConcurrency() {
+		const draft = this.state.capDraft.trim();
+		const value = /^\d+$/u.test(draft) ? Number(draft) : NaN;
+		if (!Number.isInteger(value) || value < CONCURRENCY_MIN || value > CONCURRENCY_MAX) {
+			this.setState({
+				capError: "invalid",
+				capSaved: false
+			});
+			return;
+		}
+		const epoch = this.#epoch;
+		const editStamp = this.#capEditStamp;
+		const controller = new AbortController();
+		this.#settingsController?.abort();
+		this.#settingsController = controller;
+		const owns = () => this.#epoch === epoch && !controller.signal.aborted;
+		this.setState({
+			capBusy: true,
+			capError: void 0,
+			capSaved: false
+		});
+		const outcome = await postPath(`${PREFIX}/settings`, { maxConcurrent: value }, controller.signal);
+		if (!owns()) return;
+		if (this.#settingsController === controller) this.#settingsController = void 0;
+		if (!outcome.ok) {
+			this.setState({
+				capBusy: false,
+				capError: outcome.code ?? "storage-error",
+				capSaved: false
+			});
+			return;
+		}
+		const applied = typeof outcome.result?.maxConcurrent === "number" ? outcome.result.maxConcurrent : value;
+		const keepDraft = this.#capEditStamp !== editStamp;
+		if (keepDraft) this.setState({
+			capBusy: false,
+			capError: void 0,
+			capSaved: true
+		});
+		else this.setState({
+			capBusy: false,
+			capDraft: String(applied),
+			capError: void 0,
+			capSaved: true
+		});
+		this.refresh(true);
+	}
+	renderConcurrency(t) {
+		const scheduler = this.state.snapshot?.scheduler ?? this.state.batchSnapshot?.scheduler;
+		const maxConcurrent = scheduler?.maxConcurrent;
+		const inFlight = scheduler?.inFlight ?? 0;
+		const over = typeof maxConcurrent === "number" && inFlight > maxConcurrent;
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: IciExplainToolview_module_css_default.scheduler,
+			"data-testid": "ici-explain-concurrency",
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+					className: IciExplainToolview_module_css_default.field,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("explain.concurrency") }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							type: "number",
+							min: CONCURRENCY_MIN,
+							max: CONCURRENCY_MAX,
+							step: 1,
+							value: this.state.capDraft,
+							disabled: this.state.capBusy,
+							onChange: (event) => {
+								this.#capEdited = true;
+								this.#capEditStamp += 1;
+								this.setState({
+									capDraft: event.target.value,
+									capSaved: false
+								});
+							}
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							disabled: this.state.capBusy,
+							onClick: () => void this.applyConcurrency(),
+							children: t("explain.concurrencyApply")
+						})
+					]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					className: IciExplainToolview_module_css_default.hint,
+					children: [
+						t("explain.concurrencyHint"),
+						" · ",
+						t("explain.inFlight"),
+						" ",
+						inFlight,
+						typeof maxConcurrent === "number" ? ` / ${t("explain.limit")} ${maxConcurrent}` : ""
+					]
+				}),
+				over ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+					className: IciExplainToolview_module_css_default.hint,
+					role: "status",
+					children: t("explain.overCapacity")
+				}) : null,
+				this.state.capError ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+					className: IciExplainToolview_module_css_default.error,
+					role: "alert",
+					children: this.state.capError === "invalid" ? t("explain.concurrencyInvalid") : t("explain.concurrencyFailed")
+				}) : null,
+				this.state.capSaved ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+					className: IciExplainToolview_module_css_default.hint,
+					role: "status",
+					children: t("explain.concurrencySaved")
+				}) : null
+			]
+		});
+	}
+	renderPagination(t, jobs) {
+		if (jobs.length <= PAGE_SIZE) return null;
+		const total = this.maxPage(jobs) + 1;
+		const current = Math.min(this.state.page, this.maxPage(jobs));
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: IciExplainToolview_module_css_default.pagination,
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					disabled: current <= 0,
+					onClick: () => this.setPage(current - 1, jobs),
+					children: t("explain.prevPage")
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+					t("explain.pageLabel"),
+					" ",
+					current + 1,
+					"/",
+					total
+				] }),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					disabled: current >= total - 1,
+					onClick: () => this.setPage(current + 1, jobs),
+					children: t("explain.nextPage")
+				})
+			]
+		});
+	}
+	renderBatchStats(t, jobs) {
+		const count = (predicate) => jobs.filter(predicate).length;
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+			className: IciExplainToolview_module_css_default.batchStats,
+			"data-testid": "ici-explain-batch-stats",
+			children: [
+				t("explain.jobTotal"),
+				" ",
+				jobs.length,
+				" · ",
+				t("explain.statFinal"),
+				" ",
+				count((job) => job.status === "final"),
+				" · ",
+				t("explain.statRunning"),
+				" ",
+				count((job) => job.status === "running"),
+				" · ",
+				t("explain.statWaiting"),
+				" ",
+				count((job) => job.status === "scheduled" || job.status === "confirmed"),
+				" · ",
+				statusLabel("awaiting-input", t),
+				" ",
+				count((job) => job.status === "awaiting-input"),
+				" · ",
+				t("explain.statFailed"),
+				" ",
+				count((job) => job.status === "failed"),
+				" · ",
+				t("explain.statCancelled"),
+				" ",
+				count((job) => job.status === "cancelled" || job.status === "interrupted")
+			]
+		});
+	}
 	renderBatchJobRow(t, job) {
+		const key = `job:${job.jobId}`;
+		const open = this.state.details[key] === true;
+		const elapsed = this.elapsedText(job);
+		const shortError = job.error === void 0 ? "" : job.error.length > 60 ? `${job.error.slice(0, 60)}…` : job.error;
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", {
 			className: IciExplainToolview_module_css_default.batchJobRow,
-			children: [
-				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: job.apiName }),
-				" · ",
-				statusLabel(job.status, t),
-				job.provider && job.model ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: IciExplainToolview_module_css_default.jobLine,
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {
+						className: IciExplainToolview_module_css_default.jobName,
+						children: job.apiName
+					}),
 					" · ",
-					job.provider,
-					"/",
-					job.model
-				] }) : null,
-				job.artifactPath ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [" · ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: job.artifactPath })] }) : null,
-				job.error ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [" · ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					className: IciExplainToolview_module_css_default.errorText,
-					children: job.error
-				})] }) : null,
-				this.renderRunMeta(t, job)
-			]
+					statusLabel(job.status, t),
+					elapsed ? ` · ${t("explain.elapsed")} ${elapsed}` : "",
+					shortError ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [" · ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: IciExplainToolview_module_css_default.errorText,
+						title: job.error,
+						children: shortError
+					})] }) : null,
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: IciExplainToolview_module_css_default.detailsToggle,
+						onClick: () => this.toggleDetails(key),
+						children: open ? t("explain.hideDetails") : t("explain.details")
+					})
+				]
+			}), open ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: IciExplainToolview_module_css_default.detailsBody,
+				children: [
+					this.renderRunMeta(t, job),
+					job.artifactPath ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+						className: IciExplainToolview_module_css_default.path,
+						children: [
+							t("explain.complete"),
+							": ",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: job.artifactPath })
+						]
+					}) : null,
+					job.error ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: IciExplainToolview_module_css_default.error,
+						children: job.error
+					}) : null
+				]
+			}) : null]
 		}, job.jobId);
 	}
 	clearReference() {
@@ -4122,6 +4393,8 @@ var IciExplainToolview = class extends react.Component {
 		const awaiting = jobs.filter((job) => job.status === "awaiting-input");
 		const confirmable = awaiting.length > 0 && jobs.every((job) => job.status === "awaiting-input" || job.status === "final");
 		const retryable = jobs.some((job) => RETRYABLE.has(job.status)) && !jobs.some((job) => RUNNING.has(job.status));
+		const page = Math.min(this.state.page, this.maxPage(jobs));
+		const pageJobs = jobs.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(Card, {
 			title: `${t("explain.batchTitle")} · ${jobs.length} ${t("explain.batchApis")}`,
 			status,
@@ -4137,20 +4410,23 @@ var IciExplainToolview = class extends react.Component {
 						t("explain.batchApis")
 					]
 				}),
+				batch ? this.renderBatchStats(t, jobs) : null,
+				batch ? this.renderConcurrency(t) : null,
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
 					className: IciExplainToolview_module_css_default.hint,
 					"data-testid": "ici-explain-batch-jobs",
-					children: jobs.map((job) => this.renderBatchJobRow(t, job))
+					children: pageJobs.map((job) => this.renderBatchJobRow(t, job))
 				}),
+				this.renderPagination(t, jobs),
+				batch ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+					className: IciExplainToolview_module_css_default.hint,
+					children: t("explain.batchOpsScope")
+				}) : null,
 				batch && confirmable ? this.renderConfirmation(t, true) : null,
-				batch && !confirmable && !retryable && RUNNING.has(status) ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+				batch && !confirmable && !retryable && RUNNING.has(status) ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 					className: IciExplainToolview_module_css_default.progress,
 					role: "status",
-					children: [
-						statusLabel(status, t),
-						" · ",
-						t("explain.waitingIdle")
-					]
+					children: status === "scheduled" ? `${statusLabel(status, t)} · ${t("explain.waitingIdle")}` : `${statusLabel(status, t)} · ${t("explain.runningNow")}`
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 					type: "button",
 					disabled: this.state.busy,
@@ -4193,6 +4469,7 @@ var IciExplainToolview = class extends react.Component {
 			})
 		});
 		const status = snapshot?.job.status ?? "awaiting-input";
+		const metaOpen = this.state.details["job:meta"] === true;
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(Card, {
 			title: snapshot?.job.apiName ?? t("explain.title"),
 			status,
@@ -4214,20 +4491,40 @@ var IciExplainToolview = class extends react.Component {
 						t("explain.readable")
 					]
 				}) : null,
-				snapshot ? this.renderRunMeta(t, snapshot.job) : null,
+				snapshot ? this.renderConcurrency(t) : null,
+				snapshot ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: IciExplainToolview_module_css_default.detailsToggle,
+					onClick: () => this.toggleDetails("job:meta"),
+					children: metaOpen ? t("explain.hideDetails") : t("explain.details")
+				}) : null,
+				snapshot && metaOpen ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: IciExplainToolview_module_css_default.detailsBody,
+					children: [
+						this.renderRunMeta(t, snapshot.job),
+						snapshot.job.artifactPath ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+							className: IciExplainToolview_module_css_default.path,
+							children: [
+								t("explain.complete"),
+								": ",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: snapshot.job.artifactPath })
+							]
+						}) : null,
+						snapshot.job.error ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+							className: IciExplainToolview_module_css_default.error,
+							children: snapshot.job.error
+						}) : null
+					]
+				}) : null,
 				snapshot?.summary.truncated ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 					className: IciExplainToolview_module_css_default.hint,
 					children: t("explain.truncated")
 				}) : null,
 				status === "awaiting-input" || status === "scheduled" ? this.renderConfirmation(t, false) : null,
-				status === "confirmed" || status === "running" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+				status === "confirmed" || status === "running" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 					className: IciExplainToolview_module_css_default.progress,
 					role: "status",
-					children: [
-						statusLabel(status, t),
-						" · ",
-						t("explain.waitingIdle")
-					]
+					children: status === "confirmed" ? `${statusLabel(status, t)} · ${t("explain.waitingIdle")}` : `${statusLabel(status, t)} · ${t("explain.runningNow")}`
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 					type: "button",
 					disabled: this.state.busy,
@@ -4240,7 +4537,10 @@ var IciExplainToolview = class extends react.Component {
 					children: [
 						t("explain.complete"),
 						": ",
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: snapshot?.job.artifactPath ?? "—" })
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+							className: IciExplainToolview_module_css_default.path,
+							children: snapshot?.job.artifactPath ?? "—"
+						})
 					]
 				}) : null,
 				status === "failed" || status === "cancelled" || status === "interrupted" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
@@ -4358,7 +4658,30 @@ const zh = {
 	"explain.session": "会话",
 	"explain.startedAt": "开始",
 	"explain.finishedAt": "结束",
-	"explain.noReference": "不使用参考资料"
+	"explain.noReference": "不使用参考资料",
+	"explain.concurrency": "最大并发",
+	"explain.concurrencyHint": "当前 Host 的全部 ICI Explain 任务共享此上限（1–32），保存后立即生效",
+	"explain.concurrencyApply": "应用",
+	"explain.concurrencyInvalid": "请输入 1–32 的整数",
+	"explain.concurrencySaved": "已应用",
+	"explain.concurrencyFailed": "保存失败，未生效",
+	"explain.inFlight": "在途",
+	"explain.limit": "上限",
+	"explain.overCapacity": "正在收窄并发：在途任务完成后不再补位",
+	"explain.pageLabel": "页码",
+	"explain.prevPage": "上一页",
+	"explain.nextPage": "下一页",
+	"explain.details": "详情",
+	"explain.hideDetails": "收起",
+	"explain.elapsed": "用时",
+	"explain.statFinal": "完成",
+	"explain.statRunning": "运行",
+	"explain.statWaiting": "等待",
+	"explain.statFailed": "失败",
+	"explain.statCancelled": "取消",
+	"explain.batchOpsScope": "确认、取消整批与重试失败任务始终作用于全部批次任务，与当前页无关",
+	"explain.runningNow": "解释中…",
+	"explain.jobTotal": "共"
 };
 const en = {
 	"status.queued": "Queued",
@@ -4434,7 +4757,30 @@ const en = {
 	"explain.session": "Session",
 	"explain.startedAt": "started",
 	"explain.finishedAt": "finished",
-	"explain.noReference": "No reference"
+	"explain.noReference": "No reference",
+	"explain.concurrency": "Max concurrency",
+	"explain.concurrencyHint": "Shared by all ICI Explain jobs on this Host (1–32); applies immediately after saving",
+	"explain.concurrencyApply": "Apply",
+	"explain.concurrencyInvalid": "Enter an integer from 1 to 32",
+	"explain.concurrencySaved": "Applied",
+	"explain.concurrencyFailed": "Save failed; not applied",
+	"explain.inFlight": "In flight",
+	"explain.limit": "Limit",
+	"explain.overCapacity": "Throttling down: no new jobs start until in-flight drops to the new limit",
+	"explain.pageLabel": "Page",
+	"explain.prevPage": "Previous",
+	"explain.nextPage": "Next",
+	"explain.details": "Details",
+	"explain.hideDetails": "Hide",
+	"explain.elapsed": "elapsed",
+	"explain.statFinal": "Completed",
+	"explain.statRunning": "Running",
+	"explain.statWaiting": "Waiting",
+	"explain.statFailed": "Failed",
+	"explain.statCancelled": "Cancelled",
+	"explain.batchOpsScope": "Confirmation, cancel-batch, and retry-failed always act on the whole batch, not the current page",
+	"explain.runningNow": "Explaining…",
+	"explain.jobTotal": "Total"
 };
 
 //#endregion

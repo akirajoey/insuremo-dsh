@@ -12409,6 +12409,131 @@ var IciEngineService = class extends Service {
 };
 
 //#endregion
+//#region ../icomposer-code-intelligence/src/explain-config.ts
+/**
+* TASK-102: the one Host-wide ICI Explain scheduling setting.
+*
+* Scope is deliberately the CURRENT Host instance: every workspace, session,
+* and batch scheduled by this process shares one maximum-concurrency cap. The
+* value is durable (storage-domain global) so a restart remembers it, but it
+* is NOT a cross-process limit — two Host processes keep separate caps.
+*/
+const EXPLAIN_MIN_CONCURRENCY = 1;
+const EXPLAIN_MAX_CONCURRENCY = 32;
+const EXPLAIN_DEFAULT_CONCURRENCY = 4;
+/** Strict durable/effective shape: an integer in the closed 1–32 range. */
+const explainConcurrencySchema = number().int().min(EXPLAIN_MIN_CONCURRENCY).max(EXPLAIN_MAX_CONCURRENCY);
+/** Durable Host-wide Explain configuration domain (global singleton). */
+const explainConfigDomain = defineDomain({
+	name: "ici_explain_config",
+	version: 1,
+	global: {
+		schema: object({ maxConcurrent: explainConcurrencySchema }),
+		initial: { maxConcurrent: EXPLAIN_DEFAULT_CONCURRENCY }
+	},
+	tables: {}
+});
+/**
+* The single owner of the Explain concurrency setting (`ctx.iciExplainConfig`).
+*
+* Both the scheduler and the routes read the effective value from this one
+* service, so no caller opens the domain twice and no in-memory copy can drift
+* from the durable one: every accepted write persists FIRST and only then
+* moves the effective value and wakes the scheduler.
+*/
+var ExplainConfigService = class extends Service {
+	static inject = ["storageDomain"];
+	domain;
+	maxConcurrentValue = EXPLAIN_DEFAULT_CONCURRENCY;
+	listeners = /* @__PURE__ */ new Set();
+	writeTail = Promise.resolve();
+	serviceDisposed = false;
+	constructor(ctx) {
+		super(ctx, "iciExplainConfig");
+		this.setMaxConcurrent = this.setMaxConcurrent.bind(this);
+		this.onChange = this.onChange.bind(this);
+		this.dispose = this.dispose.bind(this);
+	}
+	async [Service.init]() {
+		const storage = this.ctx.get("storageDomain");
+		if (storage === void 0) throw new Error("iciExplainConfig: storageDomain is unavailable");
+		const domain = await storage.open(explainConfigDomain);
+		try {
+			const stored = explainConfigDomain.global.schema.parse(domain.global.get());
+			this.domain = domain;
+			this.maxConcurrentValue = stored.maxConcurrent;
+		} catch (error$2) {
+			await domain.close().catch(() => void 0);
+			throw error$2;
+		}
+		this.ctx.effect(() => () => this.dispose(), "iciExplainConfig.dispose");
+	}
+	/** Effective cap for the current Host instance. */
+	get maxConcurrent() {
+		return this.maxConcurrentValue;
+	}
+	/** Detached view for status payloads. */
+	get view() {
+		return { maxConcurrent: this.maxConcurrentValue };
+	}
+	/**
+	* The one write entry: validate strictly, persist through the domain, then
+	* commit the effective value. Invalid input never touches storage or the
+	* effective value; a persistence failure returns `storage-error` with the
+	* previous value still in force.
+	*/
+	setMaxConcurrent(input) {
+		if (this.serviceDisposed || this.domain === void 0) return Promise.resolve({
+			ok: false,
+			code: "storage-error"
+		});
+		if (typeof input !== "number" || !Number.isInteger(input) || input < EXPLAIN_MIN_CONCURRENCY || input > EXPLAIN_MAX_CONCURRENCY) return Promise.resolve({
+			ok: false,
+			code: "invalid-input"
+		});
+		const domain = this.domain;
+		const write = async () => {
+			try {
+				await domain.global.set({ maxConcurrent: input });
+			} catch {
+				return {
+					ok: false,
+					code: "storage-error"
+				};
+			}
+			this.maxConcurrentValue = input;
+			for (const listener of [...this.listeners]) try {
+				listener(input);
+			} catch {}
+			return {
+				ok: true,
+				value: { maxConcurrent: input }
+			};
+		};
+		const task = this.writeTail.then(write, write);
+		this.writeTail = task.then(() => void 0, () => void 0);
+		return task;
+	}
+	/** Observe committed cap changes (the scheduler uses this to fill capacity). */
+	onChange(listener) {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
+	}
+	/** Drain pending writes, then close the domain exactly once. */
+	async dispose() {
+		if (this.serviceDisposed) return;
+		this.serviceDisposed = true;
+		this.listeners.clear();
+		await this.writeTail.catch(() => void 0);
+		const domain = this.domain;
+		this.domain = void 0;
+		await domain?.close();
+	}
+};
+
+//#endregion
 //#region ../icomposer-code-intelligence/src/explain-scheduler.ts
 const MAX_EXPLAIN_PROMPT_BYTES = 256 * 1024;
 const MAX_FLOW_ITEMS = 64;
@@ -12422,6 +12547,40 @@ const SUBMIT_REPAIR = "schema-invalid: submit exactly technical/business strings
 const SECRET_PATTERN$1 = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
 const ABSOLUTE_PATH_PATTERN$1 = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
 const explainJobTails = /* @__PURE__ */ new Map();
+/** Child Explain agents are created one at a time per composition; concurrent create is not proven safe. */
+const explainChildCreationTails = /* @__PURE__ */ new WeakMap();
+function serializeChildCreation(key, operation) {
+	const prior = explainChildCreationTails.get(key) ?? Promise.resolve();
+	const task = prior.then(operation, operation);
+	explainChildCreationTails.set(key, task.then(() => void 0, () => void 0));
+	return task;
+}
+/**
+* TASK-102: per-composition registry of live Explain child sessions. The
+* WeakMap keys it to the composition context (no module-global lifetime), and
+* a child is registered BEFORE `agents.create` so it can never be observed as
+* a driver root, with every exit path (create failure, abort, throw, dispose)
+* unregistering it.
+*/
+const explainChildSessions = /* @__PURE__ */ new WeakMap();
+function explainChildRegistry(ctx) {
+	let registry$1 = explainChildSessions.get(ctx);
+	if (registry$1 === void 0) {
+		registry$1 = /* @__PURE__ */ new Set();
+		explainChildSessions.set(ctx, registry$1);
+	}
+	return registry$1;
+}
+function registerExplainChild(ctx, sessionId) {
+	explainChildRegistry(ctx).add(sessionId);
+}
+function unregisterExplainChild(ctx, sessionId) {
+	explainChildRegistry(ctx).delete(sessionId);
+}
+function isExplainChildRoot(ctx, agent) {
+	const id = agent?.id;
+	return typeof id === "string" && explainChildRegistry(ctx).has(id);
+}
 async function withExplainJobTransaction(root, jobId, task) {
 	const key = `${root}\0${jobId}`;
 	const previous = explainJobTails.get(key) ?? Promise.resolve();
@@ -12821,23 +12980,30 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 		});
 	};
 	const childSessionId = randomUUID();
-	const create = () => agents.create({
-		sessionId: childSessionId,
-		meta: {
-			cwd: root,
-			...parent?.id ? { parentSession: parent.id } : {},
-			origin: "subagent",
-			delegationDepth: 1
-		},
-		agentOptions: {
-			provider: job.provider,
-			model: job.model,
-			maxTokens: 4096
-		},
-		setup,
-		signal
-	});
-	const handle = parent && agents.withInitiator ? await agents.withInitiator(parent, create) : await create();
+	registerExplainChild(ctx, childSessionId);
+	let handle;
+	try {
+		const create = () => agents.create({
+			sessionId: childSessionId,
+			meta: {
+				cwd: root,
+				...parent?.id ? { parentSession: parent.id } : {},
+				origin: "subagent",
+				delegationDepth: 1
+			},
+			agentOptions: {
+				provider: job.provider,
+				model: job.model,
+				maxTokens: 4096
+			},
+			setup,
+			signal
+		});
+		handle = await serializeChildCreation(ctx, () => parent && agents.withInitiator ? agents.withInitiator(parent, create) : create());
+	} catch (error$2) {
+		unregisterExplainChild(ctx, childSessionId);
+		throw error$2;
+	}
 	const child = handle.agent;
 	childRef = child;
 	const abortChild = () => {
@@ -12899,7 +13065,11 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 		try {
 			child.cancel("cancelled");
 		} catch {}
-		await handle.dispose();
+		try {
+			await handle.dispose();
+		} finally {
+			unregisterExplainChild(ctx, childSessionId);
+		}
 	}
 }
 async function processConfirmedJob(llm, root, jobId, signal, ctx, parent) {
@@ -12999,23 +13169,30 @@ var ExplainScheduler = class extends Service {
 	static inject = [
 		"agents",
 		"llm",
-		"workspaceBinding"
+		"workspaceBinding",
+		"iciExplainConfig"
 	];
-	#attached = /* @__PURE__ */ new WeakSet();
-	#requested = /* @__PURE__ */ new WeakSet();
-	#runs = /* @__PURE__ */ new WeakMap();
-	#waiting = /* @__PURE__ */ new WeakSet();
-	#controllers = /* @__PURE__ */ new Map();
-	#inflight = /* @__PURE__ */ new Set();
-	#disposePromise;
-	#timers = /* @__PURE__ */ new Map();
-	#timerTargets = /* @__PURE__ */ new Map();
-	#recovered = /* @__PURE__ */ new Set();
-	#disposed = false;
+	/** One global fill loop: every drive source funnels here, so concurrent roots can never over-fill. */
+	filling;
+	fillRequested = false;
+	/** TASK-102: reserved capacity, keyed `${canonicalRoot}\0${jobId}`, reserved BEFORE any async preflight. */
+	inFlight = /* @__PURE__ */ new Map();
+	/** One-shot idle wakes, deduplicated per user root and never awaited by the fill loop. */
+	idleWakes = /* @__PURE__ */ new WeakSet();
+	/** All live job tasks, awaited before disposal completes. */
+	tasks = /* @__PURE__ */ new Set();
+	configDispose;
+	disposePromise;
+	timers = /* @__PURE__ */ new Map();
+	timerTargets = /* @__PURE__ */ new Map();
+	recovered = /* @__PURE__ */ new Set();
+	disposed = false;
 	constructor(ctx) {
 		super(ctx, "iciExplainScheduler");
 		this.cancelJob = this.cancelJob.bind(this);
 		this.poke = this.poke.bind(this);
+		this.status = this.status.bind(this);
+		this.dispose = this.dispose.bind(this);
 	}
 	[Service.init]() {
 		this.ctx.effect(() => () => this.dispose(), "iciExplainScheduler.dispose");
@@ -13028,10 +13205,29 @@ var ExplainScheduler = class extends Service {
 		]) try {
 			on(event, () => void this.attachRoots());
 		} catch {}
+		const config$1 = this.ctx.get("iciExplainConfig");
+		if (config$1 !== void 0) this.configDispose = config$1.onChange(() => {
+			if (!this.disposed) this.poke();
+		});
+	}
+	/** Current effective cap and reserved in-flight count for status payloads. */
+	status() {
+		return {
+			maxConcurrent: this.maxConcurrent(),
+			inFlight: this.inFlight.size
+		};
+	}
+	maxConcurrent() {
+		const config$1 = this.ctx.get("iciExplainConfig");
+		return config$1?.maxConcurrent ?? EXPLAIN_DEFAULT_CONCURRENCY;
+	}
+	/** Real user roots only: Explain children are registered by session id before creation. */
+	userRoots() {
+		const roots = this.ctx.get("agents")?.roots?.() ?? [];
+		return roots.filter((agent) => !isExplainChildRoot(this.ctx, agent));
 	}
 	async attachRoots() {
-		if (this.#disposed) return;
-		const roots = this.ctx.get("agents")?.roots?.() ?? [];
+		if (this.disposed) return;
 		const binding = this.ctx.get("workspaceBinding");
 		if (binding) {
 			const listed = await binding.list().catch(() => ({
@@ -13039,18 +13235,14 @@ var ExplainScheduler = class extends Service {
 				value: void 0
 			}));
 			if (listed.ok) for (const row of listed.value ?? []) {
-				if (!this.#recovered.has(row.canonicalPath)) {
-					this.#recovered.add(row.canonicalPath);
+				if (!this.recovered.has(row.canonicalPath)) {
+					this.recovered.add(row.canonicalPath);
 					await markRunningJobsInterrupted(row.canonicalPath);
 				}
 				await this.armScheduled(row.canonicalPath);
 			}
 		}
-		for (const agent of roots) {
-			if (this.#attached.has(agent)) continue;
-			this.#attached.add(agent);
-			this.requestDrive(agent);
-		}
+		this.requestDrive();
 	}
 	async armScheduled(root) {
 		for (const job of await listActiveJobs(root)) if (job.status === "scheduled" && job.notBefore) this.armTimer(job);
@@ -13059,93 +13251,144 @@ var ExplainScheduler = class extends Service {
 		const target = Date.parse(job.notBefore ?? "");
 		if (!Number.isFinite(target)) return;
 		const delay = Math.min(MAX_TIMER_MS, Math.max(0, target - Date.now()));
-		const existing = this.#timers.get(job.jobId);
-		if (existing && this.#timerTargets.get(job.jobId) === target) return;
+		const existing = this.timers.get(job.jobId);
+		if (existing && this.timerTargets.get(job.jobId) === target) return;
 		if (existing) clearTimeout(existing);
 		const timer = setTimeout(() => {
-			this.#timers.delete(job.jobId);
-			this.#timerTargets.delete(job.jobId);
+			this.timers.delete(job.jobId);
+			this.timerTargets.delete(job.jobId);
 			this.poke();
 		}, delay);
-		this.#timers.set(job.jobId, timer);
-		this.#timerTargets.set(job.jobId, target);
+		this.timers.set(job.jobId, timer);
+		this.timerTargets.set(job.jobId, target);
 	}
-	requestDrive(agent) {
-		if (this.#disposed) return;
-		this.#requested.add(agent);
-		if (this.#runs.has(agent)) return;
-		const run = this.drain(agent).finally(() => {
-			this.#runs.delete(agent);
-			if (this.#requested.has(agent)) this.requestDrive(agent);
-		});
-		this.#runs.set(agent, run);
+	requestDrive() {
+		if (this.disposed) return;
+		this.scheduleFill();
 	}
-	async drain(agent) {
-		while (this.#requested.has(agent) && !this.#disposed) {
-			this.#requested.delete(agent);
-			await this.driveOnce(agent);
+	scheduleFill() {
+		if (this.filling !== void 0) {
+			this.fillRequested = true;
+			return;
 		}
+		this.filling = this.fillLoop().finally(() => {
+			this.filling = void 0;
+			if (this.fillRequested) {
+				this.fillRequested = false;
+				this.scheduleFill();
+			}
+		});
 	}
-	async driveOnce(agent) {
-		const binding = this.ctx.get("workspaceBinding");
-		const llm = this.ctx.get("llm");
-		if (!binding || !llm) return;
+	/** Pick the next claimable job globally; futures arm their timer and never block due work. */
+	async pickClaimable(binding) {
 		const listed = await binding.list().catch(() => ({
 			ok: false,
 			value: void 0
 		}));
-		if (!listed.ok) return;
-		let job;
+		if (!listed.ok) return void 0;
 		for (const row of listed.value ?? []) {
-			const candidate = (await listActiveJobs(row.canonicalPath)).find((item) => ["scheduled", "confirmed"].includes(item.status));
-			if (candidate?.notBefore && Date.parse(candidate.notBefore) > Date.now()) {
-				this.armTimer(candidate);
-				continue;
-			}
-			if (candidate && !this.#controllers.has(candidate.jobId)) {
-				job = candidate;
-				break;
+			const actives = await listActiveJobs(row.canonicalPath);
+			for (const item of actives) {
+				if (!["scheduled", "confirmed"].includes(item.status)) continue;
+				if (item.notBefore && Date.parse(item.notBefore) > Date.now()) {
+					this.armTimer(item);
+					continue;
+				}
+				if (this.inFlight.has(`${row.canonicalPath}\0${item.jobId}`)) continue;
+				return item;
 			}
 		}
-		if (!job) return;
-		const resolved$1 = await binding.get(job.workspaceId);
-		if (!resolved$1.ok || !resolved$1.value) return;
-		try {
-			await agent.whenIdle();
-		} catch {
+		return void 0;
+	}
+	/**
+	* One global serial fill loop. Each pass picks a job, re-resolves its root,
+	* reverifies capacity/disposal/record state after EVERY await, then reserves
+	* synchronously and tries the user roots in order. A root that refuses
+	* `runMaintenance` is busy; when every root is busy the pass releases its
+	* reservation and arms one-shot idle wakes instead of polling.
+	*/
+	async fillLoop() {
+		while (!this.disposed) {
+			this.fillRequested = false;
+			if (this.inFlight.size >= this.maxConcurrent()) return;
+			const binding = this.ctx.get("workspaceBinding");
+			const llm = this.ctx.get("llm");
+			if (!binding || !llm) return;
+			const roots = this.userRoots();
+			if (roots.length === 0) return;
+			const claim = await this.pickClaimable(binding);
+			if (this.disposed) return;
+			if (claim === void 0) return;
+			if (this.inFlight.size >= this.maxConcurrent()) return;
+			const resolved$1 = await binding.get(claim.workspaceId);
+			if (this.disposed) return;
+			if (this.inFlight.size >= this.maxConcurrent()) return;
+			if (!resolved$1.ok || !resolved$1.value) return;
+			const canonicalRoot = resolved$1.value.canonicalPath;
+			const latest = await readJobRecord(canonicalRoot, claim.jobId);
+			if (this.disposed) return;
+			if (!latest || !["scheduled", "confirmed"].includes(latest.status)) continue;
+			if (this.inFlight.size >= this.maxConcurrent()) return;
+			const key = `${canonicalRoot}\0${claim.jobId}`;
+			if (this.inFlight.has(key)) continue;
+			const controller = new AbortController();
+			this.inFlight.set(key, controller);
+			if (this.tryStartOn(roots, {
+				llm,
+				canonicalRoot,
+				jobId: claim.jobId,
+				controller,
+				key
+			})) continue;
+			this.inFlight.delete(key);
+			this.armIdleWakes(roots);
 			return;
 		}
-		if (this.#disposed) return;
-		try {
-			await agent.runMaintenance(async (signal) => {
-				const controller = new AbortController();
-				this.#controllers.set(job.jobId, controller);
-				const relay = () => controller.abort();
-				signal.addEventListener("abort", relay, { once: true });
-				const run = processConfirmedJob(llm, resolved$1.value.canonicalPath, job.jobId, controller.signal, this.ctx, agent).catch(() => void 0).finally(() => {
-					signal.removeEventListener("abort", relay);
-					this.#controllers.delete(job.jobId);
-					this.#inflight.delete(run);
+	}
+	/** Try the roots in order; `runMaintenance` throws synchronously while busy. */
+	tryStartOn(roots, pending) {
+		for (const agent of roots) {
+			if (this.disposed || pending.controller.signal.aborted || this.inFlight.get(pending.key) !== pending.controller) return false;
+			let kicked = false;
+			try {
+				agent.runMaintenance(async (signal) => {
+					if (this.disposed || pending.controller.signal.aborted || this.inFlight.get(pending.key) !== pending.controller) return;
+					const relay = () => pending.controller.abort();
+					signal.addEventListener("abort", relay, { once: true });
+					const run = processConfirmedJob(pending.llm, pending.canonicalRoot, pending.jobId, pending.controller.signal, this.ctx, agent).catch(() => void 0).finally(() => {
+						signal.removeEventListener("abort", relay);
+						this.inFlight.delete(pending.key);
+						this.tasks.delete(run);
+						if (!this.disposed) this.requestDrive();
+					});
+					this.tasks.add(run);
+					if (this.disposed) pending.controller.abort();
+					kicked = true;
 				});
-				this.#inflight.add(run);
-				if (this.#disposed) controller.abort();
+			} catch {
+				continue;
+			}
+			if (!kicked) return false;
+			return true;
+		}
+		return false;
+	}
+	/** One-shot, deduplicated idle wake per busy root (maintenance emits no status event). */
+	armIdleWakes(roots) {
+		for (const agent of roots) {
+			if (this.disposed) return;
+			if (this.idleWakes.has(agent)) continue;
+			this.idleWakes.add(agent);
+			agent.whenIdle().then(() => {
+				this.idleWakes.delete(agent);
+				if (!this.disposed) this.requestDrive();
+			}, () => {
+				this.idleWakes.delete(agent);
 			});
-		} catch {} finally {
-			this.rearmAtNextIdle(agent);
 		}
 	}
-	rearmAtNextIdle(agent) {
-		if (this.#disposed || this.#waiting.has(agent)) return;
-		this.#waiting.add(agent);
-		agent.whenIdle().then(() => {
-			this.#waiting.delete(agent);
-			this.requestDrive(agent);
-		}, () => {
-			this.#waiting.delete(agent);
-		});
-	}
 	async cancelJob(jobId) {
-		this.#controllers.get(jobId)?.abort();
+		for (const [key, controller] of this.inFlight) if (key.endsWith(`\0${jobId}`)) controller.abort();
 		const binding = this.ctx.get("workspaceBinding");
 		if (!binding) return false;
 		const listed = await binding.list().catch(() => ({
@@ -13153,6 +13396,7 @@ var ExplainScheduler = class extends Service {
 			value: void 0
 		}));
 		for (const row of listed.value ?? []) {
+			this.inFlight.get(`${row.canonicalPath}\0${jobId}`)?.abort();
 			const cancelled$1 = await withExplainJobTransaction(row.canonicalPath, jobId, async () => {
 				for (let attempt = 0; attempt < 20; attempt++) {
 					const record = await readJobRecord(row.canonicalPath, jobId);
@@ -13174,32 +13418,33 @@ var ExplainScheduler = class extends Service {
 				return (await readJobRecord(row.canonicalPath, jobId))?.status === "cancelled";
 			});
 			if (cancelled$1) {
-				const timer = this.#timers.get(jobId);
+				const timer = this.timers.get(jobId);
 				if (timer) clearTimeout(timer);
-				this.#timers.delete(jobId);
-				this.#timerTargets.delete(jobId);
+				this.timers.delete(jobId);
+				this.timerTargets.delete(jobId);
 			}
 			if (cancelled$1 || (await readJobRecord(row.canonicalPath, jobId))?.status === "final") return cancelled$1;
 		}
 		return false;
 	}
 	poke() {
-		if (this.#disposed) return;
-		const roots = this.ctx.get("agents")?.roots?.() ?? [];
-		for (const agent of roots) this.requestDrive(agent);
+		if (this.disposed) return;
+		this.requestDrive();
 	}
 	dispose() {
-		if (this.#disposePromise) return this.#disposePromise;
-		this.#disposed = true;
-		for (const controller of this.#controllers.values()) controller.abort();
-		for (const timer of this.#timers.values()) clearTimeout(timer);
-		this.#timers.clear();
-		this.#timerTargets.clear();
-		this.#disposePromise = (async () => {
-			while (this.#inflight.size > 0) await Promise.all([...this.#inflight]);
-			this.#controllers.clear();
+		if (this.disposePromise) return this.disposePromise;
+		this.disposed = true;
+		this.configDispose?.();
+		this.configDispose = void 0;
+		for (const controller of this.inFlight.values()) controller.abort();
+		for (const timer of this.timers.values()) clearTimeout(timer);
+		this.timers.clear();
+		this.timerTargets.clear();
+		this.disposePromise = (async () => {
+			while (this.tasks.size > 0) await Promise.all([...this.tasks]);
+			this.inFlight.clear();
 		})();
-		return this.#disposePromise;
+		return this.disposePromise;
 	}
 };
 
@@ -13421,7 +13666,8 @@ var ExplainRoutesService = class extends Service {
 		"workspaceBinding",
 		"iciEngine",
 		"llm",
-		"iciExplainScheduler"
+		"iciExplainScheduler",
+		"iciExplainConfig"
 	];
 	#dispose;
 	#nativeFilePicker;
@@ -13513,6 +13759,15 @@ var ExplainRoutesService = class extends Service {
 		}
 		return output;
 	}
+	schedulerInfo() {
+		const scheduler = this.ctx.get("iciExplainScheduler");
+		const config$1 = this.ctx.get("iciExplainConfig");
+		const live = scheduler?.status?.();
+		return {
+			maxConcurrent: live?.maxConcurrent ?? config$1?.maxConcurrent ?? 4,
+			inFlight: live?.inFlight ?? 0
+		};
+	}
 	async getJob(located, res) {
 		let prepare;
 		try {
@@ -13564,6 +13819,7 @@ var ExplainRoutesService = class extends Service {
 			referenceTarget: referenceTargetOf(located.job),
 			sourceBytes: prepare.sources.reduce((sum, ref) => sum + (ref.readable ? ref.bytes : 0), 0),
 			providers: await this.providers(),
+			scheduler: this.schedulerInfo(),
 			consent: "The background AI will read only the selected workspace-relative reference target and send selected source excerpts and directory material to the chosen model."
 		});
 	}
@@ -13605,6 +13861,7 @@ var ExplainRoutesService = class extends Service {
 			batch: located.batch,
 			jobs,
 			providers: await this.providers(),
+			scheduler: this.schedulerInfo(),
 			summary: {
 				promptBaseBytes,
 				sourceBytes,
@@ -14128,10 +14385,54 @@ var ExplainRoutesService = class extends Service {
 			fail(res, 500, "storage-error");
 		}
 	}
+	/** TASK-102: the single Host-wide concurrency setting endpoint (same-origin + action header). */
+	async settings(req, res) {
+		if (req.method !== "POST" || req.headers["x-workbench-action"] !== "1") {
+			response(res, 405, {
+				ok: false,
+				error: {
+					code: "method-not-allowed",
+					message: "method-not-allowed"
+				}
+			});
+			return;
+		}
+		if (typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) {
+			fail(res, 415, "invalid-input");
+			return;
+		}
+		const body = await readBody$1(req);
+		if (body === null) {
+			fail(res, 413, "input-too-large");
+			return;
+		}
+		if (!hasOnly(body, ["maxConcurrent"])) {
+			fail(res, 422, "invalid-input");
+			return;
+		}
+		const config$1 = this.ctx.get("iciExplainConfig");
+		if (config$1 === void 0) {
+			fail(res, 500, "storage-error");
+			return;
+		}
+		const result = await config$1.setMaxConcurrent(body.maxConcurrent);
+		if (!result.ok) {
+			fail(res, result.code === "invalid-input" ? 422 : 500, result.code);
+			return;
+		}
+		ok(res, {
+			...result.value,
+			...this.schedulerInfo()
+		});
+	}
 	async handle(req, res) {
 		const url = new URL(req.url ?? "/", "http://localhost");
 		const suffix = url.pathname.slice(EXPLAIN_ROUTES_PREFIX.length).replace(/^\//, "");
 		const parts = suffix.split("/").filter(Boolean);
+		if (parts.length === 1 && parts[0] === "settings") {
+			await this.settings(req, res);
+			return;
+		}
 		const isBatch = parts[0] === "batches";
 		const isJobScope = parts[0] === "jobs";
 		const id = isBatch || isJobScope ? parts[1] : parts[0];
@@ -27248,15 +27549,68 @@ const SKILLS_TOOL_SOURCE = "insuremo-skills";
 const SKILL_CATALOG_OUTPUT_LIMIT_BYTES = 64 * 1024;
 /** Keep the cache and every response finite even when a source grows unexpectedly. */
 const SKILL_CATALOG_MAX_ENTRIES = 128;
-const SKILL_CATALOG_DESCRIPTION_MAX = 500;
+/**
+* Description bound. The real 1.1.2 macOS capture (`add -l`, 36 skills) measures
+* a maximum joined description of 1618 characters; the Windows capture wraps the
+* same descriptions as single long lines (14 rows above 500). 4096 keeps roughly
+* 2.5x headroom for longer future descriptions while staying bounded — an
+* over-limit description is still rejected (fail closed).
+*/
+const SKILL_CATALOG_DESCRIPTION_MAX = 4096;
 const SKILL_CATALOG_TTL_MS = 6e4;
 const SKILL_CATALOG_TIMEOUT_MS = 15e3;
 const SKILL_CATALOG_SCHEMA_VERSION = "1";
 const ANSI_ESCAPE$1 = /\u001B(?:\](?:[^\u0007\u001B]|\u001B(?=\\))*\u0007|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
-const MESSAGE_PREFIX = /^\s*[│|]\s{2,}/u;
+const ERASE_SEQUENCE = /^\u001B\[[0-9;]*[JK]/u;
+const CURSOR_HOME = /^\u001B\[[0-9]*D/u;
+/**
+* Assemble terminal output into logical lines.
+*
+* clack's spinner rewrites one visual line with `\r`/`ESC[<n>D` followed by
+* `ESC[K`/`ESC[J`; stripping those bytes would concatenate the erased spinner
+* text with the replacement text ("Found 36 skills" glued to the previous
+* fragment), so erasure INVALIDATES the pending visual line instead: the
+* carriage return resets it and an erase sequence drops it. A physical `\n`
+* terminates the logical line either way.
+*/
+function assembleLogicalLines(output) {
+	const lines = [];
+	let buffer = "";
+	for (let index = 0; index < output.length; index += 1) {
+		const char = output[index];
+		if (char === "\r") {
+			if (output[index + 1] === "\n") {
+				lines.push(buffer);
+				buffer = "";
+				index += 1;
+				continue;
+			}
+			buffer = "";
+			continue;
+		}
+		if (char === "\n") {
+			lines.push(buffer);
+			buffer = "";
+			continue;
+		}
+		if (char === "\x1B") {
+			const rest = output.slice(index);
+			const erase = ERASE_SEQUENCE.exec(rest) ?? CURSOR_HOME.exec(rest);
+			if (erase !== null) {
+				if (ERASE_SEQUENCE.test(erase[0])) buffer = "";
+				index += erase[0].length - 1;
+				continue;
+			}
+		}
+		buffer += char;
+	}
+	if (buffer.length > 0) lines.push(buffer);
+	return lines;
+}
+const MESSAGE_PREFIX = /^\s*([│|┃└┌├─])(\s{2,})/u;
 const PREFIXES = /^(?:[┌└│|—]\s*|T(?=\s)\s*)/u;
-const INDICATOR = /^[◇◆●•*oO0◒◐◓◑x>!▲■]\s{1,}/u;
+const INDICATOR = /^[◇◆●•*oO0◒◐◓◑x>!▲■✔✓]\s{1,}/u;
 const FOUND = /^Found\s+([0-9]{1,4})\s+skills?$/u;
 const FOOTER = "Use --skill <name> to install specific skills";
 const EMPTY_STATUS = "No skills found";
@@ -27296,14 +27650,14 @@ function parseSkillCatalogOutput(output) {
 		ok: false,
 		reason: "oversized"
 	};
-	const lines = output.replace(/\r\n?/gu, "\n").split("\n").map(cleanLine);
+	const lines = assembleLogicalLines(output).map(cleanLine);
 	const markerIndexes = lines.map((line, index) => lineText(line) === MARKER ? index : -1).filter((index) => index >= 0);
 	if (markerIndexes.length !== 1) return {
 		ok: false,
 		reason: "format"
 	};
 	const markerIndex = markerIndexes[0];
-	const footerIndexes = lines.map((line, index) => messageText(line) === FOOTER ? index : -1).filter((index) => index >= 0);
+	const footerIndexes = lines.map((line, index) => messageOf(line)?.text === FOOTER ? index : -1).filter((index) => index >= 0);
 	if (footerIndexes.length !== 1 || footerIndexes[0] <= markerIndex) return {
 		ok: false,
 		reason: "format"
@@ -27322,7 +27676,7 @@ function parseSkillCatalogOutput(output) {
 	for (const line of lines.slice(0, markerIndex)) {
 		const text$1 = lineText(line);
 		if (text$1.length === 0) continue;
-		if (!PREAMBLE_ALLOWED.some((pattern) => pattern.test(text$1))) return {
+		if (!PREAMBLE_ALLOWED.some((pattern) => pattern.test(text$1)) && !isLogoLine(text$1)) return {
 			ok: false,
 			reason: "format"
 		};
@@ -27335,15 +27689,34 @@ function parseSkillCatalogOutput(output) {
 	const names = /* @__PURE__ */ new Set();
 	let currentGroup;
 	let pendingName;
+	let descriptionLines = [];
 	let sawFooter = false;
+	const flushSkill = () => {
+		if (pendingName === void 0) return true;
+		const description = descriptionLines.join("\n").trim();
+		if (descriptionLines.length === 0 || !validDescription(description) || skills.length >= SKILL_CATALOG_MAX_ENTRIES) return false;
+		names.add(pendingName);
+		skills.push({
+			type: "skill",
+			name: pendingName,
+			description,
+			...currentGroup === void 0 ? {} : { group: currentGroup }
+		});
+		pendingName = void 0;
+		descriptionLines = [];
+		return true;
+	};
 	for (let index = markerIndex + 1; index <= footerIndex; index += 1) {
 		const line = lines[index] ?? "";
 		const text$1 = lineText(line);
-		if (text$1.length === 0) continue;
-		const message = messageText(line);
+		if (text$1.length === 0) {
+			if (pendingName !== void 0) descriptionLines.push("");
+			continue;
+		}
+		const message = messageOf(line);
 		if (message !== void 0) {
-			if (message === FOOTER) {
-				if (pendingName !== void 0) return {
+			if (message.text === FOOTER) {
+				if (!flushSkill()) return {
 					ok: false,
 					reason: "format"
 				};
@@ -27354,29 +27727,34 @@ function parseSkillCatalogOutput(output) {
 				ok: false,
 				reason: "format"
 			};
-			if (pendingName === void 0) {
-				if (!validSkillName(message) || names.has(message)) return {
-					ok: false,
-					reason: "format"
-				};
-				pendingName = message;
-			} else {
-				if (!validDescription(message) || skills.length >= SKILL_CATALOG_MAX_ENTRIES) return {
-					ok: false,
-					reason: "format"
-				};
-				names.add(pendingName);
-				skills.push({
-					type: "skill",
-					name: pendingName,
-					description: message,
-					...currentGroup === void 0 ? {} : { group: currentGroup }
-				});
-				pendingName = void 0;
+			if (message.text.length === 0) {
+				if (pendingName !== void 0) descriptionLines.push("");
+				continue;
 			}
+			if (message.indent === 4 && validSkillName(message.text)) {
+				if (!flushSkill()) return {
+					ok: false,
+					reason: "format"
+				};
+				if (names.has(message.text)) return {
+					ok: false,
+					reason: "format"
+				};
+				pendingName = message.text;
+				continue;
+			}
+			if (message.indent !== 2 && message.indent !== 4 && message.indent !== 6) return {
+				ok: false,
+				reason: "format"
+			};
+			if (pendingName === void 0) return {
+				ok: false,
+				reason: "format"
+			};
+			descriptionLines.push(message.text);
 			continue;
 		}
-		if (sawFooter || pendingName !== void 0 || !validGroup(text$1)) return {
+		if (sawFooter || !flushSkill() || !validGroup(text$1)) return {
 			ok: false,
 			reason: "format"
 		};
@@ -27397,7 +27775,7 @@ function parseSkillCatalogOutput(output) {
 /** Recognize only the documented 1.1.2 empty-source failure envelope. */
 function isEmptySkillCatalogOutput(output) {
 	if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > SKILL_CATALOG_OUTPUT_LIMIT_BYTES) return false;
-	const lines = output.replace(/\r\n?/gu, "\n").split("\n").map(cleanLine);
+	const lines = assembleLogicalLines(output).map(cleanLine);
 	let foundStatus = 0;
 	let foundDetail = 0;
 	for (const line of lines) {
@@ -27411,7 +27789,7 @@ function isEmptySkillCatalogOutput(output) {
 			foundDetail += 1;
 			continue;
 		}
-		if (!PREAMBLE_ALLOWED.some((pattern) => pattern.test(text$1))) return false;
+		if (!PREAMBLE_ALLOWED.some((pattern) => pattern.test(text$1)) && !isLogoLine(text$1)) return false;
 	}
 	return foundStatus === 1 && foundDetail === 1;
 }
@@ -27452,16 +27830,29 @@ function lineText(value) {
 	}
 	return text$1;
 }
-/** Return payload text only for the exact clack message prefix used by 1.1.2. */
-function messageText(value) {
+/** Return the clack message payload and its indent for the 1.1.2 decoration set. */
+function messageOf(value) {
 	const match = MESSAGE_PREFIX.exec(value);
-	return match === null ? void 0 : value.slice(match[0].length).trim();
+	return match === null ? void 0 : {
+		text: value.slice(match[0].length).trim(),
+		indent: match[2].length
+	};
+}
+/**
+* Bounded clack ASCII-logo line: box-drawing/block glyphs and spaces only,
+* with a hard length bound. The real 1.1.2 logo is six such lines above the
+* `skills` badge; anything with other characters is not a logo line.
+*/
+const LOGO_GLYPHS = /^[\s\u2500-\u257F\u2580-\u259F]+$/u;
+const LOGO_MAX_LENGTH = 200;
+function isLogoLine(text$1) {
+	return text$1.length > 0 && text$1.length <= LOGO_MAX_LENGTH && /[^\s]/u.test(text$1) && LOGO_GLYPHS.test(text$1);
 }
 function validSkillName(value) {
 	return value.length > 0 && value.length <= MAX_SKILL_NAME_LENGTH && isSkillName(value);
 }
 function validDescription(value) {
-	return value.length > 0 && value.length <= SKILL_CATALOG_DESCRIPTION_MAX && !/[\u0000-\u001F\u007F]/u.test(value);
+	return value.length > 0 && value.length <= SKILL_CATALOG_DESCRIPTION_MAX && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value);
 }
 function validGroup(value) {
 	return value.length > 0 && value.length <= MAX_GROUP_LENGTH && /^[A-Za-z0-9][A-Za-z0-9 _-]*$/u.test(value);
@@ -32451,6 +32842,7 @@ var WorkbenchDistService = class extends Service {
 		await ctx.plugin(IcomposerVerifyService, this.#config.verify);
 		await ctx.plugin(IciContextService);
 		await ctx.plugin(IciEngineService);
+		await ctx.plugin(ExplainConfigService);
 		await ctx.plugin(ExplainScheduler);
 		await ctx.plugin(ExplainRoutesService);
 		await ctx.plugin(IcomposerVerifyToolService);
