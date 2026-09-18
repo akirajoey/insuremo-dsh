@@ -68,7 +68,9 @@ test("TASK-102: status surfaces the effective cap and in-flight count from the l
     await setup.handler(req("GET", `/api/icomposer-workbench/ici/explain/batches/${batchId}/status`), status);
     const view = decode(status);
     assert.equal(view.ok, true);
-    assert.deepEqual(view.result.scheduler, { maxConcurrent: 4, inFlight: 3 });
+    // TASK-111: the batch status now reports the Host ceiling AND the task's own
+    // ceiling/live count next to it, so the card can show both without a write path.
+    assert.deepEqual(view.result.scheduler, { maxConcurrent: 4, inFlight: 3, taskMaxConcurrent: 4, taskInFlight: 0, hostMaxConcurrent: 4 });
     assert.equal(status.body.includes(setup.fx.root), false);
   } finally { await setup.fiber.dispose(); await setup.fx.cleanup(); }
 });

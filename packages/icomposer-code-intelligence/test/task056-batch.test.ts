@@ -25,11 +25,17 @@ async function fixture(prefix = "task056-batch-") {
   return { root, graph, deps, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
-test("TASK-056 batch prepare deduplicates APIs, writes one batch record, and reuses active jobs", async () => {
+test("TASK-111 batch prepare deduplicates APIs, writes one task record, and refuses another task's active job", async () => {
   const fx = await fixture(); try {
-    const first = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["AlphaAPI", "BetaAPI", "AlphaAPI"] }); assert.equal(first.ok, true); assert.equal(first.value.jobs.length, 2); assert.match(first.value.batchId, /^[a-f0-9]{16}$/); assert.ok(first.value.jobs.every(job => job.reused === false));
-    const record = await readBatchRecord(fx.root, first.value.batchId); assert.ok(record); assert.deepEqual(record?.jobIds, first.value.jobs.map(job => job.jobId)); assert.equal((await listJobs(fx.root)).length, 2); assert.ok(first.value.jobs.every(job => job.chainNodes >= 1 && job.artifactPath.startsWith(".metadata/")));
-    const second = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["BetaAPI", "AlphaAPI"] }); assert.equal(second.ok, true); assert.deepEqual(second.value.jobs.map(job => job.jobId).sort(), first.value.jobs.map(job => job.jobId).sort()); assert.ok(second.value.jobs.every(job => job.reused === true)); assert.equal((await listJobs(fx.root)).length, 2);
+    const first = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["AlphaAPI", "BetaAPI", "AlphaAPI"] }); assert.equal(first.ok, true); assert.equal(first.value.jobs.length, 2); assert.match(first.value.batchId, /^[a-f0-9]{16}$/); assert.ok(first.value.jobs.every(job => job.reused === false)); assert.equal(first.value.requestedCount, 3); assert.equal(first.value.duplicates, 1);
+    const record = await readBatchRecord(fx.root, first.value.batchId); assert.ok(record); assert.deepEqual(record?.jobIds, first.value.jobs.map(job => job.jobId)); assert.equal(record?.requestedCount, 3); assert.equal(record?.maxConcurrent, 4); assert.equal((await listJobs(fx.root)).length, 2); assert.ok(first.value.jobs.every(job => job.chainNodes >= 1 && job.artifactPath.startsWith(".metadata/")));
+    assert.ok(first.value.jobs.every(job => typeof job.jobId === "string"));
+    const jobsAfterFirst = await listJobs(fx.root);
+    assert.ok(jobsAfterFirst.every(job => job.batchId === first.value.batchId));
+    // TASK-111: a second task never adopts the first task's active jobs (that would
+    // couple batch attribution, concurrency, and plan); it is refused explicitly.
+    const second = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["BetaAPI", "AlphaAPI"] }); assert.equal(second.ok, false); assert.equal(second.error.code, "job-active"); assert.match(second.error.message, /BetaAPI/);
+    assert.equal((await listJobs(fx.root)).length, 2);
   } finally { await fx.cleanup(); }
 });
 
@@ -37,7 +43,7 @@ test("TASK-062 native single and batch prepares default to none through status a
   const fx = await fixture(); const routes: any[] = [];
   try {
     const single = await runPrepare(fx.deps, { workspaceId: "batch", query: "AlphaAPI" }); assert.equal(single.ok, true);
-    const batch = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["BetaAPI", "AlphaAPI"] }); assert.equal(batch.ok, true); assert.equal(batch.value.jobs.length, 2);
+    const batch = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["BetaAPI"] }); assert.equal(batch.ok, true); assert.equal(batch.value.jobs.length, 1);
     for (const jobId of [single.value.jobId, ...batch.value.jobs.map(job => job.jobId)]) { const job = await readJobRecord(fx.root, jobId); assert.deepEqual(job?.referenceTarget, { path: "", kind: "none" }); assert.equal(job?.folderPath, ""); }
     const ctx: any = new Context(); ctx.provide("webServer", { register(route: any) { routes.push(route); return () => undefined; } }); ctx.provide("workspaceBinding", { list: async () => ({ ok: true, value: [{ workspaceId: "batch", canonicalPath: fx.root }] }) }); ctx.provide("llm", { listProviders: () => [{ id: "mvp" }] }); ctx.provide("iciEngine", {}); ctx.provide("iciExplainScheduler", { poke: () => undefined, cancelJob: async () => false }); ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4 } }) }); const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await();
     try {
@@ -53,8 +59,13 @@ test("TASK-056 batch prepare validates all queries and freshness before writing"
   const stale = await fixture(); try { const deps = { ...stale.deps, loadBase: async (_workspaceId: string, query: string) => { const value = await stale.deps.loadBase(_workspaceId, query); return query === "BetaAPI" && value.ok ? { ...value, value: { ...value.value, stale: true as const } } : value; } }; const result = await runPrepareBatch(deps, { workspaceId: "batch", queries: ["AlphaAPI", "BetaAPI"] }); assert.equal(result.ok, false); assert.equal(result.error.code, "stale-snapshot"); assert.equal((await listJobs(stale.root)).length, 0); } finally { await stale.cleanup(); }
 });
 
-test("TASK-056 batch prepare rolls back jobs when a later write fails", async () => {
-  const fx = await fixture(); setExplainWriteFailpoint(path => { if (path.includes("/batches/")) throw new Error("batch-write-failed"); }); try { const result = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["AlphaAPI", "BetaAPI"] }); assert.equal(result.ok, false); assert.equal(result.error.code, "storage-error"); const jobs = await listJobs(fx.root); assert.equal(jobs.length, 2); assert.ok(jobs.every(job => job.status === "cancelled" && job.error === "storage-error")); } finally { setExplainWriteFailpoint(undefined); await fx.cleanup(); }
+test("TASK-111 batch prepare leaves no undisclosed partial task when a later write fails", async () => {
+  const fx = await fixture(); setExplainWriteFailpoint(path => { if (path.includes("/batches/")) throw new Error("batch-write-failed"); }); try {
+    const result = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["AlphaAPI", "BetaAPI"] }); assert.equal(result.ok, false); assert.equal(result.error.code, "storage-error");
+    // The task card never existed, so the records this call created are removed again
+    // (only records it owned; a reused record is never touched).
+    assert.equal((await listJobs(fx.root)).length, 0);
+  } finally { setExplainWriteFailpoint(undefined); await fx.cleanup(); }
 });
 
 test("TASK-056 removing the workspace-wide limit still blocks duplicate single API prepares", async () => {

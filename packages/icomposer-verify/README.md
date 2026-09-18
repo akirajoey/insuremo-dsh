@@ -48,7 +48,7 @@ Registered under `ctx.tools` (all `isConcurrencySafe`, effect-free, structured
 - `ici_query` — api-chain/impact graph queries via `ctx.iciEngine`
 - `ici_build` — graph build (inline or background job)
 - `ici_status` — read-only Code Intelligence diagnostics
-- `ici_explain` — prepare one API with `query`, or one 2–10 API batch with `queries`, for a single Workbench confirmation card
+- `ici_explain` — prepare ONE source-backed task: `query` (one API), `queries` (explicit list), `group` (one code group, resolved host-side), or `all` (every API of the workspace). One call is one task card with every target, no target-count ceiling, no silent truncation, and same-named assets at different paths are refused with bounded candidates. Optional `concurrency` sets the task's own maximum concurrency (the Host ceiling still caps it).
 
 The engine's index/search faces remain available for internal backend use, but
 semantic search is temporarily unavailable as an Agent tool: no `ici_search`

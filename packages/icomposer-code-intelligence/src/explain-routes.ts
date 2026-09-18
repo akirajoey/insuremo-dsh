@@ -4,8 +4,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { graphBaseDir, readManifest } from "./storage.ts";
-import { assertReferenceTarget, batchRecordRelativePath, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, supportedFolderPath, updateJobRecord, withExplainJobLocks, writeBatchRecordUnderLock, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
-import { withExplainFileLock } from "@icomposer/workbench-contracts/ici-explain";
+import { assertReferenceTarget, batchStatusVersion, batchRecordRelativePath, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, restoreBatchPlan, setBatchConfirmPending, supportedFolderPath, updateBatchPlan, updateBatchSettings, updateJobRecord, withExplainJobLocks, writeBatchRecordUnderLock, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
+import { withExplainFileLock, EXPLAIN_TASK_CONCURRENCY_MAX, EXPLAIN_TASK_CONCURRENCY_MIN } from "@icomposer/workbench-contracts/ici-explain";
 import { pickNativeFile, type NativePickerKind } from "./native-picker.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
@@ -23,7 +23,7 @@ interface DirectoryPicker { capability(): { kind: string; pick?: (signal: AbortS
 export interface NativeFilePicker { pick(signal: AbortSignal): Promise<string | null>; }
 export interface ExplainRoutesConfig { readonly nativeFilePicker?: NativeFilePicker; }
 interface Scheduler { cancelJob(jobId: string): Promise<boolean>; poke(): void; }
-interface SchedulerStatusFace { status?(): { readonly maxConcurrent: number; readonly inFlight: number }; }
+interface SchedulerStatusFace { status?(): { readonly maxConcurrent: number; readonly inFlight: number }; taskInFlightCount?(root: string, batchId: string): number; }
 interface ExplainConfigFace { readonly maxConcurrent: number; setMaxConcurrent(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number } } | { ok: false; code: string }>; }
 interface WebServer { register(route: { kind: "prefix"; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }): () => void; }
 
@@ -47,6 +47,22 @@ function hasOnly(value: Record<string, unknown>, keys: readonly string[]): boole
 function validDocPath(value: unknown): value is string { return typeof value === "string" && value.length <= 512 && value.startsWith("ref_doc/") && !value.includes("\\") && !value.split("/").includes("..") && !value.includes("\0"); }
 function statusCode(code: string): number { return code === "job-missing" ? 404 : code === "job-active" || code === "revision-conflict" || code === "stale-snapshot" || code === "source-changed" || code === "folder-changed" ? 409 : code === "storage-error" ? 500 : 422; }
 function targetFromBody(body: Record<string, unknown>, current: ExplainJobRecord): ExplainReferenceTarget | null { const fields = ["referenceTarget", "reference_target", "target"].filter(key => Object.prototype.hasOwnProperty.call(body, key)); if (fields.length > 1) return null; const legacy = body.folderPath ?? body.folder_path; const target = fields.length === 1 ? (validReferenceTarget(body[fields[0]]) ? body[fields[0]] as ExplainReferenceTarget : null) : legacy === undefined ? referenceTargetOf(current) : validFolderPath(legacy) ? { path: legacy, kind: "directory" as const } : null; if (!target) return null; if (legacy !== undefined && (typeof legacy !== "string" || legacy !== target.path)) return null; return target; }
+/**
+ * TASK-111 P4: the status summary is cached per task and invalidated by the task's status
+ * version, which every member-status write seam bumps. A cache hit therefore performs no
+ * per-member read at all, while the counts stay real (a status change always bumps).
+ */
+const BATCH_STATUS_DEFAULT_SIZE = 5;
+const BATCH_STATUS_MAX_SIZE = 200;
+const batchStatusSummaryCache = new Map<string, { readonly version: number; readonly summary: { readonly jobCount: number; readonly countsByStatus: Record<string, number> } }>();
+function pageParams(url: URL, size: number, total: number): { readonly index: number; readonly size: number; readonly totalPages: number } {
+  const rawSize = Number(url.searchParams.get("size") ?? size);
+  const pageSize = Number.isSafeInteger(rawSize) && rawSize >= 1 ? Math.min(rawSize, BATCH_STATUS_MAX_SIZE) : size;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rawPage = Number(url.searchParams.get("page") ?? 1);
+  const index = Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(rawPage, totalPages) : 1;
+  return { index, size: pageSize, totalPages };
+}
 const PICKER_CODES = new Set(["picker-cancelled", "picker-aborted", "picker-unavailable", "picker-failed", "reference-outside-workspace", "reference-symlink", "reference-unsupported"]);
 function isOutside(relativePath: string): boolean { return relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath); }
 /** Convert a native absolute selection into a workspace-relative target without exposing the absolute path. */
@@ -115,6 +131,18 @@ export class ExplainRoutesService extends Service {
     const live = scheduler?.status?.();
     return { maxConcurrent: live?.maxConcurrent ?? config?.maxConcurrent ?? 4, inFlight: live?.inFlight ?? 0 };
   }
+  /**
+   * TASK-111: a task's own ceiling (its setting, clamped by the Host ceiling) plus
+   * its live count. The card reads both without any additional write path, and the
+   * Host-wide value stays visible so the clamping is never hidden.
+   */
+  private taskSchedulerInfo(root: string, batch: ExplainBatchRecord): { readonly maxConcurrent: number; readonly inFlight: number; readonly taskMaxConcurrent: number; readonly taskInFlight: number; readonly hostMaxConcurrent: number } {
+    const host = this.schedulerInfo();
+    const scheduler = this.ctx.get("iciExplainScheduler") as SchedulerStatusFace | undefined;
+    const declared = typeof batch.maxConcurrent === "number" ? batch.maxConcurrent : host.maxConcurrent;
+    const taskMaxConcurrent = Math.max(EXPLAIN_TASK_CONCURRENCY_MIN, Math.min(declared, host.maxConcurrent));
+    return { maxConcurrent: host.maxConcurrent, inFlight: host.inFlight, taskMaxConcurrent, taskInFlight: scheduler?.taskInFlightCount?.(root, batch.batchId) ?? 0, hostMaxConcurrent: host.maxConcurrent };
+  }
   private async getJob(located: Located, res: ServerResponse): Promise<void> {
     let prepare: any; try { prepare = await loadPrepare(located.root, located.job.prepareArtifactPath); } catch { fail(res, 409, "prepare-invalidated"); return; }
     const final = await readValidatedExplainFinal(located.root, located.job.apiName, located.job.workspaceId);
@@ -131,10 +159,38 @@ export class ExplainRoutesService extends Service {
       consent: "The background AI will read only the selected workspace-relative reference target and send selected source excerpts and directory material to the chosen model."
     });
   }
-  private async batchStatus(located: BatchLocated, res: ServerResponse): Promise<void> {
+  /**
+   * TASK-111 P4 status: header-only locate plus one bounded page of members, so the
+   * request and the heavy per-member reads (prepare/final) both stay bounded by `size`.
+   */
+  private async locateBatchHeader(batchId: string): Promise<{ readonly root: string; readonly batch: ExplainBatchRecord } | null> {
+    if (!/^[a-f0-9]{16}$/.test(batchId)) return null;
+    const binding = this.ctx.get("workspaceBinding") as Binding | undefined; if (!binding) return null;
+    const listed = await binding.list().catch(() => ({ ok: false, value: undefined })); if (!listed.ok) return null;
+    for (const entry of listed.value ?? []) { const batch = await readBatchRecord(entry.canonicalPath, batchId); if (batch && batch.workspaceId === entry.workspaceId) return { root: entry.canonicalPath, batch }; }
+    return null;
+  }
+  /** Real counts, computed once per status version (a hit performs no per-member read). */
+  private async batchStatusSummary(root: string, batch: ExplainBatchRecord): Promise<{ readonly jobCount: number; readonly countsByStatus: Record<string, number> }> {
+    const cacheKey = `${root}\0${batch.batchId}`;
+    const version = batchStatusVersion(root, batch.batchId);
+    const cached = batchStatusSummaryCache.get(cacheKey);
+    if (cached !== undefined && cached.version === version) return cached.summary;
+    const countsByStatus: Record<string, number> = {};
+    for (const jobId of batch.jobIds) { const job = await readJobRecord(root, jobId); const status = job?.status ?? "missing"; countsByStatus[status] = (countsByStatus[status] ?? 0) + 1; }
+    const summary = { jobCount: batch.jobIds.length, countsByStatus };
+    batchStatusSummaryCache.set(cacheKey, { version, summary });
+    return summary;
+  }
+  private async batchStatus(located: { readonly root: string; readonly batch: ExplainBatchRecord }, url: URL, res: ServerResponse): Promise<void> {
+    const ids = located.batch.jobIds;
+    const page = pageParams(url, BATCH_STATUS_DEFAULT_SIZE, ids.length);
+    const slice = ids.slice((page.index - 1) * page.size, page.index * page.size);
     let promptBaseBytes = 0; let sourceBytes = 0; let maxPromptBaseBytes = 0;
     const jobs: Array<Record<string, unknown>> = [];
-    for (const job of located.jobs) {
+    for (const jobId of slice) {
+      const job = await readJobRecord(located.root, jobId);
+      if (!job) { fail(res, 409, "revision-conflict"); return; }
       let promptBytes = 0; let jobSourceBytes = 0;
       try { const prepare = await loadPrepare(located.root, job.prepareArtifactPath); jobSourceBytes = prepare.sources.reduce((sum, ref) => sum + (ref.readable ? ref.bytes : 0), 0); promptBytes = Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + jobSourceBytes + 1024; } catch { /* status remains useful even if an old prepare was invalidated */ }
       sourceBytes += jobSourceBytes; promptBaseBytes += promptBytes; maxPromptBaseBytes = Math.max(maxPromptBaseBytes, promptBytes);
@@ -142,7 +198,9 @@ export class ExplainRoutesService extends Service {
       const artifactPath = final?.final?.prepareId === job.prepareId && final.artifactPath.endsWith(`${job.jobId}.json`) ? final.artifactPath : undefined;
       jobs.push({ jobId: job.jobId, apiName: job.apiName, status: job.status, revision: job.revision, provider: job.provider, model: job.model, childSessionId: job.childSessionId, startedAt: job.startedAt, finishedAt: job.finishedAt, ...(artifactPath === undefined ? {} : { artifactPath }), ...(job.error === undefined ? {} : { error: job.error }), promptBaseBytes: promptBytes, sourceBytes: jobSourceBytes });
     }
-    ok(res, { batch: located.batch, jobs, providers: await this.providers(), scheduler: this.schedulerInfo(), summary: { promptBaseBytes, sourceBytes, maxPromptBaseBytes, jobCount: jobs.length } });
+    const summary = await this.batchStatusSummary(located.root, located.batch);
+    const { jobIds: _ids, ...batchView } = located.batch;
+    ok(res, { batch: { ...batchView, jobCount: ids.length }, jobs, providers: await this.providers(), scheduler: this.taskSchedulerInfo(located.root, located.batch), summary: { ...summary, promptBaseBytes, sourceBytes, maxPromptBaseBytes, pageJobCount: jobs.length }, page });
   }
   private async batchNativePick(located: BatchLocated, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
     if (!located.jobs.some(job => job.status === "awaiting-input" || job.status === "scheduled")) { fail(res, 409, "revision-conflict"); return; }
@@ -162,6 +220,22 @@ export class ExplainRoutesService extends Service {
       fail(res, code === "picker-failed" ? 500 : 409, code);
     }
   }
+  /**
+   * TASK-111: the per-task `batch` setting (how many targets of THIS task may be
+   * analyzed at once). It rewrites only this task's record: other tasks and the
+   * durable Host-wide ceiling are untouched. Lowering it while jobs are in flight
+   * cannot cancel those jobs; it only gates the next starts.
+   */
+  private async batchSettings(located: BatchLocated, body: Record<string, unknown>, res: ServerResponse): Promise<void> {
+    if (!hasOnly(body, ["maxConcurrent"])) { fail(res, 422, "invalid-input"); return; }
+    const value = body.maxConcurrent;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < EXPLAIN_TASK_CONCURRENCY_MIN || value > EXPLAIN_TASK_CONCURRENCY_MAX) { fail(res, 422, "invalid-input"); return; }
+    try {
+      const updated = await updateBatchSettings(located.root, located.batch.batchId, value);
+      (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke();
+      ok(res, { batchId: updated.batchId, ...this.taskSchedulerInfo(located.root, updated) });
+    } catch (cause) { const message = cause instanceof Error ? cause.message : "storage-error"; fail(res, message === "batch-missing" ? 404 : 500, message === "batch-missing" ? "job-missing" : "storage-error"); }
+  }
   private async batchConfirm(located: BatchLocated, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
     const members = located.batch.jobIds.map(jobId => located.jobs.find(job => job.jobId === jobId));
     if (members.some(job => !job)) { fail(res, 409, "revision-conflict"); return; }
@@ -179,6 +253,12 @@ export class ExplainRoutesService extends Service {
     if (!providerValid) { fail(res, 422, "confirmation-invalid"); return; }
     try { await assertReferenceTarget(located.root, target); } catch { fail(res, 422, "confirmation-invalid"); return; }
     if (llm?.resolveModelInfo) { try { await llm.resolveModelInfo(body.provider as string, body.model as string, signal); } catch { fail(res, 422, "confirmation-invalid"); return; } }
+    // TASK-111 P0: arm the task-level confirmation gate BEFORE the first member write.
+    // While the gate is armed the scheduler refuses to claim this task, so a member
+    // scheduled by a half-finished confirmation cannot start; the plan write below is
+    // the single commit point that publishes the plan and clears the gate together.
+    const previousPlan = located.batch.plan;
+    try { await setBatchConfirmPending(located.root, located.batch.batchId, true); } catch { fail(res, 500, "storage-error"); return; }
     try {
       const result = await withExplainJobLocks(located.root, typedMembers.map(job => job.jobId), async () => {
         const validated: Array<{ before: ExplainJobRecord; prepare: any }> = [];
@@ -205,8 +285,17 @@ export class ExplainRoutesService extends Service {
         }
         return applied.map(item => ({ jobId: item.updated.jobId, status: item.updated.status, revision: item.updated.revision }));
       });
+      await updateBatchPlan(located.root, located.batch.batchId, { provider: body.provider as string, model: body.model as string, referenceTarget: target, notBefore, confirmedAt: new Date().toISOString() });
       (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke(); ok(res, { batchId: located.batch.batchId, applied: result, jobs: result.length, status: "scheduled" });
-    } catch (cause) { const message = cause instanceof Error ? cause.message : "storage-error"; const code = ["revision-conflict", "stale-snapshot", "prepare-invalidated", "source-changed", "folder-changed", "confirmation-invalid", "source-forbidden", "folder-forbidden", "folder-oversize"].includes(message) ? message === "prepare-invalidated" ? "stale-snapshot" : message : signal.aborted ? "cancelled" : "storage-error"; fail(res, statusCode(code), code); }
+    } catch (cause) {
+      // Fail closed: the gate may only be released once the rollback of every member AND
+      // the plan restore are both published. If either fails the gate stays armed, so no
+      // member of a half-finished confirmation can ever become claimable; the next start
+      // heals the task through recoverPendingConfirms.
+      const restored = await restoreBatchPlan(located.root, located.batch.batchId, previousPlan).then(() => true, () => false);
+      const released = restored && await setBatchConfirmPending(located.root, located.batch.batchId, false).then(() => true, () => false);
+      if (!released) await setBatchConfirmPending(located.root, located.batch.batchId, true).catch(() => undefined);
+      const message = cause instanceof Error ? cause.message : "storage-error"; const code = ["revision-conflict", "stale-snapshot", "prepare-invalidated", "source-changed", "folder-changed", "confirmation-invalid", "source-forbidden", "folder-forbidden", "folder-oversize"].includes(message) ? message === "prepare-invalidated" ? "stale-snapshot" : message : signal.aborted ? "cancelled" : "storage-error"; fail(res, statusCode(code), code); }
   }
   private async batchCancel(located: BatchLocated, res: ServerResponse): Promise<void> {
     const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined; const cancelled: string[] = [];
@@ -221,6 +310,7 @@ export class ExplainRoutesService extends Service {
   private async batchRetry(located: BatchLocated, res: ServerResponse, signal: AbortSignal): Promise<void> {
     const engine = this.ctx.get("iciEngine") as Engine | undefined; if (!engine) { fail(res, 500, "storage-error"); return; }
     const jobIds = [...located.batch.jobIds]; const retried: Array<{ from: string; to: string; apiName: string }> = []; const created: string[] = [];
+    const plan = located.batch.plan;
     const retryable = new Set(["failed", "cancelled", "interrupted"]); const runnable = new Set(["scheduled", "confirmed", "running"]); const quiescent = new Set(["awaiting-input", "final", "failed", "cancelled", "interrupted"]);
     if (located.jobs.length !== jobIds.length || jobIds.some(jobId => !located.jobs.some(job => job.jobId === jobId))) { fail(res, 409, "revision-conflict"); return; }
     if (located.jobs.some(job => runnable.has(job.status))) { fail(res, 409, "job-active"); return; }
@@ -239,6 +329,12 @@ export class ExplainRoutesService extends Service {
             if (!result.ok || typeof result.value?.jobId !== "string") throw new Error(result.error?.code ?? "storage-error");
             if (jobIds.includes(result.value.jobId)) throw new Error("revision-conflict");
             const index = jobIds.indexOf(job.jobId); if (index < 0) throw new Error("revision-conflict");
+            // TASK-111: this route is the ONLY retry entry point (same-origin POST plus
+            // the `X-Workbench-Action` gate, reached only by the card's own button), so a
+            // user-clicked retry of a task keeps the model, reference target, and
+            // not-before the user chose once for the whole task. Nothing else re-runs a
+            // failed job, and an unresolvable inherited plan degrades to awaiting-input.
+            await this.inheritRetryPlan(located.root, job, result.value.jobId, plan);
             jobIds[index] = result.value.jobId; created.push(result.value.jobId); retried.push({ from: job.jobId, to: result.value.jobId, apiName: job.apiName });
           }
           const committed: ExplainBatchRecord = { ...currentBatch, jobIds: [...jobIds], updatedAt: new Date().toISOString() };
@@ -249,6 +345,26 @@ export class ExplainRoutesService extends Service {
     } catch (cause) {
       await cleanupCreated(); const message = cause instanceof Error ? cause.message : "storage-error"; const code = message === "job-active" || message === "revision-conflict" ? message : signal.aborted ? "cancelled" : message; fail(res, statusCode(code), code);
     }
+  }
+  /**
+   * TASK-111: carry the task's once-chosen model, reference target, and not-before
+   * onto a user-initiated retry replacement. A provider that is no longer
+   * registered, or a reference target that no longer exists, degrades to the plain
+   * awaiting-input behaviour instead of starting a job from a stale plan.
+   */
+  private async inheritRetryPlan(root: string, previous: ExplainJobRecord, replacementId: string, plan?: { readonly provider: string; readonly model: string; readonly referenceTarget: { readonly path: string; readonly kind: "none" | "file" | "directory" }; readonly notBefore: string }): Promise<void> {
+    // The task record carries the confirmed plan; a member job's own fields are only a
+    // legacy fallback for records written before the plan existed.
+    const provider = plan?.provider ?? previous.provider;
+    const model = plan?.model ?? previous.model;
+    const notBefore = plan?.notBefore ?? previous.notBefore;
+    if (!provider || !model || typeof notBefore !== "string") return;
+    const llm = this.ctx.get("llm") as Llm | undefined;
+    let registered = false; try { registered = llm?.listProviders().some(item => item.id === provider) === true; } catch { registered = false; }
+    if (!registered) return;
+    const target = plan?.referenceTarget ?? referenceTargetOf(previous);
+    try { await assertReferenceTarget(root, target); } catch { return; }
+    try { await updateJobRecord(root, replacementId, 1, { provider, model, docs: previous.docs, referenceTarget: target, notBefore, status: "scheduled" }); } catch { /* stays awaiting-input: the card asks for a plan again */ }
   }
   private async folder(located: Located, url: URL, res: ServerResponse): Promise<void> { const selected = referenceTargetOf(located.job); const folderPath = url.searchParams.get("path") ?? (selected.kind === "directory" ? selected.path : selected.path.slice(0, selected.path.lastIndexOf("/"))); if (!validFolderPath(folderPath)) { fail(res, 422, "folder-forbidden"); return; } try { const entries = await listFolderEntries(located.root, folderPath); const slash = folderPath.lastIndexOf("/"); ok(res, { folderPath, parentPath: slash > 0 ? folderPath.slice(0, slash) : null, entries: entries.filter(entry => entry.kind === "directory" || entry.supported === true), unsupportedCount: entries.filter(entry => entry.kind === "file" && entry.supported === false).length }); } catch { fail(res, 422, "folder-forbidden"); } }
   private async confirm(located: Located, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
@@ -312,11 +428,15 @@ export class ExplainRoutesService extends Service {
     const isBatch = parts[0] === "batches"; const isJobScope = parts[0] === "jobs"; const id = isBatch || isJobScope ? parts[1] : parts[0]; const action = isBatch || isJobScope ? parts[2] : parts[1];
     if (!id || !action || !/^[a-f0-9]{16}$/.test(id)) { fail(res, 404, "job-missing"); return; }
     if (isBatch) {
+      if (req.method === "GET" && action === "status") {
+        const header = await this.locateBatchHeader(id); if (!header) { fail(res, 404, "job-missing"); return; }
+        await this.batchStatus(header, url, res); return;
+      }
       const located = await this.locateBatch(id); if (!located) { fail(res, 404, "job-missing"); return; }
-      if (req.method === "GET" && action === "status") { await this.batchStatus(located, res); return; }
-      if (req.method !== "POST" || !["confirm", "cancel", "retry", "native-pick"].includes(action) || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
-      if ((action === "confirm" || action === "native-pick") && typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "confirmation-invalid"); return; }
+      if (req.method !== "POST" || !["confirm", "cancel", "retry", "native-pick", "settings"].includes(action) || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
+      if ((action === "confirm" || action === "native-pick" || action === "settings") && typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, action === "settings" ? "invalid-input" : "confirmation-invalid"); return; }
       const controller = new AbortController(); req.on("aborted", () => controller.abort()); const body = await readBody(req); if (body === null) { fail(res, 413, "input-too-large"); return; }
+      if (action === "settings") { await this.batchSettings(located, body, res); return; }
       if (action === "confirm") { await this.batchConfirm(located, body, res, controller.signal); return; }
       if (action === "native-pick") { await this.batchNativePick(located, body, res, controller.signal); return; }
       if (action === "cancel") { await this.batchCancel(located, res); return; }

@@ -4,7 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { auditGraph, buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { runExplainContext, runExplainDeterministic } from "./explain-runtime.ts";
-import { runFinalize, runPrepare, runPrepareBatch, runSource, type NativeExplainDeps } from "./explain-native.ts";
+import { runFinalize, runPrepare, runPrepareBatch, runSource, type NativeExplainDeps, runPrepareTask } from "./explain-native.ts";
 import { computeGraphDigest } from "./explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
@@ -48,6 +48,8 @@ import type {
   SearchIndexResult,
   SearchInput,
   SearchResult,
+  ExplainPrepareTaskResult,
+  ExplainTaskSelector,
 } from "./types.ts";
 declare module "@deepseek-ai/dsh-jobs" {
   interface JobKindMap {
@@ -118,7 +120,8 @@ export class IciEngineService extends Service {
       cleanupApply: (input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }) => self.cleanupApply(input),
       explainContext: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainContext(input, options),
       explainPrepare: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainPrepare(input, options),
-      explainPrepareBatch: (input: { readonly workspaceId: string; readonly queries: readonly string[] }, options?: BuildOptions | AbortSignal) => self.explainPrepareBatch(input, options),
+      explainPrepareBatch: (input: { readonly workspaceId: string; readonly queries: readonly string[]; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal) => self.explainPrepareBatch(input, options),
+      explainPrepareTask: (input: { readonly workspaceId: string; readonly selector: ExplainTaskSelector; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal) => self.explainPrepareTask(input, options),
       explainSource: (input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal) => self.explainSource(input, options),
       explainFinalize: (input: Parameters<IciEngineService["explainFinalize"]>[0], options?: BuildOptions | AbortSignal) => self.explainFinalize(input, options),
       explainDeterministic: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainDeterministic(input, options),
@@ -146,12 +149,25 @@ export class IciEngineService extends Service {
       const catalogRes = await this.listCatalog(input.workspaceId, signal);
       if (!catalogRes.ok) return catalogRes as Result<never>;
       const entries = catalogRes.value!.entries;
-      const normalized = entries.map(e => ({
-        name: e.name,
-        type: e.type,
-        sourcePath: (e as { sourcePath?: string }).sourcePath,
-        metadata: (e as { metadata?: Record<string, unknown> }).metadata,
-      }));
+      const complete = await this.listSourcesComplete(input.workspaceId);
+      // Same-named assets at different paths are two assets: the build refuses instead of
+      // producing a graph that silently dropped or merged one of them.
+      if (complete.duplicateNames.length > 0) {
+        const shown = complete.duplicateNames.slice(0, 10).join(", ");
+        const suffix = complete.duplicateNames.length > 10 ? ` … (+${complete.duplicateNames.length - 10} more)` : "";
+        return err("ambiguous-target", `same asset names exist at several source paths: ${shown}${suffix}; rename or remove the duplicates before building the graph`);
+      }
+      const known = new Set(entries.map(entry => `${entry.type}:${entry.name}`));
+      const additions = complete.entries.filter(entry => !known.has(`${entry.type}:${entry.name}`));
+      const normalized = [
+        ...entries.map(e => ({
+          name: e.name,
+          type: e.type,
+          sourcePath: (e as { sourcePath?: string }).sourcePath,
+          metadata: (e as { metadata?: Record<string, unknown> }).metadata,
+        })),
+        ...additions.map(entry => ({ name: entry.name, type: entry.type, sourcePath: entry.sourcePath, metadata: undefined as Record<string, unknown> | undefined })),
+      ];
       try {
         const { nodes, edges, sourceFingerprint } = await buildGraph(canonicalPath, normalized, onProgress, signal);
         if (signal?.aborted) return err("cancelled");
@@ -181,6 +197,38 @@ export class IciEngineService extends Service {
     return options instanceof AbortSignal ? { signal: options } : (options ?? {});
   }
 
+  /**
+   * TASK-111: complete, path-identified api/function listing. `listAssets` keeps its
+   * 5000-item display bound; the graph must not inherit it, and two same-named assets at
+   * different paths are two assets — reported, never merged.
+   */
+  private async listSourcesComplete(workspaceId: string): Promise<{ entries: Array<{ name: string; type: string; sourcePath?: string }>; duplicateNames: string[] }> {
+    const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as {
+      listSourcesComplete?: (input: { workspaceId: string }) => Promise<{ ok: boolean; value?: { entries: readonly { name: string; type: string; sourcePath: string }[]; duplicateNames: readonly string[] } }>;
+    } | undefined;
+    if (catalog?.listSourcesComplete === undefined) return { entries: [], duplicateNames: [] };
+    try {
+      const res = await catalog.listSourcesComplete({ workspaceId });
+      if (!res.ok || res.value === undefined) return { entries: [], duplicateNames: [] };
+      return { entries: res.value.entries.map(entry => ({ name: entry.name, type: entry.type, sourcePath: entry.sourcePath })), duplicateNames: [...res.value.duplicateNames] };
+    } catch { return { entries: [], duplicateNames: [] }; }
+  }
+  /**
+   * TASK-111: the exact entry set the graph is built from — the capped catalog listing
+   * PLUS every api/function source the complete enumeration found. The staleness check
+   * must fingerprint this same set, otherwise a workspace beyond the catalog display
+   * bound would look stale forever.
+   */
+  private async graphEntries(workspaceId: string): Promise<Array<{ name: string; type: string; sourcePath?: string; metadata?: Record<string, unknown> }>> {
+    const catalogRes = await this.listCatalog(workspaceId);
+    const entries = catalogRes.ok ? catalogRes.value?.entries ?? [] : [];
+    const complete = await this.listSourcesComplete(workspaceId);
+    const known = new Set(entries.map(entry => `${entry.type}:${entry.name}`));
+    return [
+      ...entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath, metadata: (e as { metadata?: Record<string, unknown> }).metadata })),
+      ...complete.entries.filter(entry => !known.has(`${entry.type}:${entry.name}`)).map(entry => ({ name: entry.name, type: entry.type, sourcePath: entry.sourcePath })),
+    ];
+  }
   private async listCatalog(workspaceId: string, signal?: AbortSignal): Promise<Result<CatalogResult["value"]>> {
     const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as {
       listAssets(input: { workspaceId: string }, signal?: AbortSignal): Promise<CatalogResult>;
@@ -223,12 +271,9 @@ export class IciEngineService extends Service {
     };
     let stale: true | undefined = snapshot.manifest.engineVersion !== this.#engineVersion ? true : undefined;
     try {
-      const catalogRes = await this.listCatalog(workspaceId, signal);
-      if (catalogRes.ok) {
-        const entries = catalogRes.value!.entries.map(e => ({ name: e.name, type: e.type, sourcePath: (e as { sourcePath?: string }).sourcePath }));
-        const sources = await collectSources(canonicalPath, entries, signal);
-        if (fingerprintSources(sources.values()) !== snapshot.manifest.sourceFingerprint) stale = true;
-      }
+      const entries = (await this.graphEntries(workspaceId)).map(e => ({ name: e.name, type: e.type, sourcePath: e.sourcePath }));
+      const sources = await collectSources(canonicalPath, entries, signal);
+      if (fingerprintSources(sources.values()) !== snapshot.manifest.sourceFingerprint) stale = true;
     } catch { /* staleness check is best-effort */ }
     return { ok: true, graph, canonicalPath, ...(stale ? { stale } : {}) };
   }
@@ -437,11 +482,20 @@ export class IciEngineService extends Service {
       disposed: () => this.#disposed,
       loadBase: async (workspaceId, query) => { const result = await this.loadExplainBase(workspaceId, query); return result.ok ? { ok: true as const, value: result } : result.result; },
       refs: path => this.listRefDocNames(path),
+      catalog: async (workspaceId: string) => {
+        const catalog = this.ctx.get("icomposerCatalog" as never) as unknown as { listSourcesComplete?: (input: { workspaceId: string }) => Promise<{ ok: boolean; value?: { entries: readonly { name: string; type: string; tenant: string; group: string; sourcePath: string }[]; duplicateNames: readonly string[] }; error?: { code?: unknown; message?: string } }> } | undefined;
+        if (catalog?.listSourcesComplete === undefined) return err("storage-error", "catalog source listing is unavailable");
+        const res = await catalog.listSourcesComplete({ workspaceId });
+        if (!res.ok || res.value === undefined) { const raw = res.error?.code; const code = typeof raw === "string" ? (raw as IciErrorCode) : undefined; return err(code && PASSTHROUGH_CODES.has(code) ? code : "storage-error", res.error?.message ?? "catalog listing failed"); }
+        return { ok: true as const, value: { entries: res.value.entries, duplicateNames: res.value.duplicateNames } };
+      },
       current: async id => { const result = await this.loadQueryContext(id); if (!result.ok) return result.result; return { ok: true as const, value: { canonicalPath: result.canonicalPath, sourceFingerprint: result.graph.manifest.sourceFingerprint, graphDigest: computeGraphDigest(result.graph), engineVersion: result.graph.manifest.engineVersion } }; },
     };
   }
   async explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainPrepareResult>> { return runPrepare(this.nativeExplainDeps(), input, options); }
-  async explainPrepareBatch(input: { readonly workspaceId: string; readonly queries: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareBatchResult>> { return runPrepareBatch(this.nativeExplainDeps(), input, options); }
+  async explainPrepareBatch(input: { readonly workspaceId: string; readonly queries: readonly string[]; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareBatchResult>> { return runPrepareBatch(this.nativeExplainDeps(), input, options); }
+  /** TASK-111: one task entry point — `query`/`queries`/`group`/`all` all resolve host-side into ONE task record. */
+  async explainPrepareTask(input: { readonly workspaceId: string; readonly selector: ExplainTaskSelector; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareTaskResult>> { return runPrepareTask(this.nativeExplainDeps(), input, options); }
   async explainSource(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainSourceResult>> { return runSource(this.nativeExplainDeps(), input, options); }
   async explainFinalize(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly analysis: { readonly api: { technical: string; business: string; flow: readonly string[]; evidence: readonly string[] } } }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainFinalizeResult>> { return runFinalize(this.nativeExplainDeps(), input, options); }
 

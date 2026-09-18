@@ -11,7 +11,18 @@ usePinnedBrowserLanguages("zh-CN");
 const batchId = "fedcba9876543210";
 
 /** TASK-102 fixture: ten jobs across two pages with mixed statuses. */
-function batchStatus(jobs = 10, scheduler: { maxConcurrent: number; inFlight: number } = { maxConcurrent: 4, inFlight: 2 }) {
+function paged(url: string | undefined, rows: any[]): { jobs: any[]; page: any; countsByStatus: Record<string, number> } {
+  // TASK-111 P4: the status route pages server-side; the fixture slices exactly like the server.
+  const query = new URL(String(url ?? ""), "http://localhost").searchParams;
+  const size = Number(query.get("size") ?? 5);
+  const page = Math.max(1, Number(query.get("page") ?? 1));
+  const totalPages = Math.max(1, Math.ceil(rows.length / size));
+  const from = (Math.min(page, totalPages) - 1) * size;
+  const countsByStatus: Record<string, number> = {};
+  for (const row of rows) countsByStatus[row.status] = (countsByStatus[row.status] ?? 0) + 1;
+  return { jobs: rows.slice(from, from + size), page: { index: Math.min(page, totalPages), size, totalPages }, countsByStatus };
+}
+function batchStatus(jobs = 10, scheduler: { maxConcurrent: number; inFlight: number } = { maxConcurrent: 4, inFlight: 2 }, url = "") {
   const rows = Array.from({ length: jobs }, (_, index) => ({
     jobId: `000000000000${String(index).padStart(4, "0")}`,
     apiName: `Api${index}`,
@@ -26,14 +37,16 @@ function batchStatus(jobs = 10, scheduler: { maxConcurrent: number; inFlight: nu
     promptBaseBytes: 1024,
     sourceBytes: 512,
   }));
+  const sliced = paged(url, rows);
   return {
     ok: true,
     result: {
-      batch: { batchId, workspaceId: "batch", jobIds: rows.map(row => row.jobId), createdAt: "2026-08-27T00:00:00.000Z", updatedAt: "2026-08-27T00:00:00.000Z" },
-      jobs: rows,
+      batch: { batchId, workspaceId: "batch", jobCount: rows.length, createdAt: "2026-08-27T00:00:00.000Z", updatedAt: "2026-08-27T00:00:00.000Z" },
+      jobs: sliced.jobs,
       providers: [{ id: "mvp", models: [{ id: "mvp-model", name: "MVP model" }] }],
       scheduler,
-      summary: { promptBaseBytes: 10240, sourceBytes: 5120, maxPromptBaseBytes: 1024, jobCount: jobs },
+      page: sliced.page,
+      summary: { promptBaseBytes: 10240, sourceBytes: 5120, maxPromptBaseBytes: 1024, jobCount: rows.length, countsByStatus: sliced.countsByStatus },
     },
   };
 }
@@ -51,7 +64,7 @@ describe("TASK-102 batch pagination and concurrency settings", () => {
   afterEach(async () => { await feature.dispose(); await runtime.dispose(); vi.unstubAllGlobals(); });
 
   it("pages five rows per page, keeps whole-batch stats on every page, and never auto-jumps on polling", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus()), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/status") ? new Response(JSON.stringify(batchStatus(10, { maxConcurrent: 4, inFlight: 2 }, String(input))), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderRoot();
     await vi.waitFor(() => expect(view.queryByText("Api0")).not.toBeNull());
@@ -79,7 +92,7 @@ describe("TASK-102 batch pagination and concurrency settings", () => {
   });
 
   it("keeps per-row details folded state across paging", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`) ? new Response(JSON.stringify(batchStatus()), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/status") ? new Response(JSON.stringify(batchStatus(10, { maxConcurrent: 4, inFlight: 2 }, String(input))), { status: 200 }) : new Response(JSON.stringify({ ok: false }), { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderRoot();
     await vi.waitFor(() => expect(view.queryByText("Api0")).not.toBeNull());
@@ -98,7 +111,7 @@ describe("TASK-102 batch pagination and concurrency settings", () => {
     let settingsCalls = 0; let settingsStatus = 200; let settingsBody: unknown = { ok: true, result: { maxConcurrent: 8, inFlight: 2 } };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith(`/batches/${batchId}/status`)) return new Response(JSON.stringify(batchStatus()), { status: 200 });
+      if (url.includes("/status")) return new Response(JSON.stringify(batchStatus(10, { maxConcurrent: 4, inFlight: 2 }, url)), { status: 200 });
       if (url.endsWith("/settings")) { settingsCalls += 1; expect(JSON.parse(String(init?.body))).toEqual({ maxConcurrent: expect.any(Number) }); return new Response(JSON.stringify(settingsBody), { status: settingsStatus }); }
       return new Response(JSON.stringify({ ok: false }), { status: 404 });
     });
@@ -130,15 +143,16 @@ describe("TASK-102 batch pagination and concurrency settings", () => {
 
 /** TASK-102 P2-03: card isolation probes render the toolview directly with two blocks. */
 const cardBlock = (id: string) => ({ kind: "tool-result" as const, call: null, content: [{ type: "text", text: `batch=${id}` }] });
-function namedBatchStatus(id: string, cap: number) {
+function namedBatchStatus(id: string, cap: number, url = "") {
   return {
     ok: true,
     result: {
-      batch: { batchId: id, workspaceId: "ws", jobIds: [], createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-      jobs: Array.from({ length: 10 }, (_, index) => ({ jobId: `${id.slice(0, 14)}${String(index).padStart(2, "0")}`, apiName: `${id}Api${index}`, status: "running" })),
+      batch: { batchId: id, workspaceId: "ws", jobCount: 10, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+      jobs: (() => { const all = Array.from({ length: 10 }, (_, index) => ({ jobId: `${id.slice(0, 14)}${String(index).padStart(2, "0")}`, apiName: `${id}Api${index}`, status: "running" })); const sliced = paged(url, all); return sliced.jobs; })(),
       providers: [],
       scheduler: { maxConcurrent: cap, inFlight: 0 },
-      summary: { sourceBytes: 0, promptBaseBytes: 0, maxPromptBaseBytes: 0, jobCount: 10 },
+      page: (() => { const all = Array.from({ length: 10 }, (_, index) => ({ jobId: `${id.slice(0, 14)}${String(index).padStart(2, "0")}`, apiName: `${id}Api${index}`, status: "running" })); return paged(url, all).page; })(),
+      summary: { sourceBytes: 0, promptBaseBytes: 0, maxPromptBaseBytes: 0, jobCount: 10, countsByStatus: { running: 10 } },
     },
   };
 }
@@ -162,7 +176,7 @@ describe("TASK-102 P2-03 card isolation", () => {
         return new Response(JSON.stringify({ ok: true, result: { maxConcurrent: 8, inFlight: 0 } }), { status: 200 });
       }
       const id = String(url).includes(a) ? a : b;
-      return new Response(JSON.stringify(namedBatchStatus(id, applied ? 8 : 4)), { status: 200 });
+      return new Response(JSON.stringify(namedBatchStatus(id, applied ? 8 : 4, url)), { status: 200 });
     }));
     const t = (key: string) => key;
     const view = render(React.createElement(IciExplainToolview, { block: cardBlock(a) as never, t: t as never }));
@@ -204,7 +218,7 @@ describe("TASK-102 P2-03 card isolation", () => {
         await new Promise<void>(resolve => { release = resolve; });
         return new Response(JSON.stringify({ ok: true, result: { maxConcurrent: 8, inFlight: 0 } }), { status: 200 });
       }
-      return new Response(JSON.stringify(namedBatchStatus(id, 4)), { status: 200 });
+      return new Response(JSON.stringify(namedBatchStatus(id, 4, url)), { status: 200 });
     }));
     const t = (key: string) => key;
     const view = render(React.createElement(IciExplainToolview, { block: cardBlock(id) as never, t: t as never }));
@@ -224,7 +238,7 @@ describe("TASK-102 P2-03 card isolation", () => {
     const id = "4444444444444444";
     vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
       if (String(url).endsWith("/settings")) return new Response(JSON.stringify({ ok: true, result: { maxConcurrent: 6, inFlight: 0 } }), { status: 200 });
-      return new Response(JSON.stringify(namedBatchStatus(id, 4)), { status: 200 });
+      return new Response(JSON.stringify(namedBatchStatus(id, 4, url)), { status: 200 });
     }));
     const t = (key: string) => key;
     const view = render(React.createElement(IciExplainToolview, { block: cardBlock(id) as never, t: t as never }));

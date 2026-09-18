@@ -77,7 +77,10 @@ export type IciErrorCode =
   | "schema-invalid"
   | "job-active"
   | "input-too-large"
-  | "interrupted";
+  | "interrupted"
+  | "no-targets"
+  | "group-not-found"
+  | "ambiguous-target";
 
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
@@ -115,7 +118,24 @@ export interface ExplainPrepareBatchJob {
   readonly apiId: string; readonly apiName: string; readonly jobId: string; readonly artifactPath: string;
   readonly jobStatus: "awaiting-input" | "scheduled" | "confirmed" | "running" | "final" | "failed" | "cancelled" | "interrupted"; readonly chainNodes: number; readonly chainEdges: number; readonly truncated: boolean; readonly reused: boolean;
 }
-export interface ExplainPrepareBatchResult { readonly batchId: string; readonly workspaceId: string; readonly jobs: readonly ExplainPrepareBatchJob[]; }
+/** TASK-111: what the user asked for in one task; `group`/`all` are resolved host-side. */
+export type ExplainTaskSelector =
+  | { readonly kind: "api"; readonly query: string }
+  | { readonly kind: "queries"; readonly queries: readonly string[] }
+  | { readonly kind: "group"; readonly group: string }
+  | { readonly kind: "all" };
+export interface ExplainPrepareTaskResult extends ExplainPrepareBatchResult {
+  readonly selector: { readonly kind: "api" | "queries" | "group" | "all"; readonly label?: string };
+}
+export interface ExplainPrepareBatchResult {
+  readonly batchId: string;
+  readonly workspaceId: string;
+  readonly jobs: readonly ExplainPrepareBatchJob[];
+  /** TASK-111: targets the caller declared, so a task reports dedupe instead of silently shrinking. */
+  readonly requestedCount: number;
+  /** TASK-111: how many declared targets collapsed into an existing job of the same task. */
+  readonly duplicates: number;
+}
 export interface ExplainSourceResult { readonly files: readonly { nodeId?: string; path: string; startLine?: number; endLine?: number; content: string; sha256: string }[]; }
 export interface ExplainFinalizeResult { readonly artifactPath: string; readonly schemaVersion: 3; readonly kind: "final"; readonly generatedBy: "current-agent"; readonly verified: false; readonly needsBusinessReview: true; readonly sourceFingerprint: string; readonly graphDigest: string; readonly contextHash: string; readonly flow: readonly string[]; readonly evidence: readonly string[]; }
 
@@ -141,7 +161,7 @@ export interface IciEngineFace {
   cleanupApply(input: { readonly workspaceId: string; readonly expectedPaths: readonly string[] }): Promise<Result<CleanupApplyResult>>;
   explainContext(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainContextBundle>>;
   explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareResult>>;
-  explainPrepareBatch(input: { readonly workspaceId: string; readonly queries: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareBatchResult>>;
+  explainPrepareBatch(input: { readonly workspaceId: string; readonly queries: readonly string[]; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareBatchResult>>;
   explainSource(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainSourceResult>>;
   explainFinalize(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly analysis: { readonly api: { technical: string; business: string; flow: readonly string[]; evidence: readonly string[] } } }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainFinalizeResult>>;
   explainDeterministic(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainDeterministicResult>>;

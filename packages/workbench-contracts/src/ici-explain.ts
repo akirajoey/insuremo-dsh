@@ -185,6 +185,53 @@ export async function readContainedExplainJson(root: string, path: string): Prom
 export async function isExplainArtifactPathContained(root: string, path: string): Promise<boolean> { try { await safeMetadataPath(root, path); return true; } catch { return false; } }
 export async function assertExplainWritePath(root: string, relativePath: string): Promise<void> { await ensureParent(root, relativePath); }
 
+/** TASK-111: task-level concurrency bounds (they mirror explain-config's Host bounds). */
+export const EXPLAIN_TASK_CONCURRENCY_MIN = 1 as const;
+export const EXPLAIN_TASK_CONCURRENCY_MAX = 32 as const;
+/** TASK-111: the once-confirmed task plan. */
+export interface ExplainBatchPlan {
+  readonly provider: string;
+  readonly model: string;
+  readonly referenceTarget: { readonly path: string; readonly kind: "none" | "file" | "directory" };
+  readonly notBefore: string;
+  readonly confirmedAt: string;
+}
+/** TASK-111: the request shape of a task. `group`/`all` are resolved host-side against the workspace catalog snapshot. */
+export type ExplainTaskSelectorKind = "api" | "group" | "all" | "queries";
+export interface ExplainTaskSelector {
+  readonly kind: ExplainTaskSelectorKind;
+  /** The group name (`group`) or the api query (`api`); absent for `all` and explicit lists. */
+  readonly label?: string;
+}
+/**
+ * TASK-111 P2: the batch job list is stored as immutable shard files and the batch
+ * record is only the header that points at one generation of them. The numbers bound
+ * ONE FILE, never the number of targets: a task keeps every target, and the shard
+ * count grows with it. A header that would need more than `INLINE_MAX` ids carries no
+ * inline list at all, so a reader that ignores the shard fields fails loudly instead
+ * of silently seeing a prefix.
+ */
+export const EXPLAIN_BATCH_INLINE_MAX = 512 as const;
+export const EXPLAIN_BATCH_SHARD_MAX = 512 as const;
+/** One generation of shard files inside `batches/<batchId>/gen-<generation>/`. */
+export interface ExplainBatchShards {
+  readonly generation: number;
+  readonly count: number;
+  readonly dir: string;
+}
+export interface ExplainBatchShardRecord {
+  readonly schemaVersion: 1;
+  readonly kind: "explain-batch-shard";
+  readonly batchId: string;
+  readonly generation: number;
+  readonly index: number;
+  readonly jobIds: readonly string[];
+}
+/** TASK-111: the disk header. Exactly one of `jobIds` (small task) and `jobShards` (large task) is present. */
+export interface ExplainBatchHeader extends Omit<ExplainBatchRecord, "jobIds"> {
+  readonly jobIds?: readonly string[];
+  readonly jobShards?: ExplainBatchShards;
+}
 export interface ExplainBatchRecord {
   readonly schemaVersion: 1;
   readonly kind: "explain-batch";
@@ -193,14 +240,93 @@ export interface ExplainBatchRecord {
   readonly jobIds: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** TASK-111 P2: total number of job ids across the inline list or every shard. */
+  readonly jobCount?: number;
+  /** TASK-111 task-level maximum concurrency; absent on legacy records (the Host default applies). */
+  readonly maxConcurrent?: number;
+  /** TASK-111 targets the triggering tool call declared (never below `jobIds.length`); absent on legacy records. */
+  readonly requestedCount?: number;
+  /** TASK-111 what the user asked for (api/group/all/explicit list), for card disclosure; absent on legacy records. */
+  readonly selector?: ExplainTaskSelector;
+  /**
+   * TASK-111 the plan the user confirmed ONCE for the whole task. It is the task's
+   * own record of that decision (not re-derived from a member job), so a retry
+   * replacement and a restart both keep the same model, reference, and time.
+   */
+  readonly plan?: ExplainBatchPlan;
+  /**
+   * TASK-111: a confirmation that is still committing. While this is true the task
+   * is not claimable, so a member scheduled by a half-finished confirmation can
+   * never start, and a crash mid-commit is recoverable (the flag is cleared and
+   * every member returns to awaiting-input on the next start).
+   */
+  readonly confirmPending?: boolean;
+  /** TASK-111: the Host process that armed the gate; recovery only heals another process's gate. */
+  readonly confirmOwner?: string;
 }
 export type ExplainBatchJobStatus = "awaiting-input" | "scheduled" | "confirmed" | "running" | "final" | "failed" | "cancelled" | "interrupted";
 export interface ExplainBatchStatusJob { readonly jobId: string; readonly apiName: string; readonly status: ExplainBatchJobStatus; readonly artifactPath?: string; readonly error?: string; readonly promptBaseBytes: number; readonly sourceBytes: number; }
-export interface ExplainBatchStatus { readonly batch: ExplainBatchRecord; readonly jobs: readonly ExplainBatchStatusJob[]; readonly providers: readonly { id: string; models: readonly { id: string; name: string }[] }[]; readonly summary: { promptBaseBytes: number; sourceBytes: number; maxPromptBaseBytes?: number; jobCount?: number }; }
+/** TASK-111: Host ceiling plus this task's own live concurrency, so the card can show both without another write path. */
+export interface ExplainBatchSchedulerView { readonly maxConcurrent: number; readonly inFlight: number; readonly taskMaxConcurrent?: number; readonly taskInFlight?: number; readonly hostMaxConcurrent?: number; }
+export interface ExplainBatchStatus { readonly batch: ExplainBatchRecord; readonly jobs: readonly ExplainBatchStatusJob[]; readonly providers: readonly { id: string; models: readonly { id: string; name: string }[] }[]; readonly summary: { promptBaseBytes: number; sourceBytes: number; maxPromptBaseBytes?: number; jobCount?: number }; readonly scheduler?: ExplainBatchSchedulerView; }
 export interface ExplainBatchConfirmInput { readonly provider: string; readonly model: string; readonly docs: readonly { path: string; sha256: string }[]; readonly referenceTarget: { path: string; kind: "none" | "file" | "directory" }; readonly notBefore: string; readonly consent: true; }
-export function validExplainBatchJobIds(value: unknown): value is readonly string[] { return Array.isArray(value) && value.length >= 1 && value.length <= 10 && value.every(id => typeof id === "string" && /^[a-f0-9]{16}$/.test(id)) && new Set(value).size === value.length; }
+/** TASK-111 removed the former hard 10-job ceiling: one task carries every target. */
+export function validExplainBatchJobIds(value: unknown): value is readonly string[] { return Array.isArray(value) && value.length >= 1 && value.every(id => typeof id === "string" && /^[a-f0-9]{16}$/.test(id)) && new Set(value).size === value.length; }
+function validShardList(value: unknown): value is readonly string[] { return Array.isArray(value) && value.length >= 1 && value.length <= EXPLAIN_BATCH_SHARD_MAX && value.every(id => typeof id === "string" && /^[a-f0-9]{16}$/.test(id)); }
+function validExplainBatchShards(value: unknown): value is ExplainBatchShards {
+  if (!allowed(value, ["generation", "count", "dir"], ["generation", "count", "dir"])) return false;
+  const row = value as ExplainBatchShards;
+  return Number.isSafeInteger(row.generation) && row.generation >= 1 && Number.isSafeInteger(row.count) && row.count >= 1 && row.dir === `gen-${row.generation}`;
+}
+export function validExplainBatchShardRecord(value: unknown): value is ExplainBatchShardRecord {
+  if (!allowed(value, ["schemaVersion", "kind", "batchId", "generation", "index", "jobIds"], ["schemaVersion", "kind", "batchId", "generation", "index", "jobIds"])) return false;
+  const row = value as ExplainBatchShardRecord;
+  return row.schemaVersion === 1 && row.kind === "explain-batch-shard" && /^[a-f0-9]{16}$/.test(row.batchId) && Number.isSafeInteger(row.generation) && row.generation >= 1 && Number.isSafeInteger(row.index) && row.index >= 0 && validShardList(row.jobIds);
+}
+export function validExplainTaskSelector(value: unknown): value is ExplainTaskSelector {
+  if (!allowed(value, ["kind", "label"], ["kind"])) return false;
+  const row = value as ExplainTaskSelector;
+  if (!["api", "group", "all", "queries"].includes(row.kind)) return false;
+  if (row.label === undefined) return row.kind === "all" || row.kind === "queries";
+  return text(row.label, 512);
+}
+const REFERENCE_TEXT_EXTENSIONS = new Set([".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".log"]);
+function validPlanReferenceTarget(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Object.keys(value).length !== 2) return false;
+  const target = value as Record<string, unknown>;
+  if (target.kind === "none") return target.path === "";
+  if (target.kind !== "file" && target.kind !== "directory") return false;
+  const path = target.path;
+  if (typeof path !== "string" || path.length > 512 || path.startsWith("/") || path.includes("\\") || path.includes("\0") || path.startsWith(".metadata")) return false;
+  if (path !== "" && path.split("/").some(part => part === "" || part === "." || part === "..")) return false;
+  if (target.kind === "directory") return true;
+  const dot = path.lastIndexOf(".");
+  return dot > 0 && REFERENCE_TEXT_EXTENSIONS.has(path.slice(dot).toLowerCase());
+}
+function utcTime(value: unknown): value is string { return typeof value === "string" && value.length <= 128 && !Number.isNaN(Date.parse(value)) && value.endsWith("Z"); }
+export function validExplainBatchPlan(value: unknown): value is ExplainBatchPlan {
+  if (!allowed(value, ["provider", "model", "referenceTarget", "notBefore", "confirmedAt"], ["provider", "model", "referenceTarget", "notBefore", "confirmedAt"])) return false;
+  const row = value as ExplainBatchPlan;
+  return text(row.provider, 256) && text(row.model, 256) && validPlanReferenceTarget(row.referenceTarget) && utcTime(row.notBefore) && utcTime(row.confirmedAt);
+}
 export function validExplainBatchRecord(value: unknown): value is ExplainBatchRecord {
-  if (!exact(value, ["schemaVersion", "kind", "batchId", "workspaceId", "jobIds", "createdAt", "updatedAt"])) return false;
-  const row = value as ExplainBatchRecord;
-  return row.schemaVersion === 1 && row.kind === "explain-batch" && /^[a-f0-9]{16}$/.test(row.batchId) && text(row.workspaceId, 256) && validExplainBatchJobIds(row.jobIds) && text(row.createdAt, 128) && text(row.updatedAt, 128);
+  const keys = ["schemaVersion", "kind", "batchId", "workspaceId", "jobIds", "jobShards", "jobCount", "createdAt", "updatedAt", "maxConcurrent", "requestedCount", "selector", "plan", "confirmPending", "confirmOwner"];
+  if (!allowed(value, keys, ["schemaVersion", "kind", "batchId", "workspaceId", "createdAt", "updatedAt"])) return false;
+  const row = value as ExplainBatchHeader;
+  if (row.schemaVersion !== 1 || row.kind !== "explain-batch" || !/^[a-f0-9]{16}$/.test(row.batchId) || !text(row.workspaceId, 256) || !text(row.createdAt, 128) || !text(row.updatedAt, 128)) return false;
+  const inline = row.jobIds !== undefined;
+  const sharded = row.jobShards !== undefined;
+  if (inline === sharded) return false; // exactly one carrier: a sharded header has no inline prefix
+  if (inline && !validExplainBatchJobIds(row.jobIds)) return false;
+  if (inline && row.jobIds !== undefined && row.jobIds.length > EXPLAIN_BATCH_INLINE_MAX) return false;
+  if (sharded && !validExplainBatchShards(row.jobShards)) return false;
+  if (sharded && (!Number.isSafeInteger(row.jobCount) || (row.jobCount ?? 0) < (row.jobShards?.count ?? 1))) return false;
+  if (inline && row.jobCount !== undefined && row.jobCount !== row.jobIds?.length) return false;
+  if (row.maxConcurrent !== undefined && (!Number.isInteger(row.maxConcurrent) || row.maxConcurrent < EXPLAIN_TASK_CONCURRENCY_MIN || row.maxConcurrent > EXPLAIN_TASK_CONCURRENCY_MAX)) return false;
+  if (row.requestedCount !== undefined && (!Number.isInteger(row.requestedCount) || row.requestedCount < (inline ? (row.jobIds?.length ?? 0) : (row.jobCount ?? 0)))) return false;
+  if (row.selector !== undefined && !validExplainTaskSelector(row.selector)) return false;
+  if (row.plan !== undefined && !validExplainBatchPlan(row.plan)) return false;
+  if (row.confirmPending !== undefined && typeof row.confirmPending !== "boolean") return false;
+  if (row.confirmOwner !== undefined && (row.confirmPending !== true || typeof row.confirmOwner !== "string" || row.confirmOwner.length > 64)) return false;
+  return true;
 }

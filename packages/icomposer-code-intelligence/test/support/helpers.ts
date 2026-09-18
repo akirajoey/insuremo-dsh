@@ -17,20 +17,22 @@ export function makeBinding(root: string, mode: "bound" | "unbound" | "not-found
   };
 }
 
-export function makeCatalog(entries: Array<{ name: string; type: string; sourcePath?: string }>) {
+export function makeCatalog(entries: Array<{ name: string; type: string; sourcePath?: string }>, complete?: { entries: Array<{ name: string; type: string; sourcePath: string }>; duplicateNames?: string[] }) {
   return {
     listAssets: async () => ({ ok: true, value: { entries, counts: { api: 0, function: 0, batch: 0, model: 0, total: entries.length }, truncated: false } }),
+    // TASK-111: the complete, path-identified api/function listing the graph build uses.
+    listSourcesComplete: async () => ({ ok: true, value: { entries: complete?.entries ?? [], duplicateNames: complete?.duplicateNames ?? [] } }),
   };
 }
 
-export async function harness(opts: { root?: string; bindingMode?: "bound" | "unbound" | "not-found"; catalogEntries?: Array<{ name: string; type: string; sourcePath?: string }>; dshHome?: string; imoAuth?: unknown }) {
+export async function harness(opts: { root?: string; bindingMode?: "bound" | "unbound" | "not-found"; catalogEntries?: Array<{ name: string; type: string; sourcePath?: string }>; catalogComplete?: { entries: Array<{ name: string; type: string; sourcePath: string }>; duplicateNames?: string[] }; dshHome?: string; imoAuth?: unknown }) {
   const ctx = new Context();
   const root = opts.root ?? await mkdtemp(join(tmpdir(), "ici-"));
   const dshHome = opts.dshHome ?? await mkdtemp(join(tmpdir(), "ici-dsh-"));
   const prev = process.env.DSH_HOME;
   process.env.DSH_HOME = dshHome;
   ctx.provide("workspaceBinding", makeBinding(root, opts.bindingMode ?? "bound") as never);
-  ctx.provide("icomposerCatalog", makeCatalog(opts.catalogEntries ?? []) as never);
+  ctx.provide("icomposerCatalog", makeCatalog(opts.catalogEntries ?? [], opts.catalogComplete) as never);
   ctx.provide("imoAuth" as never, opts.imoAuth ?? {
     prepare: async () => ({ ok: false, error: { code: "invalid-auth" } }),
   } as never);

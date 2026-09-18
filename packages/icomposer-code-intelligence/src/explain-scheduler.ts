@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import {
-  assertReferenceTarget, finalizeExplain, listActiveJobs, listReferenceEntries, loadPrepare, markRunningJobsInterrupted,
-  readExplainPublicationState, readReferenceText, readJobRecord, readPreparedSources, referenceTargetOf, restoreExplainPublicationState, updateJobRecord, jobRecordRelativePath, type ExplainJobRecord, type ExplainReferenceTarget,
+  assertReferenceTarget, finalizeExplain, listActiveJobs, listBatchJobIds, listReferenceEntries, loadPrepare, markRunningJobsInterrupted,
+  readExplainPublicationState, readReferenceText, readJobRecord, readPreparedSources, recoverOrphanJobs, recoverPendingConfirms, referenceTargetOf, restoreExplainPublicationState, updateJobRecord, jobRecordRelativePath, type ExplainJobRecord, type ExplainReferenceTarget,
 } from "./explain-artifacts.ts";
+import { readBatchRecord } from "./explain-artifacts.ts";
 import { withExplainFileLock, writeExplainFile } from "@icomposer/workbench-contracts/ici-explain";
 import { graphBaseDir, legacyGraphBaseDir, readManifest } from "./storage.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
@@ -160,6 +161,8 @@ export class ExplainScheduler extends Service {
   private filling: Promise<void> | undefined; private fillRequested = false;
   /** TASK-102: reserved capacity, keyed `${canonicalRoot}\0${jobId}`, reserved BEFORE any async preflight. */
   private readonly inFlight = new Map<string, AbortController>();
+  /** TASK-111: live reservations per task, keyed `${canonicalRoot}\0${batchId}` (or `job:<jobId>` for single-API/legacy jobs). */
+  private readonly taskInFlight = new Map<string, number>();
   /** One-shot idle wakes, deduplicated per user root and never awaited by the fill loop. */
   private readonly idleWakes = new WeakSet<object>();
   /** All live job tasks, awaited before disposal completes. */
@@ -170,16 +173,66 @@ export class ExplainScheduler extends Service {
 
   /** Current effective cap and reserved in-flight count for status payloads. */
   status(): { readonly maxConcurrent: number; readonly inFlight: number } { return { maxConcurrent: this.maxConcurrent(), inFlight: this.inFlight.size }; }
+  /** TASK-111: how many jobs of one task are running right now (Host-wide reservation table, read-only view). */
+  taskInFlightCount(root: string, batchId: string): number { return this.taskInFlight.get(`${root}\0${batchId}`) ?? 0; }
+  /** TASK-111: the ceiling that actually gates one task = min(task setting, Host cap). */
+  effectiveTaskMax(maxConcurrent: number | undefined): number { return Math.max(1, Math.min(typeof maxConcurrent === "number" ? maxConcurrent : this.maxConcurrent(), this.maxConcurrent())); }
+  private reserveTask(key: string): void { this.taskInFlight.set(key, (this.taskInFlight.get(key) ?? 0) + 1); }
+  private releaseTask(key: string): void { const next = (this.taskInFlight.get(key) ?? 0) - 1; if (next > 0) this.taskInFlight.set(key, next); else this.taskInFlight.delete(key); }
+  /**
+   * TASK-111: resolve a job to its task identity and effective ceiling. Jobs of
+   * one task share the task's own batch record setting; single-API jobs and
+   * legacy pre-TASK-111 jobs fall back to their batch record (when one exists)
+   * and otherwise to the Host cap.
+   */
+  private async resolveTask(root: string, job: ExplainJobRecord, cache?: Map<string, { key: string; max: number }>): Promise<{ key: string; max: number }> {
+    const host = this.maxConcurrent();
+    const cacheKey = `${root}\0${job.batchId ?? job.jobId}`;
+    const cached = cache?.get(cacheKey);
+    if (cached !== undefined) return cached;
+    let batchId = typeof job.batchId === "string" ? job.batchId : undefined;
+    if (batchId === undefined) batchId = await listBatchJobIds(root).catch(() => new Map<string, string>()).then(map => map.get(job.jobId));
+    let resolved: { key: string; max: number };
+    if (batchId === undefined) resolved = { key: `${root}\0job:${job.jobId}`, max: host };
+    else {
+      const record = await readBatchRecord(root, batchId);
+      // TASK-111 P0: a task whose confirmation is still committing is not claimable at
+      // all (max 0), so no member of a half-finished confirmation can start.
+      resolved = record?.confirmPending === true
+        ? { key: `${root}\0${batchId}`, max: 0 }
+        : { key: `${root}\0${batchId}`, max: this.effectiveTaskMax(record?.maxConcurrent) };
+    }
+    cache?.set(cacheKey, resolved);
+    return resolved;
+  }
   private maxConcurrent(): number { const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined; return config?.maxConcurrent ?? EXPLAIN_DEFAULT_CONCURRENCY; }
   /** Real user roots only: Explain children are registered by session id before creation. */
   private userRoots(): AgentLike[] { const roots = (this.ctx.get("agents") as AgentsFace | undefined)?.roots?.() ?? []; return roots.filter(agent => !isExplainChildRoot(this.ctx, agent)); }
-  private async attachRoots(): Promise<void> { if (this.disposed) return; const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; if (binding) { const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); if (listed.ok) for (const row of listed.value ?? []) { if (!this.recovered.has(row.canonicalPath)) { this.recovered.add(row.canonicalPath); await markRunningJobsInterrupted(row.canonicalPath); } await this.armScheduled(row.canonicalPath); } } this.requestDrive(); }
+  private async attachRoots(): Promise<void> { if (this.disposed) return; const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; if (binding) { const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); if (listed.ok) for (const row of listed.value ?? []) { if (!this.recovered.has(row.canonicalPath)) { this.recovered.add(row.canonicalPath); await markRunningJobsInterrupted(row.canonicalPath); await recoverOrphanJobs(row.canonicalPath).catch(() => undefined); await recoverPendingConfirms(row.canonicalPath).catch(() => undefined); } await this.armScheduled(row.canonicalPath); } } this.requestDrive(); }
   private async armScheduled(root: string): Promise<void> { for (const job of await listActiveJobs(root)) if (job.status === "scheduled" && job.notBefore) this.armTimer(job); }
   private armTimer(job: ExplainJobRecord): void { const target = Date.parse(job.notBefore ?? ""); if (!Number.isFinite(target)) return; const delay = Math.min(MAX_TIMER_MS, Math.max(0, target - Date.now())); const existing = this.timers.get(job.jobId); if (existing && this.timerTargets.get(job.jobId) === target) return; if (existing) clearTimeout(existing); const timer = setTimeout(() => { this.timers.delete(job.jobId); this.timerTargets.delete(job.jobId); this.poke(); }, delay); this.timers.set(job.jobId, timer); this.timerTargets.set(job.jobId, target); }
   requestDrive(): void { if (this.disposed) return; this.scheduleFill(); }
   private scheduleFill(): void { if (this.filling !== undefined) { this.fillRequested = true; return; } this.filling = this.fillLoop().finally(() => { this.filling = undefined; if (this.fillRequested) { this.fillRequested = false; this.scheduleFill(); } }); }
   /** Pick the next claimable job globally; futures arm their timer and never block due work. */
-  private async pickClaimable(binding: BindingFace): Promise<ExplainJobRecord | undefined> { const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); if (!listed.ok) return undefined; for (const row of listed.value ?? []) { const actives = await listActiveJobs(row.canonicalPath); for (const item of actives) { if (!["scheduled", "confirmed"].includes(item.status)) continue; if (item.notBefore && Date.parse(item.notBefore) > Date.now()) { this.armTimer(item); continue; } if (this.inFlight.has(`${row.canonicalPath}\0${item.jobId}`)) continue; return item; } } return undefined; }
+  private async pickClaimable(binding: BindingFace): Promise<ExplainJobRecord | undefined> {
+    const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>));
+    if (!listed.ok) return undefined;
+    const tasks = new Map<string, { key: string; max: number }>();
+    for (const row of listed.value ?? []) {
+      const actives = await listActiveJobs(row.canonicalPath);
+      for (const item of actives) {
+        if (!["scheduled", "confirmed"].includes(item.status)) continue;
+        if (item.notBefore && Date.parse(item.notBefore) > Date.now()) { this.armTimer(item); continue; }
+        if (this.inFlight.has(`${row.canonicalPath}\0${item.jobId}`)) continue;
+        // TASK-111: a task at its own ceiling is skipped (never returned), so the
+        // scan reaches other tasks instead of spinning on the throttled one.
+        const task = await this.resolveTask(row.canonicalPath, item, tasks);
+        if ((this.taskInFlight.get(task.key) ?? 0) >= task.max) continue;
+        return item;
+      }
+    }
+    return undefined;
+  }
   /**
    * One global serial fill loop. Each pass picks a job, re-resolves its root,
    * reverifies capacity/disposal/record state after EVERY await, then reserves
@@ -211,18 +264,24 @@ export class ExplainScheduler extends Service {
       if (this.inFlight.size >= this.maxConcurrent()) return;
       const key = `${canonicalRoot}\0${claim.jobId}`;
       if (this.inFlight.has(key)) continue;
+      const task = await this.resolveTask(canonicalRoot, latest);
+      if (this.disposed) return;
+      // Capacity checks -> reservation is atomic: no await sits between them.
+      if (this.inFlight.size >= this.maxConcurrent()) return;
+      if ((this.taskInFlight.get(task.key) ?? 0) >= task.max) return;
       const controller = new AbortController();
-      // Capacity check -> reservation is atomic: no await sits between them.
       this.inFlight.set(key, controller);
-      if (this.tryStartOn(roots, { llm, canonicalRoot, jobId: claim.jobId, controller, key })) continue;
+      this.reserveTask(task.key);
+      if (this.tryStartOn(roots, { llm, canonicalRoot, jobId: claim.jobId, taskKey: task.key, controller, key })) continue;
       // Every user root is busy: give the slot back and wait for a real idle edge.
       this.inFlight.delete(key);
+      this.releaseTask(task.key);
       this.armIdleWakes(roots);
       return;
     }
   }
   /** Try the roots in order; `runMaintenance` throws synchronously while busy. */
-  private tryStartOn(roots: readonly AgentLike[], pending: { llm: LlmExplainFace; canonicalRoot: string; jobId: string; controller: AbortController; key: string }): boolean {
+  private tryStartOn(roots: readonly AgentLike[], pending: { llm: LlmExplainFace; canonicalRoot: string; jobId: string; taskKey: string; controller: AbortController; key: string }): boolean {
     for (const agent of roots) {
       if (this.disposed || pending.controller.signal.aborted || this.inFlight.get(pending.key) !== pending.controller) return false;
       let kicked = false;
@@ -236,6 +295,7 @@ export class ExplainScheduler extends Service {
           const run: Promise<void> = processConfirmedJob(pending.llm, pending.canonicalRoot, pending.jobId, pending.controller.signal, this.ctx, agent).catch(() => undefined).finally(() => {
             signal.removeEventListener("abort", relay);
             this.inFlight.delete(pending.key);
+            this.releaseTask(pending.taskKey);
             this.tasks.delete(run);
             if (!this.disposed) this.requestDrive();
           });
@@ -261,5 +321,5 @@ export class ExplainScheduler extends Service {
 
   async cancelJob(jobId: string): Promise<boolean> { for (const [key, controller] of this.inFlight) if (key.endsWith(`\0${jobId}`)) controller.abort(); const binding = this.ctx.get("workspaceBinding") as BindingFace | undefined; if (!binding) return false; const listed = await binding.list().catch(() => ({ ok: false, value: undefined } as Awaited<ReturnType<BindingFace["list"]>>)); for (const row of listed.value ?? []) { this.inFlight.get(`${row.canonicalPath}\0${jobId}`)?.abort(); const cancelled = await withExplainJobTransaction(row.canonicalPath, jobId, async () => { for (let attempt = 0; attempt < 20; attempt++) { const record = await readJobRecord(row.canonicalPath, jobId); if (!record) return false; if (record.status === "cancelled") return true; if (!["awaiting-input", "scheduled", "confirmed", "running"].includes(record.status)) return false; const updated = await updateJobRecord(row.canonicalPath, jobId, record.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); if (updated) return true; await new Promise(resolve => setTimeout(resolve, 5)); } return (await readJobRecord(row.canonicalPath, jobId))?.status === "cancelled"; }); if (cancelled) { const timer = this.timers.get(jobId); if (timer) clearTimeout(timer); this.timers.delete(jobId); this.timerTargets.delete(jobId); } if (cancelled || (await readJobRecord(row.canonicalPath, jobId))?.status === "final") return cancelled; } return false; }
   poke(): void { if (this.disposed) return; this.requestDrive(); }
-  dispose(): Promise<void> { if (this.disposePromise) return this.disposePromise; this.disposed = true; this.configDispose?.(); this.configDispose = undefined; for (const controller of this.inFlight.values()) controller.abort(); for (const timer of this.timers.values()) clearTimeout(timer); this.timers.clear(); this.timerTargets.clear(); this.disposePromise = (async () => { while (this.tasks.size > 0) await Promise.all([...this.tasks]); this.inFlight.clear(); })(); return this.disposePromise; }
+  dispose(): Promise<void> { if (this.disposePromise) return this.disposePromise; this.disposed = true; this.configDispose?.(); this.configDispose = undefined; for (const controller of this.inFlight.values()) controller.abort(); for (const timer of this.timers.values()) clearTimeout(timer); this.timers.clear(); this.timerTargets.clear(); this.disposePromise = (async () => { while (this.tasks.size > 0) await Promise.all([...this.tasks]); this.inFlight.clear(); this.taskInFlight.clear(); })(); return this.disposePromise; }
 }

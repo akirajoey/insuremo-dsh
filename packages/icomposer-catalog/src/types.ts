@@ -54,6 +54,29 @@ export interface ListAssetsInput {
   readonly type?: AssetType;
 }
 
+/** TASK-111: one path-identified source discovery of the workspace (no count cap, never name-merged). */
+export interface SourceEntry {
+  readonly name: string;
+  readonly type: "api" | "function";
+  readonly tenant: string;
+  readonly group: string;
+  /** Workspace-relative POSIX source path; the stable identity of this discovery. */
+  readonly sourcePath: string;
+}
+export interface SourceListing {
+  readonly entries: readonly SourceEntry[];
+  /** Names discovered at more than one source path: two distinct assets, never one. */
+  readonly duplicateNames: readonly string[];
+}
+export interface ListSourcesInput { readonly workspaceId: string }
+
 export interface IcomposercCatalogFace {
   listAssets(input: ListAssetsInput, signal?: AbortSignal): Promise<Result<AssetCatalog>>;
+  /**
+   * TASK-111: complete, path-identified api/function enumeration for task target
+   * resolution and graph building. `listAssets` keeps its 5000-item display
+   * bound; this call is deliberately uncapped and reports same-name collisions
+   * instead of resolving them.
+   */
+  listSourcesComplete(input: ListSourcesInput, signal?: AbortSignal): Promise<Result<SourceListing>>;
 }

@@ -19,12 +19,20 @@ function singleOwner(jobId: string, apiName: string, callId = "single-call"): Ow
 function batchOwner(callId = "batch-call"): Owner {
   return { callId, toolName: "ici_explain", block: { kind: "tool-result", call: { argsRaw: JSON.stringify({ workspace_id: "lifecycle", queries: ["AlphaAPI", "BetaAPI", "GammaAPI", "DeltaAPI"] }) }, content: [{ type: "text", text: `batch=${batchId} jobs=4` }] } };
 }
-function batchResponse(status: string = "awaiting-input"): Response {
+function batchResponse(status: string = "awaiting-input", url = ""): Response {
   const names = ["AlphaAPI", "BetaAPI", "GammaAPI", "DeltaAPI"];
+  // TASK-111 P4: the status route is paged, so the fixture slices exactly like the server.
+  const query = new URL(String(url), "http://localhost").searchParams;
+  const size = Number(query.get("size") ?? 5);
+  const page = Math.max(1, Number(query.get("page") ?? 1));
+  const totalPages = Math.max(1, Math.ceil(names.length / size));
+  const from = (Math.min(page, totalPages) - 1) * size;
   return new Response(JSON.stringify({ ok: true, result: {
-    batch: { batchId, workspaceId: "lifecycle", jobIds: names.map((_name, index) => index.toString(16).padStart(16, "0")), createdAt: "2026-08-27T00:00:00.000Z", updatedAt: "2026-08-27T00:00:00.000Z" },
-    jobs: names.map((apiName, index) => ({ jobId: index.toString(16).padStart(16, "0"), apiName, status, promptBaseBytes: 1024, sourceBytes: 512 })),
-    providers: [{ id: "mvp", models: [{ id: "mvp-model", name: "MVP model" }] }], summary: { promptBaseBytes: 4096, sourceBytes: 2048, maxPromptBaseBytes: 1024, jobCount: 4 },
+    batch: { batchId, workspaceId: "lifecycle", jobCount: names.length, createdAt: "2026-08-27T00:00:00.000Z", updatedAt: "2026-08-27T00:00:00.000Z" },
+    jobs: names.slice(from, from + size).map((apiName, index) => ({ jobId: (from + index).toString(16).padStart(16, "0"), apiName, status, promptBaseBytes: 1024, sourceBytes: 512 })),
+    providers: [{ id: "mvp", models: [{ id: "mvp-model", name: "MVP model" }] }],
+    page: { index: Math.min(page, totalPages), size, totalPages },
+    summary: { promptBaseBytes: 4096, sourceBytes: 2048, maxPromptBaseBytes: 1024, jobCount: names.length, countsByStatus: { [status]: names.length } },
   } }), { status: 200 });
 }
 function singleResponse(jobId: string, apiName: string, status: string = "awaiting-input"): Response {
@@ -56,15 +64,15 @@ describe("TASK-058 ICI toolview polling lifecycle", () => {
   it("refreshes a settled batch immediately on first mount", async () => {
     const runtime = await SlotTestRuntime.create();
     try {
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`)
-        ? batchResponse() : new Response(JSON.stringify({ ok: false }), { status: 404 }));
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/status")
+        ? batchResponse("awaiting-input", String(input)) : new Response(JSON.stringify({ ok: false }), { status: 404 }));
       vi.stubGlobal("fetch", fetchMock);
       const { view } = await mountTool(runtime, batchOwner());
       await vi.waitFor(() => {
         expect(view.queryByText(/DeltaAPI/)).not.toBeNull();
         expect(view.getAllByRole("listitem")).toHaveLength(4);
       });
-      expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith(`/batches/${batchId}/status`))).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/status"))).toHaveLength(1);
     } finally {
       await runtime.dispose();
     }
@@ -73,8 +81,8 @@ describe("TASK-058 ICI toolview polling lifecycle", () => {
   it("starts batch polling when a running call receives its settled result and renders all APIs", async () => {
     const runtime = await SlotTestRuntime.create();
     try {
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith(`/batches/${batchId}/status`)
-        ? batchResponse() : new Response(JSON.stringify({ ok: false }), { status: 404 }));
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/status")
+        ? batchResponse("awaiting-input", String(input)) : new Response(JSON.stringify({ ok: false }), { status: 404 }));
       vi.stubGlobal("fetch", fetchMock);
       const { view, update } = await mountTool(runtime, runningOwner({ workspace_id: "lifecycle", queries: ["AlphaAPI", "BetaAPI", "GammaAPI", "DeltaAPI"] }));
       expect(view.getByText(zh["explain.prepareWaiting"])).toBeTruthy();
@@ -83,7 +91,7 @@ describe("TASK-058 ICI toolview polling lifecycle", () => {
         expect(view.queryByText(/DeltaAPI/)).not.toBeNull();
         expect(view.getAllByRole("listitem")).toHaveLength(4);
       });
-      expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith(`/batches/${batchId}/status`))).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/status"))).toHaveLength(1);
       expect(view.getByText(`${zh["explain.batchTitle"]} · 4 ${zh["explain.batchApis"]}`)).toBeTruthy();
     } finally {
       await runtime.dispose();

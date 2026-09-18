@@ -13,20 +13,29 @@ function assertInlineGuidance(text: string, token: RegExp): void {
   assert.doesNotMatch(text, /(?:^|[ =])\/(?:Users|home|tmp)\//);
 }
 
-test("TASK-057 ici_explain canonical single and batch results guide users to the inline card", async () => {
+const jobs = [
+  { apiId: "api:A", apiName: "A", jobId: "0123456789abcdef", artifactPath: ".metadata/icomposer/ici/explain/A/prepare.json", jobStatus: "awaiting-input", chainNodes: 2, chainEdges: 1, truncated: false, reused: false },
+  { apiId: "api:B", apiName: "B", jobId: "abcdef0123456789", artifactPath: ".metadata/icomposer/ici/explain/B/prepare.json", jobStatus: "awaiting-input", chainNodes: 3, chainEdges: 2, truncated: false, reused: false },
+];
+
+test("TASK-111 ici_explain prepares ONE task for api/queries/group/all and guides the inline card", async () => {
   const ctx: any = new Context();
   await ctx.plugin(SystemPrompt);
   await ctx.plugin(ToolRuntime);
+  const seen: any[] = [];
+  let refuse: { code: string; message: string } | undefined;
   ctx.provide("iciEngine", {
-    explainPrepare: async () => ({ ok: true, value: {
-      artifactPath: ".metadata/icomposer/ici/explain/A/prepare.json", jobId: "0123456789abcdef", jobStatus: "awaiting-input",
-      api: { id: "api:A", name: "A" }, callChain: { nodes: [{}, {}], edges: [{}], truncated: false }, sources: [{}], references: [{}],
-      manifest: { sourceFingerprint: "source", graphDigest: "graph" }, contextHash: "context",
-    } }),
-    explainPrepareBatch: async () => ({ ok: true, value: { batchId: "fedcba9876543210", workspaceId: "ws", jobs: [
-      { apiId: "api:A", apiName: "A", jobId: "0123456789abcdef", artifactPath: ".metadata/icomposer/ici/explain/A/prepare.json", jobStatus: "awaiting-input", chainNodes: 2, chainEdges: 1, truncated: false, reused: false },
-      { apiId: "api:B", apiName: "B", jobId: "abcdef0123456789", artifactPath: ".metadata/icomposer/ici/explain/B/prepare.json", jobStatus: "awaiting-input", chainNodes: 3, chainEdges: 2, truncated: false, reused: false },
-    ] } }),
+    explainPrepareTask: async (input: any) => {
+      seen.push(input);
+      if (refuse !== undefined) return { ok: false, error: refuse };
+      const requested = input.selector.kind === "api" ? 1 : input.selector.kind === "queries" ? input.selector.queries.length : input.selector.kind === "group" ? 2 : 25;
+      const rowJobs = input.selector.kind === "api" ? jobs.slice(0, 1) : jobs;
+      return { ok: true, value: {
+        batchId: "fedcba9876543210", workspaceId: "ws", requestedCount: requested, duplicates: 0,
+        selector: { kind: input.selector.kind, ...(input.selector.kind === "api" ? { label: input.selector.query } : input.selector.kind === "group" ? { label: input.selector.group } : input.selector.kind === "all" ? { label: "all" } : {}) },
+        jobs: rowJobs,
+      } };
+    },
   });
   const disposers = registerIciExplainTools(ctx, defineTool as never);
   try {
@@ -34,29 +43,49 @@ test("TASK-057 ici_explain canonical single and batch results guide users to the
     assert.ok(tool);
     const signal = new AbortController().signal;
 
-    const single: any = await ctx.tools.execute({ callId: "task057-single-dispatch" as any, name: "ici_explain", arguments: { workspace_id: "ws", query: "A" }, signal });
-    assert.equal(single.isError, false);
-    assert.equal(single.value.job_id, "0123456789abcdef");
-    assertInlineGuidance(single.content[0].text, /job=0123456789abcdef/);
+    // A single API is a task with one target: same card, same once-only model/time.
+    const single: any = await tool.execute({ workspace_id: "ws", query: "A" }, { signal });
+    assert.equal(single.batch_id, "fedcba9876543210");
+    assert.equal(single.targets, 1);
+    assert.equal(single.concurrency, 4);
+    assert.equal(single.selector_kind, "api");
+    assertInlineGuidance(tool.output.render({}, single)[0].text, /batch=fedcba9876543210 selector=api label=A targets=1 unique=1 concurrency=4/);
 
-    const dispatched: any = await ctx.tools.execute({ callId: "task057-batch-dispatch" as any, name: "ici_explain", arguments: { workspace_id: "ws", queries: ["A", "B"] }, signal });
-    assert.equal(dispatched.isError, false);
-    assert.equal(dispatched.value.batch_id, "fedcba9876543210");
-    assert.equal(dispatched.value.jobs_count, 2);
-    assert.equal(dispatched.value.jobs.length, 2);
-    assertInlineGuidance(dispatched.content[0].text, /batch=fedcba9876543210 jobs=2/);
-    assert.equal(dispatched.content[0].text.includes("job="), false);
+    // An explicit list stays one task and is never truncated by a window.
+    const list: any = await tool.execute({ workspace_id: "ws", queries: ["A", "B"] }, { signal });
+    assert.equal(list.targets, 2);
+    assert.equal(list.jobs_count, 2);
+    assertInlineGuidance(tool.output.render({}, list)[0].text, /selector=queries targets=2 unique=2/);
 
-    const singleOutput = await tool.execute({ workspace_id: "ws", query: "A" }, { signal });
-    assertInlineGuidance(tool.output.render({}, singleOutput)[0].text, /job=0123456789abcdef/);
-    const batchOutput = await tool.execute({ workspace_id: "ws", queries: ["A", "B"] }, { signal });
-    assertInlineGuidance(tool.output.render({}, batchOutput)[0].text, /batch=fedcba9876543210 jobs=2/);
-    assert.equal(tool.output.render({}, batchOutput)[0].text.includes("job="), false);
+    // A group / the whole workspace is resolved by the host: the caller passes a selector, not a list.
+    const group: any = await tool.execute({ workspace_id: "ws", group: "Billing", concurrency: 2 }, { signal });
+    assert.equal(group.selector_kind, "group");
+    assert.equal(group.concurrency, 2);
+    assert.equal(seen.at(-1).selector.group, "Billing");
+    assert.equal(seen.at(-1).maxConcurrent, 2);
+    assertInlineGuidance(tool.output.render({}, group)[0].text, /selector=group label=Billing targets=2/);
 
-    const invalid = await tool.execute({ workspace_id: "ws", queries: ["A"] }, { signal: new AbortController().signal });
-    assert.equal(invalid.error.code, "invalid-workspace-id");
-    const both = await tool.execute({ workspace_id: "ws", query: "A", queries: ["A", "B"] }, { signal: new AbortController().signal });
-    assert.equal(both.error.code, "invalid-workspace-id");
+    const all: any = await tool.execute({ workspace_id: "ws", all: true }, { signal });
+    assert.equal(all.selector_kind, "all");
+    assert.equal(all.targets, 25);
+    // The response stays bounded: counts, never one row per target.
+    assert.equal(all.jobs_count, 2);
+    assertInlineGuidance(tool.output.render({}, all)[0].text, /selector=all label=all targets=25 unique=2/);
+
+    // Exactly one selector per call; malformed selector shapes are refused.
+    assert.equal((await tool.execute({ workspace_id: "ws", query: "A", group: "B" }, { signal })).error.code, "invalid-workspace-id");
+    assert.equal((await tool.execute({ workspace_id: "ws" }, { signal })).error.code, "invalid-workspace-id");
+    assert.equal((await tool.execute({ workspace_id: "ws", queries: [] }, { signal })).error.code, "invalid-workspace-id");
+    assert.equal((await tool.execute({ workspace_id: "ws", queries: ["A", ""] }, { signal })).error.code, "invalid-workspace-id");
+    assert.equal((await tool.execute({ workspace_id: "ws", group: " " }, { signal })).error.code, "invalid-workspace-id");
+    assert.equal((await tool.execute({ workspace_id: "ws", all: true, concurrency: 33 }, { signal })).error.code, "invalid-workspace-id");
+    assert.equal((await tool.execute({ workspace_id: "ws", all: false }, { signal })).error.code, "invalid-workspace-id");
+
+    // A host-side refusal is surfaced verbatim: no silent narrowing, no partial card.
+    refuse = { code: "ambiguous-target", message: "api names exist at several source paths: A" };
+    const refused: any = await tool.execute({ workspace_id: "ws", all: true }, { signal });
+    assert.equal(refused.error.code, "ambiguous-target");
+    assert.match(tool.output.render({}, refused)[0].text, /ambiguous-target/);
   } finally {
     for (const dispose of disposers.reverse()) await dispose();
     await ctx.fiber.dispose();

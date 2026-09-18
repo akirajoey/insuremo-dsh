@@ -48,5 +48,18 @@ async function mountExplainConfig(ctx: any): Promise<{ storageRoot: string; back
 test("TASK-056/TASK-102 scheduler serializes two scheduled jobs under cap 1 with real config storage", async () => {
   const fx = await fixture(); const adapter = new TwoJobAdapter(); const ctx: any = await realHarness(adapter); const { storageRoot, backend } = await mountExplainConfig(ctx); const parent = ctx.agentLoop.create(SessionId("task056-batch-parent"), { provider: "mvp", model: "mvp-model" }, { cwd: fx.root }); ctx.provide("workspaceBinding", { list: async () => ({ ok: true, value: [{ workspaceId: "batch", canonicalPath: fx.root }] }), get: async () => ({ ok: true, value: { canonicalPath: fx.root } }) });
   const scheduled = []; for (const job of fx.jobs) scheduled.push(await updateJobRecord(fx.root, job.jobId, job.revision, { status: "scheduled", notBefore: new Date().toISOString() })); void scheduled;
-  const fiber: any = await ctx.plugin(ExplainScheduler); await fiber.await(); try { for (let i = 0; i < 400; i++) { const rows = await Promise.all(fx.jobs.map(job => readJobRecord(fx.root, job.jobId))); if (rows.every(row => row?.status === "final")) break; await new Promise(resolve => setTimeout(resolve, 5)); } assert.equal((await readJobRecord(fx.root, fx.jobs[0].jobId))?.status, "final"); assert.equal((await readJobRecord(fx.root, fx.jobs[1].jobId))?.status, "final"); assert.equal(adapter.calls, 6); assert.equal(adapter.maxActiveStreams, 1); } finally { await fiber.dispose(); parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+  const fiber: any = await ctx.plugin(ExplainScheduler); await fiber.await(); try { for (let i = 0; i < 400; i++) { const rows = await Promise.all(fx.jobs.map(job => readJobRecord(fx.root, job.jobId))); if (rows.every(row => row?.status === "final")) break; await new Promise(resolve => setTimeout(resolve, 5)); } // TASK-111 FIX-1: report each member's status/revision/error so a red run is diagnosable
+    // (job error codes and api names only: no source contents, paths, or credentials).
+    const settled = await Promise.all(fx.jobs.map(job => readJobRecord(fx.root, job.jobId)));
+    const report = () => JSON.stringify(settled.map(row => ({ api: row?.apiName, status: row?.status, revision: row?.revision, error: row?.error })));
+    assert.equal(settled[0]?.status, "final", `member A did not finish: ${report()}`);
+    assert.equal(settled[1]?.status, "final", `member B did not finish: ${report()}`); // TASK-111 FIX-4: the serialization guarantee is `maxActiveStreams === 1`; the exact
+    // number of scripted turns is NOT deterministic under load, because the documented
+    // resilience sends one corrective turn when a child idles without submitting
+    // (TASK-059). Assert the real invariants: both members finished, one stream at a
+    // time, and each member stayed inside its bounded turn budget (3 happy steps plus at
+    // most one corrective group of 3 per member = at most 12 for two members).
+    assert.equal(adapter.maxActiveStreams, 1, `serialization was violated: ${JSON.stringify({ calls: adapter.calls, maxActive: adapter.maxActiveStreams })}`);
+    assert.ok(adapter.calls >= 6, `both members must run their script: ${adapter.calls}`);
+    assert.ok(adapter.calls <= 12, `turn budget exceeded (possible leak): ${adapter.calls} streams for ${fx.jobs.length} members`); } finally { await fiber.dispose(); parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
 });

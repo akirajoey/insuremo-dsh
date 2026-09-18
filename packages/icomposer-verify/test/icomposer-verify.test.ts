@@ -479,6 +479,7 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
       return { ok: true, value: { artifactPath: ".metadata/icomposer/ici/graph/search/api_embeddings.jsonl", total: 5, embedded: input.rebuild === true ? 5 : 1, reused: input.rebuild === true ? 0 : 4 } };
     },
     explainPrepare: async () => ({ ok: true, value: { artifactPath: ".metadata/icomposer/ici/explain/TestAPI-abc/prepare.json", jobId: "job123", jobStatus: "awaiting-input", api: { id: "api:TestAPI", name: "TestAPI" }, callChain: { nodes: [{ id: "api:TestAPI" }], edges: [], truncated: false }, sources: [], references: [], nodesToUpdate: [], cache: { hit: 0, miss: 0 }, manifest: { sourceFingerprint: "x".repeat(64), graphDigest: "g", promptVersion: "explain-v4" }, contextHash: "c" } }),
+    explainPrepareTask: async () => ({ ok: true, value: { batchId: "0123456789abcdef", workspaceId: "ws1", requestedCount: 1, duplicates: 0, selector: { kind: "api", label: "TestAPI" }, jobs: [{ apiId: "api:TestAPI", apiName: "TestAPI", jobId: "job123", artifactPath: ".metadata/icomposer/ici/explain/TestAPI-abc/prepare.json", jobStatus: "awaiting-input", chainNodes: 1, chainEdges: 0, truncated: false, reused: false }] } }),
     explainContext: async () => ({
       ok: true,
       value: {
@@ -645,11 +646,12 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
     assert.equal(status.workspace_id, "ws1");
     assert.ok(status.requiredFiles.manifest === false || status.requiredFiles.manifest === true);
     assert.doesNotThrow(() => registered.get("ici_status")!.output.render({}, status));
-    // ici_explain prepare artifact
+    // ici_explain prepare artifact (TASK-111: one task record, identity token `batch=`)
     const explainOut: any = await registered.get("ici_explain")!.execute({ workspace_id: "ws1", query: "TestAPI" }, exec);
     assert.equal(explainOut.error, undefined);
-    assert.equal(explainOut.artifact_path, ".metadata/icomposer/ici/explain/TestAPI-abc/prepare.json");
-    assert.match((registered.get("ici_explain")!.output.render({}, explainOut) as any)[0].text, /prepare=\.metadata/);
+    assert.equal(explainOut.batch_id, "0123456789abcdef");
+    assert.equal(explainOut.artifact_path, undefined);
+    assert.match((registered.get("ici_explain")!.output.render({}, explainOut) as any)[0].text, /batch=0123456789abcdef/);
   } finally {
     for (const dispose of disposers) dispose();
   }
