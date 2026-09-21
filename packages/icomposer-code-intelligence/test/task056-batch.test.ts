@@ -34,7 +34,12 @@ test("TASK-111 batch prepare deduplicates APIs, writes one task record, and refu
     assert.ok(jobsAfterFirst.every(job => job.batchId === first.value.batchId));
     // TASK-111: a second task never adopts the first task's active jobs (that would
     // couple batch attribution, concurrency, and plan); it is refused explicitly.
-    const second = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["BetaAPI", "AlphaAPI"] }); assert.equal(second.ok, false); assert.equal(second.error.code, "job-active"); assert.match(second.error.message, /BetaAPI/);
+    const second = await runPrepareBatch(fx.deps, { workspaceId: "batch", queries: ["BetaAPI", "AlphaAPI"] }); assert.equal(second.ok, false); assert.equal(second.error.code, "job-active");
+    // TASK-114 (legacy-only): the conflicting jobs belong to the task created above, so they
+    // are reported as member conflicts — never as cancellable blockers.
+    assert.equal((second.error.blockers ?? []).length, 0);
+    assert.equal(second.error.memberConflicts, 2);
+    assert.match(second.error.message, /another task card/);
     assert.equal((await listJobs(fx.root)).length, 2);
   } finally { await fx.cleanup(); }
 });

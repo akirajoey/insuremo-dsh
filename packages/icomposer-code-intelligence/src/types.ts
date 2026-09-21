@@ -82,9 +82,22 @@ export type IciErrorCode =
   | "group-not-found"
   | "ambiguous-target";
 
+/**
+ * TASK-114: metadata-only identity of an already-active job that blocks a new task.
+ * It deliberately carries no artifact path, source range, or prepare detail, so it can
+ * travel into the tool result (and the model context) without widening the sensitive surface.
+ */
+export interface BlockedExplainTarget {
+  readonly apiId: string;
+  readonly apiName: string;
+  readonly jobId: string;
+  readonly status: string;
+  readonly createdAt: string;
+}
+
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: { readonly code: IciErrorCode; readonly message: string } };
+  | { readonly ok: false; readonly error: { readonly code: IciErrorCode; readonly message: string; readonly blockers?: readonly BlockedExplainTarget[]; readonly blockersMore?: number; readonly memberConflicts?: number } };
 
 export type ProgressCallback = (current: number, total: number, label: string) => void;
 

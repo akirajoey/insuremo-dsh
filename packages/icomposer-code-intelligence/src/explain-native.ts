@@ -1,4 +1,4 @@
-import type { BuildOptions, ExplainFinalizeResult, ExplainPrepareBatchResult, ExplainPrepareResult, ExplainPrepareTaskResult, ExplainSourceResult, ExplainTaskSelector, IciErrorCode, IciNode, Result } from "./types.ts";
+import type { BlockedExplainTarget, BuildOptions, ExplainFinalizeResult, ExplainPrepareBatchResult, ExplainPrepareResult, ExplainPrepareTaskResult, ExplainSourceResult, ExplainTaskSelector, IciErrorCode, IciNode, Result } from "./types.ts";
 import type { LoadedGraph } from "./query.ts";
 import { computeGraphDigest, createJobRecord, findActiveJobByApiId, finalizeExplain, loadPrepare, newBatchId, newJobId, prepareExplain, readPreparedSources, removeJobRecord, updateJobRecord, writeBatchRecord, NONE_REFERENCE_TARGET, type ExplainJobRecord } from "./explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
@@ -9,6 +9,41 @@ type Base = { readonly graph: LoadedGraph; readonly canonicalPath: string; reado
 export interface TargetListing { readonly entries: readonly { readonly name: string; readonly type: string; readonly tenant: string; readonly group: string; readonly sourcePath: string }[]; readonly duplicateNames: readonly string[] }
 export interface NativeExplainDeps { readonly disposed: () => boolean; readonly loadBase: (workspaceId: string, query: string) => Promise<Result<Base>>; readonly catalog?: (workspaceId: string) => Promise<Result<TargetListing>>; readonly current: (workspaceId: string) => Promise<Result<{ canonicalPath: string; sourceFingerprint: string; graphDigest: string; engineVersion: string }>>; readonly refs: (root: string) => Promise<string[]>; }
 function err(code: IciErrorCode, message: string = code): Result<never> { return { ok: false, error: { code, message } }; }
+
+/** TASK-114: how many blockers travel into the tool result (and the model context). */
+export const MAX_BLOCKED_TARGETS = 5;
+/** Structured conflict: an already-active job blocks the task, and the caller needs its identity. */
+class BlockedByActiveJob extends Error {
+  readonly blockers: readonly BlockedExplainTarget[];
+  readonly blockersMore: number;
+  readonly memberConflicts: number;
+  constructor(blockers: readonly BlockedExplainTarget[], total: number, memberConflicts = 0) {
+    const legacy = blockers.map(entry => `${entry.apiName} (${entry.jobId}, ${entry.status}, since ${entry.createdAt})`).join("; ");
+    const parts = [legacy, total > blockers.length ? `+${total - blockers.length} more` : "", memberConflicts > 0 ? `${memberConflicts} target${memberConflicts === 1 ? "" : "s"} already belong to another task card (handle them in that card: confirm or cancel)` : ""].filter(part => part !== "");
+    super(`job-active: ${parts.join("; ")}`);
+    this.blockers = blockers;
+    this.blockersMore = Math.max(0, total - blockers.length);
+    this.memberConflicts = memberConflicts;
+    this.name = "BlockedByActiveJob";
+  }
+}
+/**
+ * TASK-114 (legacy-only): only a standalone legacy job (no task id) may be offered as a
+ * blocker the user can cancel from this card. A member of another task is reported as a
+ * member conflict instead: it must be handled in its own card, never cancelled from here.
+ */
+function blockedBy(job: { readonly apiId: string; readonly apiName: string; readonly jobId: string; readonly status: string; readonly createdAt: string; readonly batchId?: string | null }): BlockedByActiveJob {
+  return job.batchId === undefined || job.batchId === null ? new BlockedByActiveJob([blockedTargetOf(job as never)], 1) : new BlockedByActiveJob([], 0, 1);
+}
+/** Metadata-only projection of a blocking job: no artifact path and no prepare detail. */
+function blockedTargetOf(job: { readonly apiId: string; readonly apiName: string; readonly jobId: string; readonly status: string; readonly createdAt: string }): BlockedExplainTarget {
+  return { apiId: job.apiId, apiName: job.apiName, jobId: job.jobId, status: job.status, createdAt: job.createdAt };
+}
+/** Convert a BlockedByActiveJob into the result the engine face returns; other errors fall through. */
+function blockedResult(cause: unknown): Result<never> | undefined {
+  if (!(cause instanceof BlockedByActiveJob)) return undefined;
+  return { ok: false, error: { code: "job-active", message: cause.message, blockers: cause.blockers, blockersMore: cause.blockersMore, ...(cause.memberConflicts > 0 ? { memberConflicts: cause.memberConflicts } : {}) } };
+}
 function opts(options?: BuildOptions | AbortSignal): BuildOptions { return options instanceof AbortSignal ? { signal: options } : (options ?? {}); }
 function validInput(input: { workspaceId: string; query: string } | undefined): boolean { return typeof input?.workspaceId === "string" && input.workspaceId.length > 0 && typeof input.query === "string" && input.query.trim().length > 0; }
 const prepareTails = new Map<string, Promise<void>>();
@@ -20,12 +55,12 @@ export async function runPrepare(deps: NativeExplainDeps, input: { workspaceId: 
   const base = await deps.loadBase(input.workspaceId, input.query); if (!base.ok) return base; if (base.value.stale) return err("stale-snapshot", "stale-snapshot: run ici_build to refresh the ICI graph before explaining");
   try {
     return await withPrepareTransaction(base.value.canonicalPath, input.workspaceId, async () => {
-      const existing = await findActiveJobByApiId(base.value.canonicalPath, input.workspaceId, base.value.start.id); if (existing) return err("job-active");
+      const existing = await findActiveJobByApiId(base.value.canonicalPath, input.workspaceId, base.value.start.id); if (existing) throw blockedBy(existing);
       const prepared = await prepareExplain(base.value.canonicalPath, input.workspaceId, base.value.graph, base.value.start, await deps.refs(base.value.canonicalPath), o.signal); if (prepared.artifact.manifest.engineVersion !== ICI_ENGINE_VERSION) throw new Error("stale-snapshot");
       const job = await createJobRecord(base.value.canonicalPath, { jobId: newJobId(), workspaceId: input.workspaceId, apiName: prepared.artifact.api.name, apiId: prepared.artifact.api.id, prepareArtifactPath: prepared.artifactPath, contextHash: prepared.artifact.contextHash, prepareId: prepared.artifact.prepareId, sourceFingerprint: prepared.artifact.manifest.sourceFingerprint, graphDigest: prepared.artifact.manifest.graphDigest, provider: null, model: null, docs: prepared.artifact.references.filter(ref => ref.readable).map(ref => ({ path: ref.path, sha256: ref.sha256 })), referenceTarget: NONE_REFERENCE_TARGET });
       return { ok: true, value: { ...prepared.artifact, manifest: { ...prepared.artifact.manifest, engineVersion: ICI_ENGINE_VERSION }, artifactPath: prepared.artifactPath, jobId: job.jobId, jobStatus: "awaiting-input" as const } };
     });
-  } catch (cause) { const stale = cause instanceof Error && cause.message === "stale-snapshot"; return o.signal?.aborted ? err("cancelled") : stale ? err("stale-snapshot", "stale-snapshot: run ici_build to refresh the ICI graph before explaining") : err("storage-error"); }
+  } catch (cause) { const blocked = blockedResult(cause); if (blocked !== undefined) return blocked; const stale = cause instanceof Error && cause.message === "stale-snapshot"; return o.signal?.aborted ? err("cancelled") : stale ? err("stale-snapshot", "stale-snapshot: run ici_build to refresh the ICI graph before explaining") : err("storage-error"); }
 }
 
 /**
@@ -55,6 +90,8 @@ export async function runPrepareBatch(deps: NativeExplainDeps, input: { workspac
       const rows: Array<ExplainPrepareBatchResult["jobs"][number]> = [];
       const created: ExplainJobRecord[] = [];
       const seen = new Set<string>();
+      const conflicts: BlockedExplainTarget[] = [];
+      let memberConflicts = 0;
       const batchId = newBatchId();
       try {
         const refs = await deps.refs(root);
@@ -65,14 +102,17 @@ export async function runPrepareBatch(deps: NativeExplainDeps, input: { workspac
           // TASK-111: a task never adopts a job another task owns. Two tasks would
           // otherwise share one mutable record (batch attribution, concurrency, and
           // plan all couple), so an already-active API is an explicit conflict.
+          // TASK-114: collect every conflict (bounded, metadata only) instead of failing
+          // on the first one, so the card can name the blockers and offer one cancel each.
           const existing = await findActiveJobByApiId(root, input.workspaceId, base.start.id);
-          if (existing) throw new Error(`job-active: ${base.start.name}`);
+          if (existing) { if (existing.batchId === undefined) conflicts.push(blockedTargetOf(existing)); else memberConflicts += 1; continue; }
           const prepared = await prepareExplain(root, input.workspaceId, base.graph, base.start, refs, o.signal);
           if (prepared.artifact.manifest.engineVersion !== ICI_ENGINE_VERSION) throw new Error("stale-snapshot");
           const job = await createJobRecord(root, { jobId: newJobId(), batchId, workspaceId: input.workspaceId, apiName: prepared.artifact.api.name, apiId: prepared.artifact.api.id, prepareArtifactPath: prepared.artifactPath, contextHash: prepared.artifact.contextHash, prepareId: prepared.artifact.prepareId, sourceFingerprint: prepared.artifact.manifest.sourceFingerprint, graphDigest: prepared.artifact.manifest.graphDigest, provider: null, model: null, docs: prepared.artifact.references.filter(ref => ref.readable).map(ref => ({ path: ref.path, sha256: ref.sha256 })), referenceTarget: NONE_REFERENCE_TARGET });
           created.push(job);
           rows.push({ apiId: job.apiId, apiName: job.apiName, jobId: job.jobId, artifactPath: prepared.artifactPath, jobStatus: "awaiting-input", chainNodes: prepared.artifact.callChain.nodes.length, chainEdges: prepared.artifact.callChain.edges.length, truncated: prepared.artifact.callChain.truncated === true, reused: false });
         }
+        if (conflicts.length > 0 || memberConflicts > 0) throw new BlockedByActiveJob(conflicts.slice(0, MAX_BLOCKED_TARGETS), conflicts.length, memberConflicts);
         const duplicates = requestedCount - rows.length;
         await writeBatchRecord(root, { schemaVersion: 1, kind: "explain-batch", batchId, workspaceId: input.workspaceId, jobIds: rows.map(row => row.jobId), maxConcurrent: input.maxConcurrent ?? EXPLAIN_DEFAULT_CONCURRENCY, requestedCount, ...(input.selector === undefined ? {} : { selector: input.selector }), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, o.signal);
         return { ok: true, value: { batchId, workspaceId: input.workspaceId, jobs: rows, requestedCount, duplicates } };
@@ -87,7 +127,7 @@ export async function runPrepareBatch(deps: NativeExplainDeps, input: { workspac
   } catch (cause) {
     if (o.signal?.aborted) return err("cancelled");
     if (cause instanceof Error && cause.message === "stale-snapshot") return err("stale-snapshot", "stale-snapshot: run ici_build to refresh the ICI graph before explaining");
-    if (cause instanceof Error && cause.message.startsWith("job-active")) return err("job-active", `${cause.message}; finish or cancel that job before starting a new task`);
+    const blocked = blockedResult(cause); if (blocked !== undefined) return blocked;
     return err("storage-error");
   }
 }

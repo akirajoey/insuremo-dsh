@@ -26,7 +26,23 @@ interface BatchSnapshot { batch: BatchRecord; jobs: readonly BatchJob[]; provide
 type Status = "preparing" | "awaiting-input" | "scheduled" | "confirmed" | "running" | "final" | "failed" | "cancelled" | "interrupted";
 /** TASK-111 runtime degradation of a card: a missing record or an unreachable Host stops silent polling. */
 type Phase = "live" | "missing" | "unreachable";
-interface CardState { readonly jobId?: string; readonly batchId?: string; readonly snapshot?: Snapshot; readonly batchSnapshot?: BatchSnapshot; readonly referenceTarget: ReferenceTarget; readonly provider: string; readonly model: string; readonly notBefore: string; readonly busy: boolean; readonly localError?: string; readonly page: number; readonly details: Record<string, boolean>; readonly capDraft: string; readonly capBusy: boolean; readonly capError?: string; readonly capSaved?: boolean; readonly phase: Phase }
+/** TASK-114: one already-active job that blocks a new task (metadata only, from the tool text). */
+interface BlockedTarget { readonly apiName: string; readonly jobId: string; readonly status: string; readonly createdAt: string }
+function blockedTargetsOf(block: Block): readonly BlockedTarget[] {
+  const text = resultText(block);
+  const rows: BlockedTarget[] = [];
+  for (const line of text.split("\n")) {
+    // `old_job=` is the blocker identity; it is intentionally not the card's own `job=` token.
+    const match = /^blocked=job-active api=(\S+) old_job=([a-f0-9]{16}) status=(\S+) created=(\S+)$/.exec(line.trim());
+    if (match === null) continue;
+    rows.push({ apiName: match[1]!, jobId: match[2]!, status: match[3]!, createdAt: match[4]! });
+  }
+  return rows;
+}
+function blockedMoreOf(block: Block): number { const match = resultText(block).match(/\bblocked_more=(\d+)\b/); return match ? Number(match[1]) : 0; }
+/** TASK-114 (legacy-only): targets that belong to another task card. They are never cancellable here. */
+function memberConflictsOf(block: Block): number { const match = resultText(block).match(/\bmember_conflict=(\d+)\b/); return match ? Number(match[1]) : 0; }
+interface CardState { readonly jobId?: string; readonly batchId?: string; readonly snapshot?: Snapshot; readonly batchSnapshot?: BatchSnapshot; readonly referenceTarget: ReferenceTarget; readonly provider: string; readonly model: string; readonly notBefore: string; readonly busy: boolean; readonly localError?: string; readonly page: number; readonly details: Record<string, boolean>; readonly capDraft: string; readonly capBusy: boolean; readonly capError?: string; readonly capSaved?: boolean; readonly phase: Phase; readonly blockedConfirm?: string; readonly blockedBusy?: string; readonly blockedDone: Record<string, "cancelled" | "gone" | "failed" | "member"> }
 const PREFIX = "/api/icomposer-workbench/ici/explain";
 const PAGE_SIZE = 5;
 const CONCURRENCY_MIN = 1;
@@ -117,7 +133,7 @@ export class IciExplainToolview extends Component<Props, CardState> {
   #epoch = 0;
   #settingsController?: AbortController;
   #defaults: { readonly provider?: string; readonly model?: string };
-  constructor(props: Props) { super(props); const jobId = jobIdOf(props.block); const batchId = batchIdOf(props.block); const defaults = defaultModelOf(props.block); this.#defaults = defaults; this.state = { jobId, batchId, referenceTarget: NONE_REFERENCE, provider: defaults.provider ?? "", model: defaults.model ?? "", notBefore: "", busy: false, page: 0, details: {}, capDraft: "", capBusy: false, phase: "live" }; }
+  constructor(props: Props) { super(props); const jobId = jobIdOf(props.block); const batchId = batchIdOf(props.block); const defaults = defaultModelOf(props.block); this.#defaults = defaults; this.state = { jobId, batchId, referenceTarget: NONE_REFERENCE, provider: defaults.provider ?? "", model: defaults.model ?? "", notBefore: "", busy: false, page: 0, details: {}, capDraft: "", capBusy: false, phase: "live", blockedDone: {} }; }
   componentDidMount(): void { this.syncPolling(); }
   componentDidUpdate(previousProps: Props): void {
     const previousJobId = jobIdOf(previousProps.block);
@@ -136,7 +152,7 @@ export class IciExplainToolview extends Component<Props, CardState> {
       this.#capInitialized = false;
       this.#capEdited = false;
       this.#failures = 0;
-      this.setState({ jobId: nextJobId, batchId: nextBatchId, snapshot: undefined, batchSnapshot: undefined, referenceTarget: NONE_REFERENCE, provider: this.#defaults.provider ?? "", model: this.#defaults.model ?? "", notBefore: "", busy: false, localError: undefined, page: 0, details: {}, capDraft: "", capBusy: false, capError: undefined, capSaved: undefined, phase: "live" }, this.syncPolling);
+      this.setState({ jobId: nextJobId, batchId: nextBatchId, snapshot: undefined, batchSnapshot: undefined, referenceTarget: NONE_REFERENCE, provider: this.#defaults.provider ?? "", model: this.#defaults.model ?? "", notBefore: "", busy: false, localError: undefined, page: 0, details: {}, capDraft: "", capBusy: false, capError: undefined, capSaved: undefined, phase: "live", blockedConfirm: undefined, blockedBusy: undefined, blockedDone: {} }, this.syncPolling);
       return;
     }
     this.syncPolling();
@@ -209,6 +225,30 @@ export class IciExplainToolview extends Component<Props, CardState> {
   private chooseProvider(provider: string): void { const selected = (this.state.snapshot?.providers ?? this.state.batchSnapshot?.providers ?? []).find(item => item.id === provider); const model = selected?.models[0]?.id ?? (provider === this.#defaults.provider ? this.#defaults.model ?? "" : ""); this.setState({ provider, model }); }
   private async pickReference(kind: "file" | "directory"): Promise<void> { const id = this.state.jobId ?? this.state.batchId; const scope = this.state.batchId ? "batches" : "jobs"; if (!id || this.state.busy) return; this.setState({ busy: true, localError: undefined }); const outcome = await postPath(`${PREFIX}/${scope}/${id}/native-pick`, { kind }); if (!outcome.ok) { this.setState({ busy: false, ...(outcome.code === "picker-cancelled" ? { localError: undefined } : { localError: outcome.code ?? "picker-failed" }) }); return; } const target = validReferenceTarget(outcome.result) ? outcome.result : undefined; if (!target) { this.setState({ busy: false, localError: "picker-failed" }); return; } this.setState({ busy: false, referenceTarget: target, localError: undefined }); }
   private async confirm(): Promise<void> { const { jobId, batchId, provider, model, referenceTarget, notBefore, snapshot, batchSnapshot } = this.state; const batchAwaiting = batchSnapshot?.jobs.filter(job => job.status === "awaiting-input") ?? []; const promptTooLarge = batchId ? batchAwaiting.some(job => (job.promptBaseBytes ?? 0) > MAX_PROMPT_BYTES) : (snapshot?.summary.promptBaseBytes ?? snapshot?.summary.sourceBytes ?? 0) > MAX_PROMPT_BYTES; const id = jobId ?? batchId; if (!id || !provider || !model || promptTooLarge || (batchId ? !batchSnapshot : !snapshot)) return; this.setState({ busy: true, localError: undefined }); let when: string; try { when = notBefore ? new Date(notBefore).toISOString() : new Date().toISOString(); } catch { this.setState({ busy: false, localError: "confirmation-invalid" }); return; } const scope = batchId ? "batches" : "jobs"; const outcome = await postPath(`${PREFIX}/${scope}/${id}/confirm`, { provider, model, referenceTarget, docs: [], notBefore: when, consent: true }); if (!outcome.ok) { this.setState({ busy: false, localError: outcome.code }); return; } if (batchId) { this.setState(previous => ({ ...previous, busy: false, batchSnapshot: previous.batchSnapshot ? { ...previous.batchSnapshot, jobs: previous.batchSnapshot.jobs.map(job => job.status === "awaiting-input" ? { ...job, status: "scheduled" as const, provider, model, notBefore: when } : job) } : undefined })); } else this.setState(previous => ({ ...previous, busy: false, snapshot: previous.snapshot ? { ...previous.snapshot, job: { ...previous.snapshot.job, status: "scheduled", provider, model, folderPath: referenceTarget.path, referenceTarget, notBefore: outcome.result.notBefore } } : undefined })); }
+  /**
+   * TASK-114: cancel ONE blocking legacy job. The click is the user's explicit
+   * authorization (the request carries the same-origin workbench action header) and the
+   * card asks for confirmation first because the action cannot be undone. The task itself
+   * is never re-issued automatically: the card only tells the user they may run it again.
+   */
+  private async cancelBlocked(jobId: string): Promise<void> {
+    if (this.state.blockedBusy !== undefined) return;
+    this.setState({ blockedBusy: jobId, blockedConfirm: undefined });
+    const outcome = await postPath(`${PREFIX}/jobs/${jobId}/cancel`, {});
+    if (this.state.blockedBusy !== jobId) return;
+    if (outcome.ok || outcome.result?.alreadyCancelled === true) {
+      this.setState(previous => ({ ...previous, blockedBusy: undefined, blockedDone: { ...previous.blockedDone, [jobId]: "cancelled" } }));
+      return;
+    }
+    const member = outcome.code === "task-member";
+    const gone = outcome.code === "revision-conflict" || outcome.code === "job-missing";
+    this.setState(previous => ({ ...previous, blockedBusy: undefined, blockedDone: { ...previous.blockedDone, [jobId]: member ? "member" : gone ? "gone" : "failed" } }));
+  }
+  /** TASK-114: the failure surface for a task that is blocked by an earlier waiting card. */
+  private renderBlocked(t: Props["t"], failure: string, blockers: readonly BlockedTarget[], more: number, members: number): ReactNode {
+    const confirm = this.state.blockedConfirm;
+    return <Card title={t("explain.title")} status="failed" t={t}><p className={css.error} role="alert" data-testid="ici-explain-prepare-failed">{t("explain.prepareFailed")} · {t("explain.errorCode")} {failure}</p><p className={css.hint} data-testid="ici-explain-blocked-intro">{t("explain.blockedIntro")}</p><ul className={css.hint} data-testid="ici-explain-blockers">{blockers.map(row => { const done = this.state.blockedDone[row.jobId]; return <li key={row.jobId} className={css.batchJobRow} data-testid={`ici-explain-blocker-${row.jobId}`}><div className={css.jobLine}><strong className={css.jobName}>{row.apiName}</strong> · {row.status} · {t("explain.blockedCreated")} {formatTime(row.createdAt) || row.createdAt} · <code>{row.jobId}</code></div>{done === "cancelled" ? <p className={css.done} role="status">{t("explain.blockedCancelled")}</p> : done === "member" ? <p className={css.hint} role="status">{t("explain.memberConflictIntro")}</p> : done === "gone" ? <p className={css.hint} role="status">{t("explain.blockedGone")}</p> : done === "failed" ? <p className={css.error} role="alert">{t("explain.blockedCancelFailed")}</p> : <div className={css.actions}><button type="button" disabled={this.state.blockedBusy === row.jobId} onClick={() => this.setState({ blockedConfirm: row.jobId })}>{t("explain.blockedCancelAction")}</button></div>}</li>; })}</ul>{more > 0 ? <p className={css.hint}>{t("explain.blockedMore")} {more}</p> : null}{members > 0 ? <p className={css.hint} data-testid="ici-explain-member-conflicts">{t("explain.memberConflictIntro")} · {members}</p> : null}{confirm !== undefined ? <div className={css.fieldset} data-testid="ici-explain-blocked-confirm"><p className={css.consent} role="alert">{t("explain.blockedConfirmTitle")}</p><p className={css.hint}>{t("explain.blockedConfirmBody")}: <strong>{blockers.find(row => row.jobId === confirm)?.apiName ?? ""}</strong> · <code>{confirm}</code></p><div className={css.actions}><button type="button" disabled={this.state.blockedBusy !== undefined} onClick={() => void this.cancelBlocked(confirm)}>{t("explain.blockedConfirmYes")}</button><button type="button" onClick={() => this.setState({ blockedConfirm: undefined })}>{t("explain.blockedConfirmNo")}</button></div></div> : null}{Object.values(this.state.blockedDone).some(state => state === "cancelled") ? <p className={css.hint} role="status">{t("explain.blockedRetryHint")}</p> : null}</Card>;
+  }
   private async cancel(): Promise<void> { const id = this.state.jobId ?? this.state.batchId; if (!id || this.state.busy) return; this.setState({ busy: true }); const scope = this.state.batchId ? "batches" : "jobs"; const outcome = await postPath(`${PREFIX}/${scope}/${id}/cancel`, {}); if (!outcome.ok) { this.setState({ busy: false, localError: outcome.code }); return; } if (this.state.batchId) this.setState(previous => ({ ...previous, busy: false, batchSnapshot: previous.batchSnapshot ? { ...previous.batchSnapshot, jobs: previous.batchSnapshot.jobs.map(job => ACTIVE.has(job.status) ? { ...job, status: "cancelled" as const } : job) } : undefined })); else this.setState(previous => ({ ...previous, busy: false, snapshot: previous.snapshot ? { ...previous.snapshot, job: { ...previous.snapshot.job, status: "cancelled" } } : undefined })); }
   private async retry(): Promise<void> { const id = this.state.jobId ?? this.state.batchId; if (!id || this.state.busy) return; this.setState({ busy: true, localError: undefined }); const scope = this.state.batchId ? "batches" : "jobs"; const outcome = await postPath(`${PREFIX}/${scope}/${id}/retry`, {}); if (!outcome.ok) { this.setState({ busy: false, localError: outcome.code ?? "network" }); return; } if (this.state.batchId) { this.setState({ busy: false }, () => { void this.refresh(true); }); return; } if (typeof outcome.result?.jobId !== "string") { this.setState({ busy: false, localError: "network" }); return; } this.#initializedJob = undefined; this.setState({ busy: false, jobId: outcome.result.jobId, snapshot: undefined, referenceTarget: NONE_REFERENCE, provider: "", model: "", notBefore: "", localError: undefined }, this.syncPolling); }
   private providers(): readonly Provider[] { return this.state.snapshot?.providers ?? this.state.batchSnapshot?.providers ?? []; }
@@ -293,7 +333,14 @@ export class IciExplainToolview extends Component<Props, CardState> {
   render(): ReactNode {
     const t = this.text.bind(this);
     const failure = settledFailure(this.props.block);
-    if (failure !== undefined) return <Card title={t("explain.title")} status="failed" t={t}><p className={css.error} role="alert" data-testid="ici-explain-prepare-failed">{t("explain.prepareFailed")} · {t("explain.errorCode")} {failure}</p><p className={css.hint}>{t("explain.prepareFailedHint")}</p></Card>;
+    if (failure !== undefined) {
+      const blockers = blockedTargetsOf(this.props.block);
+      // TASK-114: a blocked task must name the blocking card and offer a single cancel —
+      // the generic "run it again" hint would be misleading (it would fail identically).
+      const memberConflicts = memberConflictsOf(this.props.block);
+      if (blockers.length > 0 || memberConflicts > 0 || failure === "job-active") return this.renderBlocked(t, failure, blockers, blockedMoreOf(this.props.block), memberConflicts);
+      return <Card title={t("explain.title")} status="failed" t={t}><p className={css.error} role="alert" data-testid="ici-explain-prepare-failed">{t("explain.prepareFailed")} · {t("explain.errorCode")} {failure}</p><p className={css.hint}>{t("explain.prepareFailedHint")}</p></Card>;
+    }
     if (this.state.phase !== "live") return this.renderDegraded(t, this.state.phase);
     if (this.state.batchId) return this.renderBatch(t);
     const { snapshot, jobId } = this.state;

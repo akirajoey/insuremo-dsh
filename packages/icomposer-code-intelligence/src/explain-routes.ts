@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -63,6 +64,15 @@ function pageParams(url: URL, size: number, total: number): { readonly index: nu
   const index = Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(rawPage, totalPages) : 1;
   return { index, size: pageSize, totalPages };
 }
+/** TASK-114: audit vocabulary and digest helper for the explicit blocker cancellation. */
+const CANCEL_OPERATION_KIND = "ici-explain-job-cancel";
+interface OperationLogLike {
+  append(input: { requestId: string; kind: string; paramsDigest: string; artifactRefs: readonly string[]; createdAt?: string }): Promise<{ id: string }>;
+  list(filter?: { requestId?: string; kind?: string }): readonly { id: string; decision: string; resultDigest?: string }[];
+  decide(id: string, approved: boolean, by: string, reason?: string): Promise<{ id: string; decision: string }>;
+  recordResult(id: string, input: { resultDigest: string; artifactRefs: readonly string[] }): Promise<{ id: string }>;
+}
+function metadataDigest(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 const PICKER_CODES = new Set(["picker-cancelled", "picker-aborted", "picker-unavailable", "picker-failed", "reference-outside-workspace", "reference-symlink", "reference-unsupported"]);
 function isOutside(relativePath: string): boolean { return relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath); }
 /** Convert a native absolute selection into a workspace-relative target without exposing the absolute path. */
@@ -366,6 +376,42 @@ export class ExplainRoutesService extends Service {
     try { await assertReferenceTarget(root, target); } catch { return; }
     try { await updateJobRecord(root, replacementId, 1, { provider, model, docs: previous.docs, referenceTarget: target, notBefore, status: "scheduled" }); } catch { /* stays awaiting-input: the card asks for a plan again */ }
   }
+  /**
+   * TASK-114: cancel exactly ONE job (typically a legacy card that is still waiting) and
+   * record the action in the operation log. The audit is fail-closed: if the action cannot
+   * be recorded as approved, no cancellation happens. Only metadata digests are stored and
+   * returned — never an artifact path, source range, or prepare detail.
+   */
+  private async cancelJobWithAudit(located: Located, res: ServerResponse): Promise<void> {
+    const job = located.job;
+    // TASK-114 (legacy-only): a member of another task is never cancelled from this card,
+    // not even through a direct request; its own card owns confirm/cancel.
+    if (job.batchId !== undefined) { fail(res, 409, "task-member"); return; }
+    const operationLog = this.ctx.get("operationLog" as never) as unknown as OperationLogLike | undefined;
+    const requestId = `ici-explain-cancel:${job.jobId}`;
+    const auditRef = (): { readonly requestId: string; readonly id?: string; readonly decision?: string } => {
+      const existing = operationLog?.list({ kind: CANCEL_OPERATION_KIND, requestId }).find(entry => entry.decision === "approved");
+      return { requestId, ...(existing === undefined ? {} : { id: existing.id, decision: existing.decision }) };
+    };
+    // Idempotent: an already cancelled job is a successful no-op (the audit keeps one record).
+    if (job.status === "cancelled") { ok(res, { jobId: job.jobId, apiName: job.apiName, status: "cancelled", alreadyCancelled: true, audit: auditRef() }); return; }
+    if (!["awaiting-input", "scheduled", "confirmed", "running"].includes(job.status)) { fail(res, 409, "revision-conflict"); return; }
+    if (operationLog === undefined) { fail(res, 500, "storage-error"); return; }
+    const paramsDigest = metadataDigest({ jobId: job.jobId, apiName: job.apiName, statusBefore: job.status });
+    let approved: { readonly id: string; readonly decision: string } | undefined = operationLog.list({ kind: CANCEL_OPERATION_KIND, requestId }).find(entry => entry.decision === "approved" && entry.resultDigest === undefined);
+    try {
+      if (approved === undefined) {
+        const appended = await operationLog.append({ requestId, kind: CANCEL_OPERATION_KIND, paramsDigest, artifactRefs: [], createdAt: new Date().toISOString() });
+        approved = await operationLog.decide(appended.id, true, "workbench-card");
+      }
+    } catch { fail(res, 500, "storage-error"); return; }
+    const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined;
+    const cancelled = scheduler ? await scheduler.cancelJob(job.jobId).catch(() => false) : await updateJobRecord(located.root, job.jobId, job.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false);
+    if (!cancelled) { fail(res, 409, "revision-conflict"); return; }
+    try { await operationLog.recordResult(approved.id, { resultDigest: metadataDigest({ jobId: job.jobId, apiName: job.apiName, statusBefore: job.status, statusAfter: "cancelled" }), artifactRefs: [] }); } catch { /* the cancellation already happened; the approved record stays without a result */ }
+    (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke();
+    ok(res, { jobId: job.jobId, apiName: job.apiName, status: "cancelled", alreadyCancelled: false, audit: { requestId, id: approved.id, decision: approved.decision } });
+  }
   private async folder(located: Located, url: URL, res: ServerResponse): Promise<void> { const selected = referenceTargetOf(located.job); const folderPath = url.searchParams.get("path") ?? (selected.kind === "directory" ? selected.path : selected.path.slice(0, selected.path.lastIndexOf("/"))); if (!validFolderPath(folderPath)) { fail(res, 422, "folder-forbidden"); return; } try { const entries = await listFolderEntries(located.root, folderPath); const slash = folderPath.lastIndexOf("/"); ok(res, { folderPath, parentPath: slash > 0 ? folderPath.slice(0, slash) : null, entries: entries.filter(entry => entry.kind === "directory" || entry.supported === true), unsupportedCount: entries.filter(entry => entry.kind === "file" && entry.supported === false).length }); } catch { fail(res, 422, "folder-forbidden"); } }
   private async confirm(located: Located, body: Record<string, unknown>, res: ServerResponse, signal: AbortSignal): Promise<void> {
     if (!["awaiting-input", "scheduled"].includes(located.job.status)) { fail(res, 409, "revision-conflict"); return; }
@@ -450,7 +496,7 @@ export class ExplainRoutesService extends Service {
     const controller = new AbortController(); req.on("aborted", () => controller.abort()); const body = await readBody(req); if (body === null) { fail(res, 413, "input-too-large"); return; }
     if (action === "confirm") { await this.confirm(located, body, res, controller.signal); return; }
     if (action === "native-pick") { await this.nativePick(located, body, res, controller.signal); return; }
-    if (action === "cancel") { const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined; const cancelled = scheduler ? await scheduler.cancelJob(id) : await updateJobRecord(located.root, id, located.job.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false); if (!cancelled) fail(res, 409, "revision-conflict"); else ok(res, { jobId: id, status: "cancelled" }); return; }
+    if (action === "cancel") { await this.cancelJobWithAudit(located, res); return; }
     await this.retry(located, res, controller.signal);
   }
 }
