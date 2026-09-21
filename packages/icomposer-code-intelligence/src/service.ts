@@ -4,7 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { auditGraph, buildGraph, collectSources, fingerprintSources } from "./graph.ts";
 import { runExplainContext, runExplainDeterministic } from "./explain-runtime.ts";
-import { runFinalize, runPrepare, runPrepareBatch, runSource, type NativeExplainDeps, runPrepareTask } from "./explain-native.ts";
+import { runBlockedTargets, runFinalize, runPrepare, runPrepareBatch, runSource, type NativeExplainDeps, runPrepareTask } from "./explain-native.ts";
 import { computeGraphDigest } from "./explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
@@ -122,6 +122,7 @@ export class IciEngineService extends Service {
       explainPrepare: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainPrepare(input, options),
       explainPrepareBatch: (input: { readonly workspaceId: string; readonly queries: readonly string[]; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal) => self.explainPrepareBatch(input, options),
       explainPrepareTask: (input: { readonly workspaceId: string; readonly selector: ExplainTaskSelector; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal) => self.explainPrepareTask(input, options),
+      explainBlockedTargets: (input: { readonly workspaceId: string; readonly selector: ExplainTaskSelector }) => self.explainBlockedTargets(input),
       explainSource: (input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal) => self.explainSource(input, options),
       explainFinalize: (input: Parameters<IciEngineService["explainFinalize"]>[0], options?: BuildOptions | AbortSignal) => self.explainFinalize(input, options),
       explainDeterministic: (input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal) => self.explainDeterministic(input, options),
@@ -494,6 +495,8 @@ export class IciEngineService extends Service {
   }
   async explainPrepare(input: { readonly workspaceId: string; readonly query: string }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainPrepareResult>> { return runPrepare(this.nativeExplainDeps(), input, options); }
   async explainPrepareBatch(input: { readonly workspaceId: string; readonly queries: readonly string[]; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareBatchResult>> { return runPrepareBatch(this.nativeExplainDeps(), input, options); }
+  /** TASK-116: read-only legacy blockers of a selector, re-resolved against the current catalog/graph. */
+  async explainBlockedTargets(input: { readonly workspaceId: string; readonly selector: ExplainTaskSelector }): Promise<Result<{ readonly blockers: readonly import("./types.ts").BlockedExplainTarget[]; readonly memberConflicts: number; readonly targets: number; readonly unresolved: number; readonly root: string }>> { return runBlockedTargets(this.nativeExplainDeps(), input); }
   /** TASK-111: one task entry point — `query`/`queries`/`group`/`all` all resolve host-side into ONE task record. */
   async explainPrepareTask(input: { readonly workspaceId: string; readonly selector: ExplainTaskSelector; readonly maxConcurrent?: number }, options?: BuildOptions | AbortSignal): Promise<Result<ExplainPrepareTaskResult>> { return runPrepareTask(this.nativeExplainDeps(), input, options); }
   async explainSource(input: { readonly workspaceId: string; readonly prepareArtifactPath: string; readonly nodeIds: readonly string[]; readonly referencePaths: readonly string[] }, options?: BuildOptions | AbortSignal): Promise<Result<import("./types.ts").ExplainSourceResult>> { return runSource(this.nativeExplainDeps(), input, options); }

@@ -66,6 +66,23 @@ function pageParams(url: URL, size: number, total: number): { readonly index: nu
 }
 /** TASK-114: audit vocabulary and digest helper for the explicit blocker cancellation. */
 const CANCEL_OPERATION_KIND = "ici-explain-job-cancel";
+/** TASK-116: one audit record for one batch cancel, plus the bounded execution shape. */
+const CANCEL_BATCH_OPERATION_KIND = "ici-explain-jobs-cancel";
+const CANCEL_BATCH_CHUNK = 20;
+const CANCEL_BATCH_MAX_FAILURES = 20;
+interface BlockedTargetLike { readonly apiId: string; readonly apiName: string; readonly jobId: string; readonly status: string; readonly createdAt: string }
+interface BlockedTargetsLike { readonly blockers: readonly BlockedTargetLike[]; readonly memberConflicts: number; readonly targets: number; readonly unresolved: number; readonly root: string }
+interface EngineWithBlockers { explainBlockedTargets?(input: { workspaceId: string; selector: unknown }): Promise<{ ok: boolean; value?: BlockedTargetsLike; error?: { code?: string; message?: string } }> }
+function validSelectorShape(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  const keys = Object.keys(row).filter(key => ["kind", "query", "queries", "group"].includes(key));
+  if (row.kind === "api") return typeof row.query === "string" && row.query.trim().length > 0 && row.query.length <= 512 && keys.length === 2;
+  if (row.kind === "group") return typeof row.group === "string" && row.group.trim().length > 0 && row.group.length <= 512 && keys.length === 2;
+  if (row.kind === "all") return keys.length === 1;
+  if (row.kind === "queries") return Array.isArray(row.queries) && row.queries.length >= 1 && (row.queries as unknown[]).every(item => typeof item === "string" && item.trim().length > 0 && item.length <= 512) && keys.length === 2;
+  return false;
+}
 interface OperationLogLike {
   append(input: { requestId: string; kind: string; paramsDigest: string; artifactRefs: readonly string[]; createdAt?: string }): Promise<{ id: string }>;
   list(filter?: { requestId?: string; kind?: string }): readonly { id: string; decision: string; resultDigest?: string }[];
@@ -377,6 +394,71 @@ export class ExplainRoutesService extends Service {
     try { await updateJobRecord(root, replacementId, 1, { provider, model, docs: previous.docs, referenceTarget: target, notBefore, status: "scheduled" }); } catch { /* stays awaiting-input: the card asks for a plan again */ }
   }
   /**
+   * TASK-116: cancel every LEGACY blocker of one selector in a single request, in bounded
+   * chunks, with exactly one audit record. The Host re-resolves the selector against the
+   * current catalog/graph and reports that recomputed scope honestly (targets/unresolved),
+   * so a changed workspace never gets a claim that it equals the original task's list.
+   * Members of other tasks are counted, never cancelled. The audit is fail-closed; a
+   * per-job failure during execution is reported and never rolls back the successes.
+   */
+  private async cancelBlockedBatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== "POST" || req.headers["x-workbench-action"] !== "1") { response(res, 405, { ok: false, error: { code: "method-not-allowed", message: "method-not-allowed" } }); return; }
+    if (typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "invalid-input"); return; }
+    const body = await readBody(req);
+    if (body === null) { fail(res, 413, "input-too-large"); return; }
+    if (!hasOnly(body, ["workspace_id", "selector"])) { fail(res, 422, "invalid-input"); return; }
+    const workspaceId = typeof body.workspace_id === "string" && body.workspace_id.length > 0 && body.workspace_id.length <= 256 ? body.workspace_id : "";
+    if (workspaceId === "" || !validSelectorShape(body.selector)) { fail(res, 422, "invalid-input"); return; }
+    const engine = this.ctx.get("iciEngine") as EngineWithBlockers | undefined;
+    if (engine?.explainBlockedTargets === undefined) { fail(res, 500, "storage-error"); return; }
+    const listed = await engine.explainBlockedTargets({ workspaceId, selector: body.selector });
+    if (!listed.ok || listed.value === undefined) { const code = typeof listed.error?.code === "string" ? listed.error.code : "storage-error"; fail(res, statusCode(code), code); return; }
+    const scope = listed.value;
+    if (scope.blockers.length === 0) { response(res, 422, { ok: false, error: { code: "no-targets", message: "no legacy blocking job matches this selector now" }, result: { requested: scope.targets, memberConflicts: scope.memberConflicts, unresolved: scope.unresolved } }); return; }
+    const operationLog = this.ctx.get("operationLog" as never) as unknown as OperationLogLike | undefined;
+    if (operationLog === undefined) { fail(res, 500, "storage-error"); return; }
+    const jobIds = scope.blockers.map(entry => entry.jobId).sort();
+    const requestId = `ici-explain-jobs-cancel:${metadataDigest(jobIds).slice(0, 16)}`;
+    const paramsDigest = metadataDigest({ selector: body.selector, jobIdsDigest: metadataDigest(jobIds), count: jobIds.length });
+    let approved: { readonly id: string; readonly decision: string } | undefined = operationLog.list({ kind: CANCEL_BATCH_OPERATION_KIND, requestId }).find(entry => entry.decision === "approved" && entry.resultDigest === undefined);
+    try {
+      if (approved === undefined) {
+        const appended = await operationLog.append({ requestId, kind: CANCEL_BATCH_OPERATION_KIND, paramsDigest, artifactRefs: [], createdAt: new Date().toISOString() });
+        approved = await operationLog.decide(appended.id, true, "workbench-card");
+      }
+    } catch { fail(res, 500, "storage-error"); return; }
+    const scheduler = this.ctx.get("iciExplainScheduler") as Scheduler | undefined;
+    const cancelled: string[] = []; const already: string[] = []; const failed: Array<{ jobId: string; apiName: string; code: string }> = [];
+    let chunks = 0;
+    for (let offset = 0; offset < scope.blockers.length; offset += CANCEL_BATCH_CHUNK) {
+      chunks += 1;
+      for (const entry of scope.blockers.slice(offset, offset + CANCEL_BATCH_CHUNK)) {
+        const before = await readJobRecord(scope.root, entry.jobId);
+        const done = scheduler ? await scheduler.cancelJob(entry.jobId).catch(() => false) : await updateJobRecord(scope.root, entry.jobId, before?.revision ?? 1, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false);
+        const after = await readJobRecord(scope.root, entry.jobId);
+        if (after?.status === "cancelled") { if (before?.status === "cancelled") already.push(entry.jobId); else cancelled.push(entry.jobId); continue; }
+        if (!done && after === null) { failed.push({ jobId: entry.jobId, apiName: entry.apiName, code: "job-missing" }); continue; }
+        failed.push({ jobId: entry.jobId, apiName: entry.apiName, code: "revision-conflict" });
+      }
+      if (offset + CANCEL_BATCH_CHUNK < scope.blockers.length) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    const resultDigest = metadataDigest({ cancelled: metadataDigest(cancelled), already: metadataDigest(already), failed: metadataDigest(failed.map(entry => [entry.jobId, entry.code])), counts: [cancelled.length, already.length, failed.length] });
+    try { await operationLog.recordResult(approved.id, { resultDigest, artifactRefs: [] }); } catch { /* the cancellations already happened; the approved record stays without a result */ }
+    (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke();
+    ok(res, {
+      requested: scope.blockers.length,
+      cancelled: cancelled.length,
+      alreadyCancelled: already.length,
+      failed: failed.slice(0, CANCEL_BATCH_MAX_FAILURES),
+      ...(failed.length > CANCEL_BATCH_MAX_FAILURES ? { failedMore: failed.length - CANCEL_BATCH_MAX_FAILURES } : {}),
+      chunks,
+      recomputedTargets: scope.targets,
+      unresolved: scope.unresolved,
+      memberConflicts: scope.memberConflicts,
+      audit: { requestId, id: approved.id, decision: approved.decision },
+    });
+  }
+  /**
    * TASK-114: cancel exactly ONE job (typically a legacy card that is still waiting) and
    * record the action in the operation log. The audit is fail-closed: if the action cannot
    * be recorded as approved, no cancellation happens. Only metadata digests are stored and
@@ -471,6 +553,7 @@ export class ExplainRoutesService extends Service {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost"); const suffix = url.pathname.slice(EXPLAIN_ROUTES_PREFIX.length).replace(/^\//, ""); const parts = suffix.split("/").filter(Boolean);
     if (parts.length === 1 && parts[0] === "settings") { await this.settings(req, res); return; }
+    if (parts.length === 1 && parts[0] === "blocked-cancel") { await this.cancelBlockedBatch(req, res); return; }
     const isBatch = parts[0] === "batches"; const isJobScope = parts[0] === "jobs"; const id = isBatch || isJobScope ? parts[1] : parts[0]; const action = isBatch || isJobScope ? parts[2] : parts[1];
     if (!id || !action || !/^[a-f0-9]{16}$/.test(id)) { fail(res, 404, "job-missing"); return; }
     if (isBatch) {

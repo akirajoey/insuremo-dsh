@@ -320,7 +320,13 @@ function bumpBatchStatusVersion(root: string, batchId: string | undefined): void
 /** Current version of one task's member statuses (0 when this process has seen no write yet). */
 export function batchStatusVersion(root: string, batchId: string): number { return batchStatusVersions.get(`${root}\0${batchId}`) ?? 0; }
 /** TASK-111: remove a job record this task created (rollback of a failed task creation); never used on reused records. */
-export async function removeJobRecord(root: string, jobId: string, batchId?: string): Promise<void> { bumpBatchStatusVersion(root, batchId); try { await rm(jobRecordPath(root, jobId), { force: true }); } catch { /* best-effort: the record stays inert without its task */ } }
+/**
+ * TASK-116 FIX-3: drop a job record this call created AND the now-empty job directory, so a
+ * rolled-back task leaves no residue in `.metadata/...(jobs/<id>/)` for an operator to trip
+ * over. Deleting the owned directory is chosen over teaching `listJobs` to ignore empty
+ * directories: the latter would leave unreadable leftovers on disk forever.
+ */
+export async function removeJobRecord(root: string, jobId: string, batchId?: string): Promise<void> { bumpBatchStatusVersion(root, batchId); try { await rm(jobRecordPath(root, jobId), { force: true }); await rm(join(explainBaseDir(root), "jobs", jobId), { recursive: true, force: true }); } catch { /* best-effort: the record stays inert without its task */ } }
 /**
  * TASK-111: mark active jobs whose task record is gone as cancelled, so a partially
  * written task never stays claimable. Ownership is decided by `host` (the process that

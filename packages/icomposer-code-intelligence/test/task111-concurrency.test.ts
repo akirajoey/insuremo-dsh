@@ -174,6 +174,12 @@ test("TASK-111 two tasks keep their own ceilings, and the Host ceiling still dom
     await waitAllSettled(taskB.root, taskB.jobs);
     fx.stopPump();
     assert.ok(fx.adapter.maxActive <= 4, "the Host ceiling of 4 was never exceeded while both tasks ran");
+    // TASK-116 FIX-1: releasing happens in each run's finaliser, which can lag the moment the
+    // members settle; wait for the release condition (same shape as the single-task case)
+    // and re-check the terminal state afterwards instead of asserting on read timing.
+    await waitFor(() => fx.scheduler.status().inFlight === 0, "the Host released every reservation");
+    await waitFor(() => fx.scheduler.taskInFlightCount(taskA.root, taskA.batchId) === 0, "task A released every reservation");
+    await waitFor(() => fx.scheduler.taskInFlightCount(taskB.root, taskB.batchId) === 0, "task B released every reservation");
     assert.equal(fx.scheduler.status().inFlight, 0);
     assert.equal(fx.scheduler.taskInFlightCount(taskA.root, taskA.batchId), 0);
     assert.equal(fx.scheduler.taskInFlightCount(taskB.root, taskB.batchId), 0);

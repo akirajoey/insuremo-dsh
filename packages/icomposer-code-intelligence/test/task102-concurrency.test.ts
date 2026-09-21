@@ -50,6 +50,16 @@ class BarrierAdapter extends LlmAdapter {
   releaseAll(): void { for (const gate of this.gates.splice(0)) gate(); }
 }
 
+/**
+ * TASK-116 FIX-A: a gate-released promise that never settles must fail in bounded time
+ * instead of hanging the file; a normal settle is returned unchanged.
+ */
+async function settle<T>(promise: Promise<T>, label: string, timeoutMs = 5_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`timeout waiting for ${label}`)), timeoutMs); })]);
+  } finally { if (timer !== undefined) clearTimeout(timer); }
+}
 async function waitFor(predicate: () => boolean, label: string, timeoutMs = 20_000): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
@@ -359,7 +369,7 @@ test("TASK-102 P1-01: a busy first root never starves an idle second root", asyn
     // still run on the idle second root (the pre-fix pin wedged the fill loop).
     await waitFor(() => fx.adapter.gates.length === 2, "both jobs start on the idle second root", 5_000);
     assert.equal(fx.adapter.active, 2);
-    release(); await maintenance;
+    release(); await settle(maintenance, "the maintenance gate to return");
     fx.pump(); await waitAllFinal(workspace.root, workspace.jobs); fx.stopPump();
     assert.deepEqual((await readStatuses(fx)).filter(status => status === "final").length, 2);
   } finally {
@@ -381,7 +391,7 @@ test("TASK-102 P1-01: releasing one busy root resumes the queue without an expli
     await new Promise(resolve => setTimeout(resolve, 400));
     assert.equal(fx.adapter.gates.length, 0, "no job starts while every user root is busy");
     assert.deepEqual(fx.scheduler.status(), { maxConcurrent: 4, inFlight: 0 });
-    release(); await maintenance;
+    release(); await settle(maintenance, "the maintenance gate to return");
     // No manual poke: the one-shot idle wake must resume the queue.
     await waitFor(() => fx.adapter.gates.length === 1, "queue resumes from the idle wake alone", 5_000);
     fx.pump(); await waitAllFinal(workspace.root, workspace.jobs); fx.stopPump();

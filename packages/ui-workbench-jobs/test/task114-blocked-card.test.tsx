@@ -113,3 +113,67 @@ describe("TASK-114 member conflicts are never cancellable from this card", () =>
     } finally { view.unmount(); }
   });
 });
+
+
+describe("TASK-116 batch cancel of legacy blockers", () => {
+  beforeEach(() => { vi.stubGlobal("localStorage", { clear: () => undefined, getItem: () => null, setItem: () => undefined, removeItem: () => undefined, key: () => null, length: 0 }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const listed = Array.from({ length: 5 }, (_, index) => `blocked=job-active api=Api${index} old_job=${String(index + 1).repeat(16).slice(0, 16)} status=awaiting-input created=2026-09-18T02:55:23.513Z`);
+  const batchBlock = (argsRaw: string) => ({
+    kind: "tool-result" as const,
+    call: { argsRaw },
+    content: [{ type: "text", text: [
+      "icomposer tools error: job-active — job-active: 5 cards (…)",
+      "The blocking card is an earlier explanation task that is still waiting: cancel it from this card, then run the task again. Do not just repeat the call.",
+      ...listed,
+      "blocked_more=58",
+    ].join("\n") }],
+  });
+
+  it("offers one batch action for the whole 63-card scope and confirms the exact total", async () => {
+    const t = (key: string) => key;
+    const calls: Array<{ url: string; body?: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), body: String(init?.body ?? "") });
+      if (String(input).includes("/blocked-cancel")) return new Response(JSON.stringify({ ok: true, result: { requested: 63, cancelled: 62, alreadyCancelled: 0, failed: [{ jobId: "0000000000000009", apiName: "Api8", code: "revision-conflict" }], failedMore: 0, chunks: 4, recomputedTargets: 63, unresolved: 0, memberConflicts: 0, audit: { requestId: "ici-explain-jobs-cancel:abcdef0123456789", id: "op-1", decision: "approved" } } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(React.createElement(IciExplainToolview, { block: batchBlock(JSON.stringify({ workspace_id: "ws", all: true })) as never, t: t as never }));
+    try {
+      const batch = view.getByTestId("ici-explain-cancel-all");
+      expect(batch.textContent).toContain("63");
+      // One explicit confirmation naming the legacy scope and the exact total.
+      fireEvent.click(batch);
+      const dialog = view.getByTestId("ici-explain-cancel-all-confirm");
+      expect(dialog.textContent).toContain(t("explain.blockedBatchConfirmTitle").replace("{}", "63"));
+      expect(calls.length).toBe(0, "opening the confirmation performs no request");
+      fireEvent.click(view.getByRole("button", { name: t("explain.blockedBatchConfirmYes") }));
+      await vi.waitFor(() => expect(calls.length).toBe(1));
+      expect(calls[0]!.url).toBe("/api/icomposer-workbench/ici/explain/blocked-cancel");
+      expect(JSON.parse(calls[0]!.body!)).toEqual({ workspace_id: "ws", selector: { kind: "all" } });
+      // Honest partial result: counts, the failing job, and a way to retry the remainder.
+      const result = await view.findByTestId("ici-explain-batch-result");
+      expect(result.textContent).toContain("62");
+      expect(result.textContent).toContain("0000000000000009");
+      expect(result.textContent).toContain("revision-conflict");
+      fireEvent.click(view.getByRole("button", { name: t("explain.blockedBatchRetryRemaining") }));
+      await vi.waitFor(() => expect(calls.length).toBe(2), { timeout: 2000 });
+      expect(calls[1]!.url).toBe("/api/icomposer-workbench/ici/explain/blocked-cancel");
+      await new Promise(resolve => setTimeout(resolve, 80));
+      expect(calls.length).toBe(2, "the task itself is never re-issued automatically");
+    } finally { view.unmount(); }
+  });
+
+  it("falls back to per-card cancellation when the call carries no selector", () => {
+    const t = (key: string) => key;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 })));
+    const view = render(React.createElement(IciExplainToolview, { block: batchBlock(JSON.stringify({ workspace_id: "ws" })) as never, t: t as never }));
+    try {
+      expect(view.queryByTestId("ici-explain-cancel-all")).toBeNull();
+      expect(view.getByText(t("explain.blockedNoSelector"))).toBeTruthy();
+      expect(view.getAllByRole("button", { name: t("explain.blockedCancelAction") })).toHaveLength(5);
+    } finally { view.unmount(); }
+  });
+});

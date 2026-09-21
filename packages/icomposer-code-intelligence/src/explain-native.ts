@@ -183,6 +183,36 @@ export async function resolveTaskTargets(deps: NativeExplainDeps, workspaceId: s
 export function boundedCandidates(values: readonly string[], limit = 10): string { return values.length <= limit ? values.join(", ") : `${values.slice(0, limit).join(", ")} … (+${values.length - limit} more)` }
 
 /**
+ * TASK-116: read-only resolution of the legacy blockers a batch cancel would target.
+ * The host re-resolves the selector against the CURRENT catalog/graph, so the answer is
+ * what exists now — never a claim that it equals the original task's target list. Nothing
+ * is written here: members of other tasks are counted, never offered as cancellable.
+ */
+export async function runBlockedTargets(deps: NativeExplainDeps, input: { workspaceId: string; selector: ExplainTaskSelector }): Promise<Result<{ readonly blockers: readonly BlockedExplainTarget[]; readonly memberConflicts: number; readonly targets: number; readonly unresolved: number; readonly root: string }>> {
+  if (deps.disposed()) return err("service-disposed");
+  if (typeof input?.workspaceId !== "string" || !input.workspaceId) return err("invalid-workspace-id", "workspace id is invalid");
+  const resolved = await resolveTaskTargets(deps, input.workspaceId, input.selector);
+  if (!resolved.ok) return err(resolved.code, resolved.message);
+  const blockers: BlockedExplainTarget[] = [];
+  const seenJobs = new Set<string>();
+  let memberConflicts = 0;
+  let unresolved = 0;
+  let root = "";
+  for (const name of resolved.names) {
+    const base = await deps.loadBase(input.workspaceId, name);
+    if (!base.ok) { unresolved += 1; continue; }
+    if (root === "") root = base.value.canonicalPath;
+    const existing = await findActiveJobByApiId(base.value.canonicalPath, input.workspaceId, base.value.start.id);
+    if (existing === null) continue;
+    if (existing.batchId !== undefined) { memberConflicts += 1; continue; }
+    if (seenJobs.has(existing.jobId)) continue;
+    seenJobs.add(existing.jobId);
+    blockers.push(blockedTargetOf(existing));
+  }
+  return { ok: true, value: { blockers, memberConflicts, targets: resolved.names.length, unresolved, root } };
+}
+
+/**
  * TASK-111: the single task entry point. `query`, `queries`, `group`, and `all`
  * all produce ONE task record with the complete target set, and the task-level
  * concurrency travels with it. Legacy `explainPrepareBatch`/`explainPrepare`

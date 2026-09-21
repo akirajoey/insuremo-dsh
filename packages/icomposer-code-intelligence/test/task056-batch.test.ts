@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -70,6 +70,9 @@ test("TASK-111 batch prepare leaves no undisclosed partial task when a later wri
     // The task card never existed, so the records this call created are removed again
     // (only records it owned; a reused record is never touched).
     assert.equal((await listJobs(fx.root)).length, 0);
+    // TASK-116 FIX-3: no empty job directory may be left behind either.
+    const leftover = await readdir(join(fx.root, ".metadata/icomposer/ici/explain/jobs")).catch(() => [] as string[]);
+    assert.deepEqual(leftover, [], `rolled-back task left residue: ${leftover.join(",")}`);
   } finally { setExplainWriteFailpoint(undefined); await fx.cleanup(); }
 });
 
