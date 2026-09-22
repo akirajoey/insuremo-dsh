@@ -142,6 +142,7 @@ export const zh = {
   "explain.blockedBatchRecomputed": "按当前目录重算：目标 {} 个",
   "explain.blockedBatchUnresolved": "其中 {} 个已无法解析",
   "explain.blockedNoSelector": "本卡无法确定完整目标集，只能逐个取消。",
+  "explain.useFullApiName": "目标解析需要完整 API 名（不做子串猜测）：请用候选列表中的完整名称重新发起。",
 } as const satisfies Record<string, string>;
 
 export type WorkbenchJobLocaleKey = keyof typeof zh;
@@ -289,4 +290,5 @@ export const en = {
   "explain.blockedBatchRecomputed": "Re-resolved against the current catalog: {} target(s)",
   "explain.blockedBatchUnresolved": "{} of them no longer resolve",
   "explain.blockedNoSelector": "This card cannot determine the full target set, so only per-card cancellation is available.",
+  "explain.useFullApiName": "Target resolution needs the exact API name (no substring guessing): pick one of the candidates and run the task again.",
 } as const satisfies Record<WorkbenchJobLocaleKey, string>;

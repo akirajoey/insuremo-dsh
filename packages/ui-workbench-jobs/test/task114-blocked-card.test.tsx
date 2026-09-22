@@ -177,3 +177,17 @@ describe("TASK-116 batch cancel of legacy blockers", () => {
     } finally { view.unmount(); }
   });
 });
+
+
+describe("TASK-119 ambiguous target resolution hint", () => {
+  it("asks for the exact API name instead of the generic retry hint", () => {
+    const t = (key: string) => key;
+    const block = { kind: "tool-result" as const, call: null, content: [{ type: "text", text: "icomposer tools error: ambiguous-target — no exact api name matched (a substring is not enough); use the full API name: AddRider; candidates: api:AddRiderAPI_NONILP, api:QuoteAddRiderAPI_NONILP" }] };
+    const view = render(React.createElement(IciExplainToolview, { block: block as never, t: t as never }));
+    try {
+      expect(view.getByTestId("ici-explain-prepare-failed").textContent).toContain("ambiguous-target");
+      expect(view.getByTestId("ici-explain-full-name-hint").textContent).toContain(t("explain.useFullApiName"));
+      expect(view.queryByText(t("explain.prepareFailedHint"))).toBeNull();
+    } finally { view.unmount(); }
+  });
+});

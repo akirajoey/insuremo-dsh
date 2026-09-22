@@ -1,5 +1,5 @@
 import type { IciEdge, IciNode, QueryApiTreeNode } from "./types.ts";
-import { resolveQueryNodes } from "./query.ts";
+import { resolveExactNames, resolveSubstringCandidates } from "./query.ts";
 import { apiEmbeddingText, downstreamNodeNames } from "./search-core.ts";
 
 export interface GraphViewLike {
@@ -82,11 +82,20 @@ export function collectReachable(root: QueryApiTreeNode | undefined, into: Set<s
   for (const child of root.children ?? []) collectReachable(child, into);
 }
 
+/**
+ * TASK-119: an api target resolves by EXACT name only (case-sensitive id/name first, then a
+ * case-insensitive name). A query that is merely a substring of an api name — the reported
+ * `AddRiderAPI_NONILP` vs `QuoteAddRiderAPI_NONILP` pair — is never bound to a longer name,
+ * and a comma inside a name is part of that name (no OR list; `ici_query` keeps the fuzzy
+ * multi-part search). Candidates are still reported so the caller can name the exact API.
+ */
 export function resolveSingleStart(nodes: Iterable<IciNode>, query: string): { ok: true; node: IciNode } | { ok: false; reason: "not-found" | "ambiguous"; candidates: string[] } {
-  const matches = resolveQueryNodes(nodes, query, "api");
-  if (matches.length === 0) return { ok: false, reason: "not-found", candidates: [] };
-  if (matches.length > 1) return { ok: false, reason: "ambiguous", candidates: matches.slice(0, 20).map(n => n.id) };
-  return { ok: true, node: matches[0] };
+  const exact = resolveExactNames(nodes, query, "api");
+  if (exact.length === 1) return { ok: true, node: exact[0]! };
+  if (exact.length > 1) return { ok: false, reason: "ambiguous", candidates: exact.slice(0, 20).map(n => n.id) };
+  const candidates = resolveSubstringCandidates(nodes, query, "api").slice(0, 20).map(n => n.id);
+  if (candidates.length === 0) return { ok: false, reason: "not-found", candidates: [] };
+  return { ok: false, reason: "ambiguous", candidates };
 }
 
 export function countTreeNodes(nodes: readonly QueryApiTreeNode[]): number {

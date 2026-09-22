@@ -461,8 +461,11 @@ export class IciEngineService extends Service {
     const { graph, canonicalPath, stale } = ctxLoad;
     const start = resolveSingleStart(graph.nodes.values(), query);
     if (!start.ok) {
-      const label = start.reason === "ambiguous" ? "ambiguous api match" : "no api matched";
-      return { ok: false, result: err("no-match", `${label}: ${query}; candidates: ${start.candidates.join(", ") || "none"}`) };
+      // TASK-119: an api target is resolved by exact name; a missing/ambiguous one is
+      // reported with the candidate list (and never abbreviated into a longer name).
+      const label = start.reason === "ambiguous" ? "no exact api name matched (a substring is not enough); use the full API name" : "no api matched";
+      const code = start.reason === "ambiguous" ? "ambiguous-target" : "no-match";
+      return { ok: false, result: err(code, `${label}: ${query}; candidates: ${start.candidates.join(", ") || "none"}`) };
     }
     return { ok: true, graph, canonicalPath, start: start.node, ...(stale ? { stale: true } : {}) };
   }

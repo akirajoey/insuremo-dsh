@@ -369,7 +369,9 @@ export class IciExplainToolview extends Component<Props, CardState> {
       // the generic "run it again" hint would be misleading (it would fail identically).
       const memberConflicts = memberConflictsOf(this.props.block);
       if (blockers.length > 0 || memberConflicts > 0 || failure === "job-active") return this.renderBlocked(t, failure, blockers, blockedMoreOf(this.props.block), memberConflicts);
-      return <Card title={t("explain.title")} status="failed" t={t}><p className={css.error} role="alert" data-testid="ici-explain-prepare-failed">{t("explain.prepareFailed")} · {t("explain.errorCode")} {failure}</p><p className={css.hint}>{t("explain.prepareFailedHint")}</p></Card>;
+      // TASK-119: an ambiguous target resolution asks for the exact API name instead of the
+      // generic retry hint (the same call with an abbreviated name would fail again).
+      return <Card title={t("explain.title")} status="failed" t={t}><p className={css.error} role="alert" data-testid="ici-explain-prepare-failed">{t("explain.prepareFailed")} · {t("explain.errorCode")} {failure}</p><p className={css.hint} data-testid={failure === "ambiguous-target" ? "ici-explain-full-name-hint" : undefined}>{failure === "ambiguous-target" ? t("explain.useFullApiName") : t("explain.prepareFailedHint")}</p></Card>;
     }
     if (this.state.phase !== "live") return this.renderDegraded(t, this.state.phase);
     if (this.state.batchId) return this.renderBatch(t);

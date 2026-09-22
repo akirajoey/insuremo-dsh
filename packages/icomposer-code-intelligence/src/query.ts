@@ -56,13 +56,54 @@ export function resolveQueryNodes(nodes: Iterable<IciNode>, query: string, kind?
   return [...matches.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** Rust resolve_focus_id: focus must resolve to exactly one function node. */
+/**
+ * TASK-119: exact-first target resolution. Unlike `resolveQueryNodes` (the fuzzy SEARCH
+ * surface, which keeps its substring + comma semantics), this matches a target by its
+ * identifier only: an exact id, then an exact (case-insensitive) name, then an exact id
+ * without the `kind:` prefix. It never abbreviates and never splits on commas.
+ */
+export function resolveExactNames(nodes: Iterable<IciNode>, query: string, kind?: string): IciNode[] {
+  const wanted = query.trim();
+  if (wanted === "") return [];
+  const wantedLower = wanted.toLowerCase();
+  const prefixed = kind === undefined ? "" : `${kind}:`;
+  const exactCase: IciNode[] = [];
+  const exactLower: IciNode[] = [];
+  for (const node of nodes) {
+    if (kind !== undefined && node.kind !== kind) continue;
+    const idWithoutKind = prefixed !== "" && node.id.startsWith(prefixed) ? node.id.slice(prefixed.length) : node.id;
+    if (node.name === wanted || node.id === wanted || idWithoutKind === wanted) { exactCase.push(node); continue; }
+    if (node.name.toLowerCase() === wantedLower || node.id.toLowerCase() === wantedLower || idWithoutKind.toLowerCase() === wantedLower) exactLower.push(node);
+  }
+  const chosen = exactCase.length > 0 ? exactCase : exactLower;
+  return [...chosen].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** TASK-119: substring matches used ONLY to build the candidate list of a failed target resolution. */
+export function resolveSubstringCandidates(nodes: Iterable<IciNode>, query: string, kind?: string): IciNode[] {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return [];
+  const matches = new Map<string, IciNode>();
+  for (const node of nodes) {
+    if (kind !== undefined && node.kind !== kind) continue;
+    if (node.id.toLowerCase().includes(wanted) || node.name.toLowerCase().includes(wanted)) matches.set(node.id, node);
+  }
+  return [...matches.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * Rust resolve_focus_id: focus must resolve to exactly one function node.
+ * TASK-119: exact-first, like `resolveSingleStart` — a focus that is only a substring of a
+ * function name is reported with candidates instead of being bound to the longer name.
+ */
 export function resolveFocusId(nodes: Iterable<IciNode>, focus: string | undefined): { ok: true; focusId?: string } | { ok: false; reason: "not-found" | "ambiguous"; candidates: string[] } {
   if (focus === undefined || focus === "") return { ok: true };
-  const matches = resolveQueryNodes(nodes, focus, "function");
-  if (matches.length === 0) return { ok: false, reason: "not-found", candidates: candidatesOf(matches) };
-  if (matches.length > 1) return { ok: false, reason: "ambiguous", candidates: matches.slice(0, MAX_CANDIDATES).map(n => n.id) };
-  return { ok: true, focusId: matches[0].id };
+  const exact = resolveExactNames(nodes, focus, "function");
+  if (exact.length === 1) return { ok: true, focusId: exact[0]!.id };
+  if (exact.length > 1) return { ok: false, reason: "ambiguous", candidates: exact.slice(0, MAX_CANDIDATES).map(n => n.id) };
+  const candidates = resolveSubstringCandidates(nodes, focus, "function").slice(0, MAX_CANDIDATES).map(n => n.id);
+  if (candidates.length === 0) return { ok: false, reason: "not-found", candidates: [] };
+  return { ok: false, reason: "ambiguous", candidates };
 }
 
 export function candidatesOf(nodes: Iterable<IciNode>): string[] {
