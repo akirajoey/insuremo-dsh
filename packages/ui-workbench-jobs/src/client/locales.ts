@@ -143,6 +143,16 @@ export const zh = {
   "explain.blockedBatchUnresolved": "其中 {} 个已无法解析",
   "explain.blockedNoSelector": "本卡无法确定完整目标集，只能逐个取消。",
   "explain.useFullApiName": "目标解析需要完整 API 名（不做子串猜测）：请用候选列表中的完整名称重新发起。",
+  "explain.errorStaleSnapshot": "图或准备产物已过期/无效：请重新构建 ICI 图，然后重新发起本任务。",
+  "explain.errorPrepareInvalid": "准备产物无效或不可读：请重新发起本任务。",
+  "explain.errorSourceChanged": "准备后源码或参考资料发生变化：请重新发起本任务。",
+  "explain.errorRevisionConflict": "任务已被其它操作修改：请刷新卡片后重试。",
+  "explain.errorJobMissing": "任务记录不存在：请刷新卡片或重新发起本任务。",
+  "explain.errorStorage": "宿主存储异常：请重试。",
+  "explain.errorNetwork": "无法连接宿主服务：请确认服务在线后重试。",
+  "explain.errorNoTargets": "目标未解析出可执行任务：请用完整 API 名重新发起。",
+  "explain.errorInvalidInput": "提交内容不符合要求：请检查模型/参考范围/时间后重试。",
+  "explain.errorGeneric": "操作失败",
 } as const satisfies Record<string, string>;
 
 export type WorkbenchJobLocaleKey = keyof typeof zh;
@@ -291,4 +301,14 @@ export const en = {
   "explain.blockedBatchUnresolved": "{} of them no longer resolve",
   "explain.blockedNoSelector": "This card cannot determine the full target set, so only per-card cancellation is available.",
   "explain.useFullApiName": "Target resolution needs the exact API name (no substring guessing): pick one of the candidates and run the task again.",
+  "explain.errorStaleSnapshot": "The graph or the prepared artifacts are stale/invalid: rebuild the ICI graph, then run this task again.",
+  "explain.errorPrepareInvalid": "The prepared artifact is invalid or unreadable: run this task again.",
+  "explain.errorSourceChanged": "Sources or reference material changed after preparation: run this task again.",
+  "explain.errorRevisionConflict": "This task was changed by another action: refresh the card and retry.",
+  "explain.errorJobMissing": "The task record no longer exists: refresh the card or run the task again.",
+  "explain.errorStorage": "Host storage error: please retry.",
+  "explain.errorNetwork": "Cannot reach the Host service: make sure it is running, then retry.",
+  "explain.errorNoTargets": "No runnable target was resolved: use the exact API name and run again.",
+  "explain.errorInvalidInput": "The submission is not acceptable: check model, reference scope, and time, then retry.",
+  "explain.errorGeneric": "The action failed",
 } as const satisfies Record<WorkbenchJobLocaleKey, string>;

@@ -191,3 +191,67 @@ describe("TASK-119 ambiguous target resolution hint", () => {
     } finally { view.unmount(); }
   });
 });
+
+
+describe("TASK-121 real action errors surface their code", () => {
+  beforeEach(() => { vi.stubGlobal("localStorage", { clear: () => undefined, getItem: () => null, setItem: () => undefined, removeItem: () => undefined, key: () => null, length: 0 }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const batchId = "aaaaaaaaaaaaaaaa";
+  const card = (confirmCode: string) => ({
+    kind: "tool-result" as const,
+    call: { argsRaw: JSON.stringify({ workspace_id: "ws", queries: ["Api0"] }) },
+    content: [{ type: "text", text: `batch=${batchId} targets=1 unique=1 concurrency=4` }],
+  });
+  const status = {
+    ok: true,
+    result: {
+      batch: { batchId, workspaceId: "ws", jobCount: 1, maxConcurrent: 4, requestedCount: 1, selector: { kind: "queries" }, createdAt: "2026-09-22T00:00:00.000Z", updatedAt: "2026-09-22T00:00:00.000Z" },
+      jobs: [{ jobId: "0000000000000001", apiName: "Api0", status: "awaiting-input", promptBaseBytes: 1024, sourceBytes: 512 }],
+      providers: [{ id: "mvp", models: [{ id: "mvp-model", name: "MVP model" }] }],
+      page: { index: 1, size: 5, totalPages: 1 },
+      summary: { promptBaseBytes: 1024, sourceBytes: 512, jobCount: 1, countsByStatus: { "awaiting-input": 1 } },
+    },
+  };
+  const mount = (confirmCode: string) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/confirm")
+      ? new Response(JSON.stringify({ ok: false, error: { code: confirmCode, message: confirmCode } }), { status: 409 })
+      : new Response(JSON.stringify(status), { status: 200 })));
+    return render(React.createElement(IciExplainToolview, { block: card(confirmCode) as never, t: ((key: string) => key) as never }));
+  };
+
+  it("shows the stale-snapshot copy with its raw code, never the picker wording", async () => {
+    const view = mount("stale-snapshot");
+    try {
+      await vi.waitFor(() => expect(view.queryByRole("button", { name: "explain.start" })).not.toBeNull());
+      fireEvent.click(view.getByRole("button", { name: "explain.start" }));
+      const alert = await view.findByTestId("ici-explain-action-error");
+      expect(alert.textContent).toContain("explain.errorStaleSnapshot");
+      expect(alert.textContent).toContain("code=stale-snapshot");
+      expect(alert.textContent).not.toContain("explain.pickerFailed");
+    } finally { view.unmount(); }
+  });
+
+  it("keeps the picker wording for genuine picker failures and echoes unknown codes", async () => {
+    const picker = mount("picker-failed");
+    try {
+      await vi.waitFor(() => expect(picker.queryByRole("button", { name: "explain.chooseFile" })).not.toBeNull());
+      fireEvent.click(picker.getByRole("button", { name: "explain.chooseFile" }));
+      const alert = await picker.findByTestId("ici-explain-action-error");
+      expect(alert.textContent).toContain("explain.pickerFailed");
+      expect(alert.textContent).toContain("code=picker-failed");
+    } finally { picker.unmount(); }
+  });
+
+  it("renders an unknown code as a generic failure that names the code", async () => {
+    const view = mount("weird-code");
+    try {
+      await vi.waitFor(() => expect(view.queryByRole("button", { name: "explain.start" })).not.toBeNull());
+      fireEvent.click(view.getByRole("button", { name: "explain.start" }));
+      const alert = await view.findByTestId("ici-explain-action-error");
+      expect(alert.textContent).toContain("explain.errorGeneric");
+      expect(alert.textContent).toContain("code=weird-code");
+      expect(alert.textContent).not.toContain("explain.pickerFailed");
+    } finally { view.unmount(); }
+  });
+});

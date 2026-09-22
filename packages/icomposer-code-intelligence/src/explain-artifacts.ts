@@ -106,6 +106,23 @@ function chain(graph: LoadedGraph, start: IciNode): ExplainPrepareArtifact["call
       if (!item.path.includes(edge.to)) queue.push({ id: edge.to, path: [...item.path, edge.to], depth: item.depth + 1 }); else paths.push([...item.path, edge.to]);
     }
   }
+  // TASK-121 (B-lite): the traversal records a node before its edges, so an exhausted edge
+  // budget used to leave `directCalls` without their CALLS edges. Spend whatever budget is
+  // left on exactly those edges (only ones that exist in the graph) so a future artifact
+  // keeps "untruncated => complete", while truncated ones stay readable via (A).
+  const selected = new Set(nodes.map(node => node.nodeId));
+  for (const node of nodes) {
+    for (const id of node.directCalls) {
+      if (!selected.has(id)) continue;
+      const key = `${node.nodeId}|${id}|CALLS`;
+      if (edgeKeys.has(key)) continue;
+      if (edges.length >= MAX_EXPLAIN_EDGES) break;
+      const source = graph.edges.find(edge => edge.from === node.nodeId && edge.to === id && edge.kind === "CALLS");
+      if (source === undefined) continue;
+      edgeKeys.add(key);
+      edges.push({ from: source.from, to: source.to, kind: source.kind, source: source.source, confidence: source.confidence, evidence: source.evidence.slice(0, 400), ownerFile: source.ownerFile ?? "" } as ExplainChainEdge);
+    }
+  }
   return { nodes: nodes.sort((a, b) => a.nodeId.localeCompare(b.nodeId)), edges: edges.sort((a, b) => `${a.from}|${a.to}|${a.kind}`.localeCompare(`${b.from}|${b.to}|${b.kind}`)), paths: paths.sort((a, b) => a.join("|").localeCompare(b.join("|")) ).slice(0, MAX_EXPLAIN_NODES), repeatedVisits: [...new Set(repeated)].sort(), truncated };
 }
 
@@ -132,9 +149,14 @@ function validPrepareShape(value: any): boolean {
   if (value.sources.some((ref: any) => !validRef(ref, true)) || value.references.some((ref: any) => !validRef(ref, false)) || new Set(value.sources.map((ref: any) => ref.nodeId)).size !== value.sources.length || new Set(value.references.map((ref: any) => ref.path)).size !== value.references.length) return false;
   if (!exact(value.callChain, ["nodes", "edges", "paths", "repeatedVisits", "truncated"]) || !Array.isArray(value.callChain.nodes) || value.callChain.nodes.length === 0 || value.callChain.nodes.length > MAX_EXPLAIN_NODES || !Array.isArray(value.callChain.edges) || value.callChain.edges.length > MAX_EXPLAIN_EDGES || !Array.isArray(value.callChain.paths) || value.callChain.paths.length > MAX_EXPLAIN_NODES || !Array.isArray(value.callChain.repeatedVisits) || value.callChain.repeatedVisits.length > MAX_EXPLAIN_NODES || typeof value.callChain.truncated !== "boolean") return false;
   const ids = value.callChain.nodes.map((node: any) => node?.nodeId); if (ids.some((id: unknown) => !validText(id, 512)) || new Set(ids).size !== ids.length || value.sources.some((ref: any) => !ids.includes(ref.nodeId)) || value.callChain.paths.some((path: any) => !Array.isArray(path) || path.length === 0 || path.length > MAX_EXPLAIN_DEPTH + 1 || path.some((id: unknown) => !ids.includes(id as string)))) return false;
-  for (const node of value.callChain.nodes) if (!allowed(node, ["nodeId", "kind", "name", "owner", "sourceFile", "startLine", "endLine", "signature", "sourceHash", "directCalls", "pathFromApi", "cycle", "repeated"], ["nodeId", "kind", "name", "sourceFile", "directCalls", "pathFromApi", "cycle", "repeated"]) || !validText(node.name, 512) || !["api", "function", "method", "model", "batch"].includes(node.kind) || (node.owner !== undefined && !validText(node.owner, 512)) || (node.signature !== undefined && !validText(node.signature, 2000)) || (node.sourceHash !== undefined && !/^[a-f0-9]{16,64}$/.test(node.sourceHash)) || typeof node.sourceFile !== "string" || (node.sourceFile !== "" && !safeRel(node.sourceFile)) || !Array.isArray(node.directCalls) || node.directCalls.some((id: unknown) => !ids.includes(id as string)) || new Set(node.directCalls).size !== node.directCalls.length || !Array.isArray(node.pathFromApi) || node.pathFromApi.some((id: unknown) => !ids.includes(id as string)) || typeof node.cycle !== "boolean" || typeof node.repeated !== "boolean" || (node.startLine !== undefined && (!Number.isInteger(node.startLine) || node.startLine < 1 || node.startLine > 10000000)) || (node.endLine !== undefined && (!Number.isInteger(node.endLine) || node.endLine < (node.startLine ?? 1) || node.endLine > 10000000))) return false;
+  for (const node of value.callChain.nodes) if (!allowed(node, ["nodeId", "kind", "name", "owner", "sourceFile", "startLine", "endLine", "signature", "sourceHash", "directCalls", "pathFromApi", "cycle", "repeated"], ["nodeId", "kind", "name", "sourceFile", "directCalls", "pathFromApi", "cycle", "repeated"]) || !validText(node.name, 512) || !["api", "function", "method", "model", "batch"].includes(node.kind) || (node.owner !== undefined && !validText(node.owner, 512)) || (node.signature !== undefined && !validText(node.signature, 2000)) || (node.sourceHash !== undefined && !/^[a-f0-9]{16,64}$/.test(node.sourceHash)) || typeof node.sourceFile !== "string" || (node.sourceFile !== "" && !safeRel(node.sourceFile)) || !Array.isArray(node.directCalls) || new Set(node.directCalls).size !== node.directCalls.length || !Array.isArray(node.pathFromApi) || (value.callChain.truncated !== true && (node.directCalls.some((id: unknown) => !ids.includes(id as string)) || node.pathFromApi.some((id: unknown) => !ids.includes(id as string)))) || typeof node.cycle !== "boolean" || typeof node.repeated !== "boolean" || (node.startLine !== undefined && (!Number.isInteger(node.startLine) || node.startLine < 1 || node.startLine > 10000000)) || (node.endLine !== undefined && (!Number.isInteger(node.endLine) || node.endLine < (node.startLine ?? 1) || node.endLine > 10000000))) return false;
   const edgeKeys = new Set<string>(); for (const edge of value.callChain.edges) { if (!exact(edge, ["from", "to", "kind", "source", "confidence", "evidence", "ownerFile"]) || !ids.includes(edge.from) || !ids.includes(edge.to) || !["CALLS", "CONTAINS"].includes(edge.kind) || !["static", "platform", "inferred"].includes(edge.source) || !["high", "medium", "inferred"].includes(edge.confidence) || typeof edge.evidence !== "string" || edge.evidence.length > 400 || SECRET_PATTERN.test(edge.evidence) || ABSOLUTE_PATH_PATTERN.test(edge.evidence) || typeof edge.ownerFile !== "string" || (edge.ownerFile !== "" && !safeRel(edge.ownerFile))) return false; const key = `${edge.from}|${edge.to}|${edge.kind}`; if (edgeKeys.has(key)) return false; edgeKeys.add(key); }
-  for (const node of value.callChain.nodes) for (const id of node.directCalls) if (!edgeKeys.has(`${node.nodeId}|${id}|CALLS`)) return false;
+  // TASK-121 (A): `truncated === true` explicitly declares an incomplete chain, and the edge
+  // budget can drop CALLS edges of nodes that were still selected. Such an artifact is
+  // legitimate; the completeness rule below is therefore skipped ONLY for it. Everything else
+  // (hash/range/containment/secret checks, contextHash) stays strict, including for untruncated
+  // artifacts where a missing CALLS edge is still a hard failure.
+  if (value.callChain.truncated !== true) for (const node of value.callChain.nodes) for (const id of node.directCalls) if (!edgeKeys.has(`${node.nodeId}|${id}|CALLS`)) return false;
   return digest({ api: value.api.id, callChain: value.callChain, sources: value.sources, references: value.references, manifest: value.manifest }) === value.contextHash;
 }
 export async function loadPrepare(root: string, artifactPath: string): Promise<ExplainPrepareArtifact> {
