@@ -141,7 +141,7 @@ async function routesFor(fx: Awaited<ReturnType<typeof fixture>>, log: ReturnTyp
     const { updateJobRecord } = await import("../src/explain-artifacts.ts");
     return updateJobRecord(fx.root, jobId, record.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false);
   }, taskInFlightCount: () => 0 });
-  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4 } }) });
+  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4, maxPromptBytes: 1048576 } }) });
   if (log !== undefined) ctx.provide("operationLog", log.service);
   const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await();
   return { routes, dispose: async () => { await fiber.dispose(); } };

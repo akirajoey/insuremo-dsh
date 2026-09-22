@@ -14,17 +14,28 @@ import { defineDomain } from "@deepseek-ai/dsh-storage-domain";
 export const EXPLAIN_MIN_CONCURRENCY = 1 as const;
 export const EXPLAIN_MAX_CONCURRENCY = 32 as const;
 export const EXPLAIN_DEFAULT_CONCURRENCY = 4 as const;
+/**
+ * TASK-123: the prompt budget is a Host-wide input-size policy, configurable in BOTH directions.
+ * The default is 1 MiB (a 1M-context model covers one API's prepared material without being cut).
+ * The bounds below are a deliberate typo guard only — they are NOT a product ceiling: raise or
+ * lower the value freely inside them. The per-file source/reference caps (256 KiB) stay separate.
+ */
+export const EXPLAIN_DEFAULT_PROMPT_BYTES = 1048576;
+export const EXPLAIN_MIN_PROMPT_BYTES = 16384;
+export const EXPLAIN_MAX_PROMPT_BYTES = 8388608;
 
 /** Strict durable/effective shape: an integer in the closed 1–32 range. */
 export const explainConcurrencySchema = z.number().int().min(EXPLAIN_MIN_CONCURRENCY).max(EXPLAIN_MAX_CONCURRENCY);
+/** TASK-123: strict durable/effective shape for the prompt budget; a legacy record gets the default. */
+export const explainPromptBytesSchema = z.number().int().min(EXPLAIN_MIN_PROMPT_BYTES).max(EXPLAIN_MAX_PROMPT_BYTES);
 
 /** Durable Host-wide Explain configuration domain (global singleton). */
 export const explainConfigDomain = defineDomain({
   name: "ici_explain_config",
   version: 1,
   global: {
-    schema: z.object({ maxConcurrent: explainConcurrencySchema }),
-    initial: { maxConcurrent: EXPLAIN_DEFAULT_CONCURRENCY },
+    schema: z.object({ maxConcurrent: explainConcurrencySchema, maxPromptBytes: explainPromptBytesSchema.default(EXPLAIN_DEFAULT_PROMPT_BYTES) }),
+    initial: { maxConcurrent: EXPLAIN_DEFAULT_CONCURRENCY, maxPromptBytes: EXPLAIN_DEFAULT_PROMPT_BYTES },
   },
   tables: {},
 });
@@ -32,6 +43,8 @@ export const explainConfigDomain = defineDomain({
 /** Resolved, effective view served to the scheduler and the status routes. */
 export interface ExplainConcurrencyView {
   readonly maxConcurrent: number;
+  /** TASK-123: effective prompt budget for this Host instance. */
+  readonly maxPromptBytes: number;
 }
 
 /** Outcome of the single setting write entry. */
@@ -57,6 +70,7 @@ export class ExplainConfigService extends Service {
 
   private domain: OpenDomain | undefined;
   private maxConcurrentValue: number = EXPLAIN_DEFAULT_CONCURRENCY;
+  private maxPromptBytesValue: number = EXPLAIN_DEFAULT_PROMPT_BYTES;
   private readonly listeners = new Set<(maxConcurrent: number) => void>();
   private writeTail: Promise<unknown> = Promise.resolve();
   private serviceDisposed = false;
@@ -64,6 +78,7 @@ export class ExplainConfigService extends Service {
   constructor(ctx: Context) {
     super(ctx, "iciExplainConfig" as never);
     this.setMaxConcurrent = this.setMaxConcurrent.bind(this);
+    this.setMaxPromptBytes = this.setMaxPromptBytes.bind(this);
     this.onChange = this.onChange.bind(this);
     this.dispose = this.dispose.bind(this);
   }
@@ -82,6 +97,7 @@ export class ExplainConfigService extends Service {
       const stored = explainConfigDomain.global.schema.parse(domain.global.get());
       this.domain = domain;
       this.maxConcurrentValue = stored.maxConcurrent;
+      this.maxPromptBytesValue = stored.maxPromptBytes;
     } catch (error) {
       await domain.close().catch(() => undefined);
       throw error;
@@ -94,9 +110,14 @@ export class ExplainConfigService extends Service {
     return this.maxConcurrentValue;
   }
 
+  /** TASK-123: effective prompt budget (fallback for a Host without this config). */
+  get maxPromptBytes(): number {
+    return this.maxPromptBytesValue;
+  }
+
   /** Detached view for status payloads. */
   get view(): ExplainConcurrencyView {
-    return { maxConcurrent: this.maxConcurrentValue };
+    return { maxConcurrent: this.maxConcurrentValue, maxPromptBytes: this.maxPromptBytesValue };
   }
 
   /**
@@ -129,7 +150,34 @@ export class ExplainConfigService extends Service {
           // One consumer must not block the others or the committed write.
         }
       }
-      return { ok: true, value: { maxConcurrent: input } };
+      return { ok: true, value: { maxConcurrent: input, maxPromptBytes: this.maxPromptBytesValue } };
+    };
+    const task = this.writeTail.then(write, write);
+    this.writeTail = task.then(() => undefined, () => undefined);
+    return task;
+  }
+
+  /**
+   * TASK-123: the one write entry for the prompt budget. Same discipline as the concurrency
+   * value: validate strictly, persist first, then commit; an invalid input never touches storage.
+   */
+  setMaxPromptBytes(input: unknown): Promise<ExplainConcurrencyResult> {
+    if (this.serviceDisposed || this.domain === undefined) return Promise.resolve({ ok: false, code: "storage-error" });
+    if (typeof input !== "number" || !Number.isInteger(input) || input < EXPLAIN_MIN_PROMPT_BYTES || input > EXPLAIN_MAX_PROMPT_BYTES) {
+      return Promise.resolve({ ok: false, code: "invalid-input" });
+    }
+    const domain = this.domain;
+    const write = async (): Promise<ExplainConcurrencyResult> => {
+      try {
+        await domain.global.set({ maxConcurrent: this.maxConcurrentValue, maxPromptBytes: input });
+      } catch {
+        return { ok: false, code: "storage-error" };
+      }
+      this.maxPromptBytesValue = input;
+      for (const listener of [...this.listeners]) {
+        try { listener(this.maxConcurrentValue); } catch { /* one consumer must not block the others */ }
+      }
+      return { ok: true, value: { maxConcurrent: this.maxConcurrentValue, maxPromptBytes: input } };
     };
     const task = this.writeTail.then(write, write);
     this.writeTail = task.then(() => undefined, () => undefined);

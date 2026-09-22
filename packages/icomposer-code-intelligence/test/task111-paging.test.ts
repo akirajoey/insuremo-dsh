@@ -40,7 +40,7 @@ async function fixture(count = 12) {
   ctx.provide("llm", { listProviders: () => [{ id: "mvp" }], listModels: async () => [] });
   ctx.provide("iciEngine", {});
   ctx.provide("iciExplainScheduler", { poke: () => undefined, cancelJob: async () => true, taskInFlightCount: () => 2 });
-  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4 } }) });
+  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4, maxPromptBytes: 1048576 } }) });
   const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await();
   const status = async (query = ""): Promise<any> => { const res = response(); await routes[0].handler(req("GET", `/api/icomposer-workbench/ici/explain/batches/${batchId}/status${query}`), res); return decode(res); };
   return { root, jobIds, status, dispose: async () => { await fiber.dispose(); await rm(root, { recursive: true, force: true }); } };

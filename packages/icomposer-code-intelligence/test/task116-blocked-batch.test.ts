@@ -91,7 +91,7 @@ async function routesFor(fx: Awaited<ReturnType<typeof fixture>>, log: ReturnTyp
     const { updateJobRecord } = await import("../src/explain-artifacts.ts");
     return updateJobRecord(fx.root, jobId, record.revision, { status: "cancelled", error: "cancelled" }).then(() => true).catch(() => false);
   }, taskInFlightCount: () => 0 });
-  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4 } }) });
+  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4, maxPromptBytes: 1048576 } }) });
   ctx.provide("operationLog", log.service);
   const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await();
   const batchCancel = async (body: unknown): Promise<any> => { const res = response(); await routes[0].handler(req("POST", "/api/icomposer-workbench/ici/explain/blocked-cancel", body), res); return { status: res.status, body: decode(res) }; };

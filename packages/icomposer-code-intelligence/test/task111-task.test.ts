@@ -63,7 +63,7 @@ async function routesFor(fx: Awaited<ReturnType<typeof fixture>>) {
   ctx.provide("llm", { listProviders: () => [{ id: "mvp" }], listModels: async () => [{ id: "mvp-model", name: "MVP model" }], resolveModelInfo: async () => ({ provider: "mvp", id: "mvp-model" }) });
   ctx.provide("iciEngine", { explainPrepare: (input: any, signal?: AbortSignal) => runPrepare(fx.deps, input, signal) });
   ctx.provide("iciExplainScheduler", { poke: () => undefined, cancelJob: async () => true, taskInFlightCount: () => 0 });
-  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4 } }) });
+  ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4, maxPromptBytes: 1048576 } }) });
   const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await();
   return { routes, dispose: async () => { await fiber.dispose(); } };
 }

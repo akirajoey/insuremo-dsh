@@ -258,3 +258,106 @@ describe("TASK-102 P2-03 card isolation", () => {
     }
   });
 });
+
+
+/** TASK-123: the same batch card block the other cases use (identity token + task counts). */
+const blockWithQueries = () => ({ kind: "tool-result" as const, call: { argsRaw: JSON.stringify({ workspace_id: "batch", queries: ["SmallAPI", "CommonQueryInvestmentAPI"] }) }, content: [{ type: "text", text: `batch=${batchId} targets=2 unique=2 concurrency=4` }] });
+
+describe("TASK-123 prompt budget on the task card", () => {
+  beforeEach(() => { vi.stubGlobal("localStorage", { clear: () => undefined, getItem: () => null, setItem: () => undefined, removeItem: () => undefined, key: () => null, length: 0 }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const jobs = [
+    { jobId: "0000000000000001", apiName: "SmallAPI", status: "awaiting-input", provider: null, model: null, promptBaseBytes: 40 * 1024, sourceBytes: 1024 },
+    { jobId: "0000000000000002", apiName: "CommonQueryInvestmentAPI", status: "awaiting-input", provider: null, model: null, promptBaseBytes: 300 * 1024, sourceBytes: 1024 },
+  ];
+  const budgetStatus = () => ({
+    ok: true,
+    result: {
+      batch: { batchId, workspaceId: "batch", jobCount: jobs.length, maxConcurrent: 4, requestedCount: jobs.length, selector: { kind: "queries" }, createdAt: "2026-09-22T00:00:00.000Z", updatedAt: "2026-09-22T00:00:00.000Z" },
+      jobs,
+      providers: [{ id: "mvp", models: [{ id: "mvp-model", name: "MVP model" }] }],
+      scheduler: { maxConcurrent: 4, inFlight: 0, taskMaxConcurrent: 4, taskInFlight: 0, hostMaxConcurrent: 4, maxPromptBytes: 256 * 1024 },
+      page: { index: 1, size: 5, totalPages: 1 },
+      summary: { promptBaseBytes: 340 * 1024, sourceBytes: 2048, jobCount: jobs.length, countsByStatus: { "awaiting-input": jobs.length } },
+    },
+  });
+
+  it("names the oversized member, separates the numbers, and offers the skip-and-run path", async () => {
+    const t = (key: string) => key;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(budgetStatus()), { status: 200 })));
+    const view = render(React.createElement(IciExplainToolview, { block: blockWithQueries() as never, t: t as never }));
+    try {
+      // The card needs its first status poll before the confirmation surface (and the budget line) exists.
+      await vi.waitFor(() => expect(view.queryByTestId("ici-explain-budget")).not.toBeNull());
+      const budget = view.getByTestId("ici-explain-budget");
+      expect(budget.textContent).toContain(`${t("explain.budgetMaxJob")} 300.0 KiB / 256.0 KiB`);
+      expect(budget.textContent).toContain(`${t("explain.budgetBatchTotal")} 340.0 KiB`);
+      expect(budget.textContent).toContain(`${t("explain.budgetEffective")} 256.0 KiB`);
+      const over = view.getByTestId("ici-explain-over-budget");
+      expect(over.textContent).toContain("CommonQueryInvestmentAPI");
+      expect(over.textContent).toContain(t("explain.skippedTitle"));
+      // The Start action is explicit about skipping the oversized member instead of blocking the batch.
+      expect(view.getByRole("button", { name: new RegExp(`${t("explain.startSkippingOver")} 1`) })).toBeTruthy();
+    } finally { view.unmount(); }
+  });
+
+  it("reports the scheduled/skipped split after the confirmation", async () => {
+    const t = (key: string) => key;
+    const calls: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/confirm")) {
+        calls.push({ url, body: String(init?.body ?? "") });
+        return new Response(JSON.stringify({ ok: true, result: { batchId, applied: [{ jobId: jobs[0]!.jobId, status: "scheduled", revision: 2 }], jobs: 1, status: "partial", skipped: [{ jobId: jobs[1]!.jobId, apiName: "CommonQueryInvestmentAPI", promptBaseBytes: 300 * 1024, code: "input-too-large" }], maxPromptBytes: 256 * 1024 } }), { status: 200 });
+      }
+      return new Response(JSON.stringify(budgetStatus()), { status: 200 });
+    }));
+    const view = render(React.createElement(IciExplainToolview, { block: blockWithQueries() as never, t: t as never }));
+    try {
+      await vi.waitFor(() => expect(view.queryByTestId("ici-explain-over-budget")).not.toBeNull());
+      const startButton = view.getByRole("button", { name: new RegExp(`${t("explain.startSkippingOver")} 1`) }) as HTMLButtonElement;
+      expect(startButton.disabled).toBe(false);
+      fireEvent.click(startButton);
+      await vi.waitFor(() => expect(calls.length).toBe(1));
+      const split = await view.findByTestId("ici-explain-confirm-split");
+      expect(split.textContent).toContain(`${t("explain.resultScheduled")} 1`);
+      expect(split.textContent).toContain(`${t("explain.resultSkipped")} 1`);
+      expect(split.textContent).toContain("CommonQueryInvestmentAPI");
+    } finally { view.unmount(); }
+  });
+});
+
+
+describe("TASK-123 default 1 MiB budget", () => {
+  beforeEach(() => { vi.stubGlobal("localStorage", { clear: () => undefined, getItem: () => null, setItem: () => undefined, removeItem: () => undefined, key: () => null, length: 0 }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("lets a 372 KiB member pass under the 1 MiB default without any skip affordance", async () => {
+    const t = (key: string) => key;
+    const jobs = [
+      { jobId: "0000000000000001", apiName: "SmallAPI", status: "awaiting-input", provider: null, model: null, promptBaseBytes: 40 * 1024, sourceBytes: 1024 },
+      { jobId: "0000000000000002", apiName: "CommonQueryInvestmentAPI", status: "awaiting-input", provider: null, model: null, promptBaseBytes: 372 * 1024, sourceBytes: 1024 },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      result: {
+        batch: { batchId, workspaceId: "batch", jobCount: 2, maxConcurrent: 4, requestedCount: 2, selector: { kind: "queries" }, createdAt: "2026-09-22T00:00:00.000Z", updatedAt: "2026-09-22T00:00:00.000Z" },
+        jobs,
+        providers: [{ id: "mvp", models: [{ id: "mvp-model", name: "MVP model" }] }],
+        scheduler: { maxConcurrent: 4, inFlight: 0, taskMaxConcurrent: 4, taskInFlight: 0, hostMaxConcurrent: 4, maxPromptBytes: 1024 * 1024 },
+        page: { index: 1, size: 5, totalPages: 1 },
+        summary: { promptBaseBytes: 412 * 1024, sourceBytes: 2048, jobCount: 2, countsByStatus: { "awaiting-input": 2 } },
+      },
+    }), { status: 200 })));
+    const view = render(React.createElement(IciExplainToolview, { block: blockWithQueries() as never, t: t as never }));
+    try {
+      await vi.waitFor(() => expect(view.queryByTestId("ici-explain-budget")).not.toBeNull());
+      const budget = view.getByTestId("ici-explain-budget");
+      expect(budget.textContent).toContain(`${t("explain.budgetEffective")} 1.0 MiB`);
+      expect(budget.textContent).toContain(`${t("explain.budgetMaxJob")} 372.0 KiB`);
+      expect(view.queryByTestId("ici-explain-over-budget")).toBeNull();
+      expect(view.getByRole("button", { name: t("explain.start") })).toBeTruthy();
+    } finally { view.unmount(); }
+  });
+});

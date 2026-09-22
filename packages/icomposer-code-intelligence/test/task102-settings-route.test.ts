@@ -60,7 +60,7 @@ async function routeFixture(config?: unknown, schedulerStatus?: () => { maxConcu
 
 test("TASK-102: status surfaces the effective cap and in-flight count from the live scheduler", async () => {
   const setup = await routeFixture(
-    { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4 } }) },
+    { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4, maxPromptBytes: 1048576 } }) },
     () => ({ maxConcurrent: 4, inFlight: 3 }),
   );
   try {
@@ -70,7 +70,7 @@ test("TASK-102: status surfaces the effective cap and in-flight count from the l
     assert.equal(view.ok, true);
     // TASK-111: the batch status now reports the Host ceiling AND the task's own
     // ceiling/live count next to it, so the card can show both without a write path.
-    assert.deepEqual(view.result.scheduler, { maxConcurrent: 4, inFlight: 3, taskMaxConcurrent: 4, taskInFlight: 0, hostMaxConcurrent: 4 });
+    assert.deepEqual(view.result.scheduler, { maxConcurrent: 4, inFlight: 3, taskMaxConcurrent: 4, taskInFlight: 0, hostMaxConcurrent: 4, maxPromptBytes: 1048576 });
     assert.equal(status.body.includes(setup.fx.root), false);
   } finally { await setup.fiber.dispose(); await setup.fx.cleanup(); }
 });
@@ -91,7 +91,8 @@ test("TASK-102: the settings endpoint persists a valid integer and rejects malfo
     const saved = response();
     await setup.handler(req("POST", `/api/icomposer-workbench/ici/explain/settings`, { maxConcurrent: 8 }), saved);
     assert.equal(decode(saved).ok, true);
-    assert.deepEqual(decode(saved).result, { maxConcurrent: 8, inFlight: 2 });
+    // TASK-123: the settings payload also reports the effective prompt budget (separately configurable).
+    assert.deepEqual(decode(saved).result, { maxConcurrent: 8, inFlight: 2, maxPromptBytes: 1048576 });
     assert.equal(stored, 8);
     assert.equal(settingsCalls, 1);
 
@@ -105,7 +106,9 @@ test("TASK-102: the settings endpoint persists a valid integer and rejects malfo
     await setup.handler(req("POST", `/api/icomposer-workbench/ici/explain/settings`, { maxConcurrent: 4, other: true }), extra);
     assert.equal(decode(extra).error.code, "invalid-input");
     assert.equal(stored, 8, "invalid payloads never change the stored cap");
-    assert.equal(settingsCalls, 6, "invalid payloads reach the service but never persist");
+    // TASK-123: an empty payload is refused locally (at least one known key is required), so it
+    // never reaches the service; the other invalid payloads still do and never persist.
+    assert.equal(settingsCalls, 5, "invalid payloads never persist");
 
     const noHeader = response();
     await setup.handler(req("POST", `/api/icomposer-workbench/ici/explain/settings`, { maxConcurrent: 2 }, false), noHeader);

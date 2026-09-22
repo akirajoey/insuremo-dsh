@@ -7,6 +7,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { graphBaseDir, readManifest } from "./storage.ts";
 import { assertReferenceTarget, batchStatusVersion, batchRecordRelativePath, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, restoreBatchPlan, setBatchConfirmPending, supportedFolderPath, updateBatchPlan, updateBatchSettings, updateJobRecord, withExplainJobLocks, writeBatchRecordUnderLock, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
 import { withExplainFileLock, EXPLAIN_TASK_CONCURRENCY_MAX, EXPLAIN_TASK_CONCURRENCY_MIN } from "@icomposer/workbench-contracts/ici-explain";
+import { EXPLAIN_DEFAULT_PROMPT_BYTES } from "./explain-config.ts";
 import { pickNativeFile, type NativePickerKind } from "./native-picker.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
@@ -25,7 +26,12 @@ export interface NativeFilePicker { pick(signal: AbortSignal): Promise<string | 
 export interface ExplainRoutesConfig { readonly nativeFilePicker?: NativeFilePicker; }
 interface Scheduler { cancelJob(jobId: string): Promise<boolean>; poke(): void; }
 interface SchedulerStatusFace { status?(): { readonly maxConcurrent: number; readonly inFlight: number }; taskInFlightCount?(root: string, batchId: string): number; }
-interface ExplainConfigFace { readonly maxConcurrent: number; setMaxConcurrent(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number } } | { ok: false; code: string }>; }
+interface ExplainConfigFace { readonly maxConcurrent: number; readonly maxPromptBytes?: number; setMaxConcurrent(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string }>; setMaxPromptBytes?(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string }>; }
+/** TASK-123: the effective prompt budget shown to the card and used by the confirm split. */
+const DEFAULT_PROMPT_BYTES = EXPLAIN_DEFAULT_PROMPT_BYTES;
+function promptBudgetOf(ctx: Context): number { const config = ctx.get("iciExplainConfig") as ExplainConfigFace | undefined; const value = config?.maxPromptBytes; return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_PROMPT_BYTES; }
+/** TASK-123: the same byte accounting the status route reports, so card and server agree. */
+async function promptBytesOf(root: string, prepareArtifactPath: string): Promise<number> { try { const prepare = await loadPrepare(root, prepareArtifactPath); const sources = prepare.sources.reduce((sum, ref) => sum + (ref.readable ? ref.bytes : 0), 0); return Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + sources + 1024; } catch { return 0; } }
 interface WebServer { register(route: { kind: "prefix"; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }): () => void; }
 
 type Located = { readonly root: string; readonly job: ExplainJobRecord };
@@ -152,23 +158,23 @@ export class ExplainRoutesService extends Service {
     }
     return output;
   }
-  private schedulerInfo(): { readonly maxConcurrent: number; readonly inFlight: number } {
+  private schedulerInfo(): { readonly maxConcurrent: number; readonly inFlight: number; readonly maxPromptBytes: number } {
     const scheduler = this.ctx.get("iciExplainScheduler") as SchedulerStatusFace | undefined;
     const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined;
     const live = scheduler?.status?.();
-    return { maxConcurrent: live?.maxConcurrent ?? config?.maxConcurrent ?? 4, inFlight: live?.inFlight ?? 0 };
+    return { maxConcurrent: live?.maxConcurrent ?? config?.maxConcurrent ?? 4, inFlight: live?.inFlight ?? 0, maxPromptBytes: promptBudgetOf(this.ctx) };
   }
   /**
    * TASK-111: a task's own ceiling (its setting, clamped by the Host ceiling) plus
    * its live count. The card reads both without any additional write path, and the
    * Host-wide value stays visible so the clamping is never hidden.
    */
-  private taskSchedulerInfo(root: string, batch: ExplainBatchRecord): { readonly maxConcurrent: number; readonly inFlight: number; readonly taskMaxConcurrent: number; readonly taskInFlight: number; readonly hostMaxConcurrent: number } {
+  private taskSchedulerInfo(root: string, batch: ExplainBatchRecord): { readonly maxConcurrent: number; readonly inFlight: number; readonly taskMaxConcurrent: number; readonly taskInFlight: number; readonly hostMaxConcurrent: number; readonly maxPromptBytes: number } {
     const host = this.schedulerInfo();
     const scheduler = this.ctx.get("iciExplainScheduler") as SchedulerStatusFace | undefined;
     const declared = typeof batch.maxConcurrent === "number" ? batch.maxConcurrent : host.maxConcurrent;
     const taskMaxConcurrent = Math.max(EXPLAIN_TASK_CONCURRENCY_MIN, Math.min(declared, host.maxConcurrent));
-    return { maxConcurrent: host.maxConcurrent, inFlight: host.inFlight, taskMaxConcurrent, taskInFlight: scheduler?.taskInFlightCount?.(root, batch.batchId) ?? 0, hostMaxConcurrent: host.maxConcurrent };
+    return { maxConcurrent: host.maxConcurrent, inFlight: host.inFlight, taskMaxConcurrent, taskInFlight: scheduler?.taskInFlightCount?.(root, batch.batchId) ?? 0, hostMaxConcurrent: host.maxConcurrent, maxPromptBytes: host.maxPromptBytes };
   }
   private async getJob(located: Located, res: ServerResponse): Promise<void> {
     let prepare: any; try { prepare = await loadPrepare(located.root, located.job.prepareArtifactPath); } catch { fail(res, 409, "prepare-invalidated"); return; }
@@ -270,6 +276,18 @@ export class ExplainRoutesService extends Service {
     if (typedMembers.some(job => !["awaiting-input", "final"].includes(job.status))) { fail(res, 409, "revision-conflict"); return; }
     const awaiting = typedMembers.filter(job => job.status === "awaiting-input");
     if (awaiting.length === 0) { fail(res, 409, "revision-conflict"); return; }
+    // TASK-123 (b1): schedule only the members that fit the effective prompt budget; the ones
+    // that exceed it are NAMED in the response and stay awaiting-input (never silently skipped,
+    // and never a whole-batch 409 just because one member is oversized).
+    const budget = promptBudgetOf(this.ctx);
+    const overBudget: Array<{ jobId: string; apiName: string; promptBaseBytes: number }> = [];
+    const schedulable = new Set<string>();
+    for (const job of awaiting) {
+      const bytes = await promptBytesOf(located.root, job.prepareArtifactPath);
+      if (bytes > budget) overBudget.push({ jobId: job.jobId, apiName: job.apiName, promptBaseBytes: bytes });
+      else schedulable.add(job.jobId);
+    }
+    if (schedulable.size === 0) { fail(res, 409, "input-too-large"); return; }
     const notBeforeValue = body.notBefore ?? body.not_before; const target = targetFromBody(body, awaiting[0]);
     if (Object.prototype.hasOwnProperty.call(body, "folderPath") && Object.prototype.hasOwnProperty.call(body, "folder_path") || Object.prototype.hasOwnProperty.call(body, "notBefore") && Object.prototype.hasOwnProperty.call(body, "not_before")) { fail(res, 422, "confirmation-invalid"); return; }
     if (!hasOnly(body, ["provider", "model", "docs", "folderPath", "folder_path", "referenceTarget", "reference_target", "target", "consent", "notBefore", "not_before"]) || body.consent !== true || !safeProvider(body.provider) || !safeModel(body.model) || !Array.isArray(body.docs) || body.docs.length > 50 || target === null) { fail(res, 422, "confirmation-invalid"); return; }
@@ -292,7 +310,7 @@ export class ExplainRoutesService extends Service {
         for (const job of typedMembers) {
           const current = await readJobRecord(located.root, job.jobId);
           if (!current || current.workspaceId !== located.batch.workspaceId || current.revision !== job.revision) throw new Error("revision-conflict");
-          if (current.status === "final") continue;
+          if (current.status === "final" || !schedulable.has(current.jobId)) continue;
           if (current.status !== "awaiting-input") throw new Error("revision-conflict");
           let prepare: Awaited<ReturnType<typeof loadPrepare>>; try { prepare = await loadPrepare(located.root, current.prepareArtifactPath); } catch { throw new Error("stale-snapshot"); } const manifest = await readManifest(graphBaseDir(located.root, current.workspaceId));
           if (!manifest || current.engineVersion !== ICI_ENGINE_VERSION || manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || manifest.sourceFingerprint !== current.sourceFingerprint || manifest.graphDigest !== current.graphDigest || prepare.manifest.sourceFingerprint !== current.sourceFingerprint || prepare.manifest.graphDigest !== current.graphDigest || prepare.prepareId !== current.prepareId) throw new Error("stale-snapshot");
@@ -313,7 +331,7 @@ export class ExplainRoutesService extends Service {
         return applied.map(item => ({ jobId: item.updated.jobId, status: item.updated.status, revision: item.updated.revision }));
       });
       await updateBatchPlan(located.root, located.batch.batchId, { provider: body.provider as string, model: body.model as string, referenceTarget: target, notBefore, confirmedAt: new Date().toISOString() });
-      (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke(); ok(res, { batchId: located.batch.batchId, applied: result, jobs: result.length, status: "scheduled" });
+      (this.ctx.get("iciExplainScheduler") as Scheduler | undefined)?.poke(); ok(res, { batchId: located.batch.batchId, applied: result, jobs: result.length, status: overBudget.length > 0 ? "partial" : "scheduled", ...(overBudget.length === 0 ? {} : { skipped: overBudget.slice(0, 5).map(entry => ({ jobId: entry.jobId, apiName: entry.apiName, promptBaseBytes: entry.promptBaseBytes, code: "input-too-large" })), ...(overBudget.length > 5 ? { skippedMore: overBudget.length - 5 } : {}) }), maxPromptBytes: budget });
     } catch (cause) {
       // Fail closed: the gate may only be released once the rollback of every member AND
       // the plan restore are both published. If either fails the gate stays armed, so no
@@ -504,6 +522,8 @@ export class ExplainRoutesService extends Service {
     const llm = this.ctx.get("llm") as Llm | undefined; let providerValid = false; try { providerValid = llm?.listProviders().some(item => item.id === body.provider) === true; } catch { providerValid = false; }
     if (!providerValid) { fail(res, 422, "confirmation-invalid"); return; }
     try {
+      // TASK-123 (b1): a single over-budget job is refused explicitly at confirmation time.
+      if (await promptBytesOf(located.root, located.job.prepareArtifactPath) > promptBudgetOf(this.ctx)) { fail(res, 409, "input-too-large"); return; }
       const prepare = await loadPrepare(located.root, located.job.prepareArtifactPath); const manifest = await readManifest(graphBaseDir(located.root, located.job.workspaceId));
       if (!manifest || located.job.engineVersion !== ICI_ENGINE_VERSION || manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || manifest.sourceFingerprint !== located.job.sourceFingerprint || manifest.graphDigest !== located.job.graphDigest || prepare.prepareId !== located.job.prepareId) { fail(res, 409, "stale-snapshot"); return; }
       if (docs.some(doc => !prepare.references.some(ref => ref.readable && ref.path === doc!.path && ref.sha256 === doc!.sha256))) { fail(res, 422, "confirmation-invalid"); return; }
@@ -543,10 +563,16 @@ export class ExplainRoutesService extends Service {
     if (typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "invalid-input"); return; }
     const body = await readBody(req);
     if (body === null) { fail(res, 413, "input-too-large"); return; }
-    if (!hasOnly(body, ["maxConcurrent"])) { fail(res, 422, "invalid-input"); return; }
+    if (!hasOnly(body, ["maxConcurrent", "maxPromptBytes"])) { fail(res, 422, "invalid-input"); return; }
+    if (!Object.prototype.hasOwnProperty.call(body, "maxConcurrent") && !Object.prototype.hasOwnProperty.call(body, "maxPromptBytes")) { fail(res, 422, "invalid-input"); return; }
     const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined;
     if (config === undefined) { fail(res, 500, "storage-error"); return; }
-    const result = await config.setMaxConcurrent(body.maxConcurrent);
+    let result: { ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string } = { ok: true, value: { maxConcurrent: config.maxConcurrent, maxPromptBytes: promptBudgetOf(this.ctx) } };
+    if (Object.prototype.hasOwnProperty.call(body, "maxConcurrent")) result = await config.setMaxConcurrent(body.maxConcurrent);
+    if (result.ok && Object.prototype.hasOwnProperty.call(body, "maxPromptBytes")) {
+      if (config.setMaxPromptBytes === undefined) { fail(res, 500, "storage-error"); return; }
+      result = await config.setMaxPromptBytes(body.maxPromptBytes);
+    }
     if (!result.ok) { fail(res, result.code === "invalid-input" ? 422 : 500, result.code); return; }
     ok(res, { ...result.value, ...this.schedulerInfo() });
   }

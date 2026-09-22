@@ -153,6 +153,15 @@ export const zh = {
   "explain.errorNoTargets": "目标未解析出可执行任务：请用完整 API 名重新发起。",
   "explain.errorInvalidInput": "提交内容不符合要求：请检查模型/参考范围/时间后重试。",
   "explain.errorGeneric": "操作失败",
+  "explain.budgetMaxJob": "批内最大单任务",
+  "explain.budgetBatchTotal": "批内合计",
+  "explain.budgetOverLimit": "超限",
+  "explain.budgetEffective": "生效预算",
+  "explain.startSkippingOver": "仅运行未超限成员（跳过",
+  "explain.skippedTitle": "以下成员超出预算、不会随本批运行：",
+  "explain.skippedMore": "另有未列出：",
+  "explain.resultScheduled": "已排入",
+  "explain.resultSkipped": "已跳过",
 } as const satisfies Record<string, string>;
 
 export type WorkbenchJobLocaleKey = keyof typeof zh;
@@ -311,4 +320,13 @@ export const en = {
   "explain.errorNoTargets": "No runnable target was resolved: use the exact API name and run again.",
   "explain.errorInvalidInput": "The submission is not acceptable: check model, reference scope, and time, then retry.",
   "explain.errorGeneric": "The action failed",
+  "explain.budgetMaxJob": "Largest job in this batch",
+  "explain.budgetBatchTotal": "Batch total",
+  "explain.budgetOverLimit": "over budget",
+  "explain.budgetEffective": "effective budget",
+  "explain.startSkippingOver": "Run only the members within budget (skip",
+  "explain.skippedTitle": "These members exceed the budget and will NOT run with this batch:",
+  "explain.skippedMore": "more not listed:",
+  "explain.resultScheduled": "Scheduled",
+  "explain.resultSkipped": "Skipped",
 } as const satisfies Record<WorkbenchJobLocaleKey, string>;
