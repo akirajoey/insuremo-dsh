@@ -140,7 +140,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
   disposers.push(ctx.systemPrompt.section({
     name: "tool:ici_query",
     order: 150,
-    text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. No InsureMO binding is required and the operation is read-only.",
+    text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Use it after a capability hit to inspect one API. To DISCOVER which APIs can do something (by capability, in natural language) use ici_search first; this tool walks a graph, it does not search explanations. No InsureMO binding is required and the operation is read-only.",
   }));
   disposers.push(ctx.tools.register(defineTool({
     name: "icomposer_catalog_list",

@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import { registerIciTools } from "./ici-tools.ts";
+import { registerIciSearchTool } from "./ici-search-tool.ts";
 import { registerIciJobTools } from "./ici-jobs-tools.ts";
 import { registerIciExplainTools } from "./ici-explain-tools.ts";
 import type { DefineToolFn } from "./tool-types.ts";
@@ -95,6 +96,8 @@ export function registerIcomposerToolsWith(ctx: Context, defineTool: DefineToolF
   }));
 
   disposers.push(...registerIciTools(ctx, defineTool as never));
+  // TASK-132: ici_search was defined but never mounted, so the capability existed only on paper.
+  disposers.push(...registerIciSearchTool(ctx, defineTool as never));
   disposers.push(...registerIciJobTools(ctx, defineTool as never));
   disposers.push(...registerIciExplainTools(ctx, defineTool as never));
   return disposers;

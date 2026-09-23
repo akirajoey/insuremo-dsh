@@ -122,7 +122,7 @@ const fileKey = "icomposer verify utils --json --profile portal:demo src/dev/T/G
 const listKey = "icomposer verify utils --json --profile portal:demo --list";
 const searchKey = "icomposer verify utils --json --profile portal:demo --search json";
 
-test("apply mounts all seven Agent tools persistently and disposes them with the plugin", async () => {
+test("apply mounts all eight Agent tools persistently and disposes them with the plugin", async () => {
   const ctx = new Context();
   ctx.provide("subprocess", fakeSubprocess() as never);
   ctx.provide("imoAuth" as never, stubAuth("ok") as never);
@@ -143,7 +143,8 @@ test("apply mounts all seven Agent tools persistently and disposes them with the
   } as never);
   const fiber = await ctx.plugin(verifyPlugin as never);
   await fiber.await();
-  assert.equal(names.size, 7);
+  // TASK-132: ici_search is mounted now (8 tools); it has no prompt section of its own (still 7).
+  assert.equal(names.size, 8);
   assert.equal(sections.size, 7);
   await fiber.dispose();
   assert.equal(names.size, 0);
@@ -574,10 +575,15 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
   const { registerIcomposerToolsWith } = await import("../src/tool-defs.ts");
   const disposers = registerIcomposerToolsWith(ctx, defineTool as never);
   try {
-    assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_explain", "ici_query", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+    // TASK-132: ici_search is mounted next to the other ICI tools (it used to be an orphan definition).
+    assert.deepEqual([...registered.keys()].sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
     assert.equal([...registered.values()].every(tool => typeof tool.output.render === "function"), true);
     assert.equal(sections.length, 7);
-    assert.equal(sections.some(section => section.name === "tool:ici_search"), false);
+    assert.equal(sections.some(section => section.name === "tool:ici_search"), false, "ici_search is a tool only; it has no prompt section");
+    const searchTool = registered.get("ici_search");
+    assert.notEqual(searchTool, undefined);
+    // TASK-132: the description is intent-first so the agent reaches for it on capability questions.
+    assert.match(String((searchTool as any)?.description ?? ""), /Find APIs by what they DO/);
     const buildSection = sections.find(section => section.name === "tool:ici_build");
     assert.ok(buildSection);
     assert.doesNotMatch(buildSection.text ?? "", /embedding|search-index|semantic/i);
@@ -617,9 +623,10 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
     assert.equal(iciImpact.paths.length, 1);
     assert.equal(iciImpact.paths[0].apiId, "api:ApiA");
     assert.deepEqual(iciImpact.confidenceCounts, { static: 2, platform: 0, inferred: 0 });
-    // Search remains an internal engine face, but is not an Agent tool.
+    // TASK-132: search is BOTH an engine face and (now) a mounted Agent tool.
     const internalEngine: any = ctx.get("iciEngine" as never);
-    assert.equal(registered.has("ici_search"), false);
+    assert.equal(registered.has("ici_search"), true);
+    assert.match(String(registered.get("ici_search")?.description ?? ""), /Find APIs by what they DO/);
     const searchOut: any = await internalEngine.search({ workspaceId: "ws1", query: "payment", top: 2 }, exec.signal);
     assert.equal(searchOut.value.rows.length, 2);
     assert.equal(searchOut.value.rows[0].apiName, "AlphaAPI");
@@ -655,7 +662,7 @@ test("tools: ICI build/query/explain two-phase tools registered at mount, unregi
   } finally {
     for (const dispose of disposers) dispose();
   }
-  assert.deepEqual(removed.sort(), ["ici_build", "ici_explain", "ici_query", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
+  assert.deepEqual(removed.sort(), ["ici_build", "ici_explain", "ici_query", "ici_search", "ici_status", "icomposer_catalog_list", "icomposer_sdk_query", "icomposer_verify_utils"]);
   assert.equal(registered.size, 0);
 });
 

@@ -285,6 +285,10 @@ export interface SearchResult {
   readonly rows: readonly SearchRow[];
   readonly truncated: boolean;
   readonly stale?: true;
+  /** TASK-132: true when the ranking came from the offline local scorer instead of embeddings. */
+  readonly degraded?: true;
+  /** TASK-132: why the local scorer was used (diagnostic only). */
+  readonly degradedReason?: string;
 }
 
 // ---- jobs / diagnostics / cleanup (TASK-026) ----

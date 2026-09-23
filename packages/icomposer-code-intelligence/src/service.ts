@@ -8,7 +8,7 @@ import { runBlockedTargets, runFinalize, runPrepare, runPrepareBatch, runSource,
 import { computeGraphDigest } from "./explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 import { indexEmbeddings, searchEmbeddings } from "./search-ops.ts";
-import { embeddingLease, loadSearchDocs } from "./search-runtime.ts";
+import { embeddingLease, loadSearchDocs, type SearchDocLike } from "./search-runtime.ts";
 import { resolveActiveProfileAuth } from "./active-profile-auth.ts";
 import { GRAPH_ARTIFACT_RELATIVE_PATH, SEARCH_ARTIFACT_RELATIVE_PATH, graphBaseDir, legacyGraphBaseDir, loadSnapshot, readManifest, searchCachePath, writeAtomic, writeFileAtomic, writeExplainContext, writeExplainDeterministic } from "./storage.ts";
 import { applyCleanup, buildDiagnosticsView, collectFileFacts, planCleanup } from "./maintenance.ts";
@@ -48,6 +48,7 @@ import type {
   SearchIndexResult,
   SearchInput,
   SearchResult,
+  SearchRow,
   ExplainPrepareTaskResult,
   ExplainTaskSelector,
 } from "./types.ts";
@@ -65,6 +66,7 @@ const PASSTHROUGH_CODES = new Set<IciErrorCode>([
   "cancelled",
 ]);
 
+function ok<T>(value: T): Result<T> { return { ok: true, value }; }
 function err(code: IciErrorCode, message: string = code): Result<never> {
   return { ok: false, error: { code, message } };
 }
@@ -95,6 +97,20 @@ interface ApiSearchDocLike {
 }
 
 export { ICI_ENGINE_VERSION } from "./engine-version.ts";
+
+const LOCAL_STOPWORDS = new Set(["the", "a", "an", "of", "for", "and", "or", "to", "in", "on", "with", "which", "what", "can", "is", "are", "does", "do", "api", "apis", "how", "that", "this", "by", "at", "from"]);
+/** Query terms for the offline scorer: lowercase word-ish tokens, stopwords and 1-char noise removed. */
+function localQueryTerms(query: string): string[] {
+  const terms = String(query ?? "").toLowerCase().split(/[^a-z0-9_.]+/).filter(term => term.length >= 2 && !LOCAL_STOPWORDS.has(term));
+  return [...new Set(terms)].slice(0, 16);
+}
+function countOccurrences(text: string, term: string): number { if (term === "" || text === "") return 0; let count = 0; let index = text.indexOf(term); while (index !== -1) { count++; index = text.indexOf(term, index + term.length); } return count; }
+/** Short, honest evidence line: which mode text matched and how many query terms it contained. */
+function localEvidence(doc: SearchDocLike, terms: readonly string[], mode: EmbeddingMode): string {
+  const fields = mode === "technical" ? ["technical"] : mode === "business" ? ["business"] : ["technical", "business"];
+  const matched = fields.filter(field => { const text = String((field === "technical" ? doc.technicalText : doc.businessText) ?? "").toLowerCase(); return terms.some(term => text.includes(term)); });
+  return matched.length === 0 ? "name-match" : `${matched.join("+")}-term-match`;
+}
 
 export class IciEngineService extends Service {
   static inject = ["workspaceBinding", "icomposerCatalog", "imoAuth", "jobs"] as const;
@@ -369,6 +385,36 @@ export class IciEngineService extends Service {
     });
   }
 
+  /**
+   * TASK-132: an offline, dependency-free ranking used when the embedding path is unavailable (no
+   * Active Profile, no network, no embedding endpoint). It scores the SAME explanation docs the
+   * embedding index is built from -- term frequency over the technical/business text plus an API-name
+   * match bonus -- and marks the result `degraded` so callers can present it as best-effort rather
+   * than embedding-ranked. It writes nothing and needs no profile.
+   */
+  async #localSearch(input: SearchInput, graph: GraphView, canonicalPath: string, mode: EmbeddingMode, top: number, reason: string): Promise<SearchResult> {
+    let docs: readonly SearchDocLike[] = [];
+    try { docs = await loadSearchDocs(canonicalPath, graph); } catch { docs = []; }
+    const terms = localQueryTerms(input.query);
+    const rows: SearchRow[] = [];
+    for (const doc of docs) {
+      const technical = typeof doc.technicalText === "string" ? doc.technicalText.toLowerCase() : "";
+      const business = typeof doc.businessText === "string" ? doc.businessText.toLowerCase() : "";
+      const name = String(doc.apiName ?? "").toLowerCase();
+      const text = mode === "technical" ? technical : mode === "business" ? business : `${technical}\n${business}`;
+      let score = 0;
+      for (const term of terms) { const hits = countOccurrences(text, term); if (hits > 0) score += 1 + Math.log(1 + hits); if (name.includes(term)) score += 2; }
+      if (terms.length === 0) score = name === input.query.trim().toLowerCase() ? 1 : 0;
+      if (score <= 0) continue;
+      rows.push({ apiId: doc.apiId, apiName: doc.apiName, score: Number((score / (terms.length || 1)).toFixed(6)), evidence: localEvidence(doc, terms, mode), downstream: [] });
+    }
+    rows.sort((a, b) => b.score - a.score || a.apiName.localeCompare(b.apiName));
+    const limited = rows.slice(0, top);
+    const best = limited[0]?.score ?? 0;
+    if (best > 0) for (const row of limited) (row as { score: number }).score = Number((row.score / best).toFixed(6));
+    return { workspaceId: input.workspaceId, rows: limited, truncated: rows.length > limited.length, degraded: true, degradedReason: reason };
+  }
+
   async search(input: SearchInput, options?: BuildOptions | AbortSignal): Promise<Result<SearchResult>> {
     const opts = this.normalizeOptions(options);
     const signal = opts.signal;
@@ -385,13 +431,15 @@ export class IciEngineService extends Service {
       const cachePath = await searchCachePath(canonicalPath, input.workspaceId);
       const mode: EmbeddingMode = input.mode ?? "all";
       const top = clampInt(input.top, 10, 1, 50);
+      // TASK-132: every dependency failure below degrades to the local scorer instead of failing closed.
       const profile = await resolveActiveProfileAuth(this.ctx, signal, input.workspaceId);
-      if (!profile.ok) return profile as Result<never>;
+      if (!profile.ok) return ok(await this.#localSearch(input, graph, canonicalPath, mode, top, `no-profile:${profile.error.code}`));
       const outcome = await embeddingLease({ auth: this.ctx.get("imoAuth" as never), profile: profile.value, workspaceId: input.workspaceId, subprocess: this.ctx.subprocess, timeoutMs: this.#timeoutMs, signal }, async (rt, token) =>
         searchEmbeddings({ rt, token, cachePath, query: input.query, mode, top, graph, timeoutMs: this.#timeoutMs, signal, embeddingUrl: this.#embeddingUrl }));
       if (!(outcome as { ok: boolean }).ok) {
         const failure = outcome as unknown as { ok: false; error: { code: IciErrorCode; message: string } };
-        return { ok: false, error: failure.error };
+        // A missing/corrupt index or an unreachable embedding endpoint is a capability gap, not an error.
+        return ok(await this.#localSearch(input, graph, canonicalPath, mode, top, `embedding-unavailable:${failure.error.code}`));
       }
       const value = (outcome as unknown as { ok: true; value: SearchResult }).value;
       return { ok: true, value: { ...value, workspaceId: input.workspaceId, ...(stale ? { stale } : {}) } };

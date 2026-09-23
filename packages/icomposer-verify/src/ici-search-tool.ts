@@ -21,6 +21,9 @@ interface IciSearchFace {
     rows: readonly IciSearchRow[];
     truncated: boolean;
     stale?: true;
+    /** TASK-132: the engine used the offline local ranking (no embedding index / no Active Profile). */
+    degraded?: true;
+    degradedReason?: string;
   }>>;
 }
 
@@ -48,7 +51,7 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
   const disposers: Array<() => void> = [];
   disposers.push(ctx.tools.register(defineTool({
     name: "ici_search",
-    description: "Semantic search over registered workspace API embeddings (iComposer Code Intelligence). Uses the Workbench Active Profile for authentication and fails closed when unavailable.",
+    description: "Find APIs by what they DO, in natural language -- capability discovery over the workspace API explanations (iComposer Code Intelligence). Use this FIRST for questions like 'which APIs can modify the group policy member', 'is there an API that cancels a rider', or 'what handles claim rejection', instead of grepping the source tree. Returns ranked APIs (apiId/apiName/score/evidence); follow up with ici_query (query=api-chain) for the call chain of a hit. Local term-frequency ranking is used and the result is marked degraded when the embedding index or the Workbench Active Profile is unavailable.",
     parameters: {
       workspace_id: { type: "string", required: true, description: "Registered workspace id; no InsureMO binding required." },
       query: { type: "string", required: true, description: "Natural-language query text." },
@@ -63,6 +66,7 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
           workspace_id: { type: "string", required: true },
           truncated: { type: "boolean" },
           stale: { type: "boolean" },
+          degraded: { type: "boolean" },
           rows: {
             type: "array",
             items: objectSchema2(
@@ -91,7 +95,7 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
         };
         if (v.error !== undefined) return [{ type: "text", text: typeof (v.error as unknown as { guidance?: string }).guidance === "string" ? (v.error as unknown as { guidance: string }).guidance : errorText(v.error.code) }];
         const lines = [
-          `workspace ${v.workspace_id}: ${v.rows?.length ?? 0} results`,
+          `workspace ${v.workspace_id}: ${v.rows?.length ?? 0} results${(v as { degraded?: boolean }).degraded === true ? " (degraded: local ranking, no embedding index/profile)" : ""}`,
           ...(v.rows ?? []).map(r => `${r.rank}. ${r.apiName} (${r.score.toFixed(4)})`),
         ];
         return [{ type: "text", text: lines.join("\n") }];
@@ -113,6 +117,7 @@ export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): A
         workspace_id: args.workspace_id,
         truncated: res.value.truncated,
         ...(res.value.stale === true ? { stale: true } : {}),
+        ...(res.value.degraded === true ? { degraded: true } : {}),
         rows: clipEntries([...res.value.rows]).map((r, i) => ({
           rank: i + 1,
           apiId: r.apiId,
