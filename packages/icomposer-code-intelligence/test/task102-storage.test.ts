@@ -50,7 +50,7 @@ test("TASK-102 storage: default cap is served without materializing the medium, 
     try {
       assert.equal(first.config.maxConcurrent, 4, "initial value comes from the domain spec");
       await assert.rejects(readFile(unitPath(first), "utf8"), /ENOENT/, "GET must not create the unit file");
-      assert.deepEqual(await first.config.setMaxConcurrent(8), { ok: true, value: { maxConcurrent: 8, maxPromptBytes: 1048576 } });
+      assert.deepEqual(await first.config.setMaxConcurrent(8), { ok: true, value: { maxConcurrent: 8, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
       const persisted = JSON.parse(await readFile(unitPath(first), "utf8")) as { global: { maxConcurrent: number } };
       assert.equal(persisted.global.maxConcurrent, 8, "explicit save is durably published");
     } finally {
@@ -105,7 +105,7 @@ test("TASK-102 storage: a real backend write failure answers storage-error and k
     const mounted = await mount(root);
     const storageDir = join(root, "storage");
     try {
-      assert.deepEqual(await mounted.config.setMaxConcurrent(6), { ok: true, value: { maxConcurrent: 6, maxPromptBytes: 1048576 } });
+      assert.deepEqual(await mounted.config.setMaxConcurrent(6), { ok: true, value: { maxConcurrent: 6, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
       assert.equal(mounted.config.maxConcurrent, 6);
       // Real medium failure: the directory stops accepting the atomic temp file.
       await chmod(storageDir, 0o500);
@@ -130,7 +130,7 @@ test("TASK-102 storage: dispose drains an in-flight write before closing the uni
     const pending = first.config.setMaxConcurrent(7);
     const disposal = first.config.dispose();
     const [write] = await Promise.all([pending, disposal]);
-    assert.deepEqual(write, { ok: true, value: { maxConcurrent: 7, maxPromptBytes: 1048576 } }, "the in-flight write settles before close");
+    assert.deepEqual(write, { ok: true, value: { maxConcurrent: 7, maxPromptBytes: 1048576, maxOutputTokens: 16384 } }, "the in-flight write settles before close");
     await first.dispose();
     const second = await mount(root);
     try {

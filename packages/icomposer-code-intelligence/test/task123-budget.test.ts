@@ -230,7 +230,8 @@ test("TASK-123 (6) the config service defaults the budget and persists a change 
   try {
     const service = ctx.get("iciExplainConfig") as ExplainConfigService;
     assert.equal(service.maxPromptBytes, DEFAULT_BUDGET);
-    assert.deepEqual(service.view, { maxConcurrent: 4, maxPromptBytes: DEFAULT_BUDGET });
+    assert.equal(service.maxOutputTokens, 16384, "TASK-125: the child output budget defaults to 16384");
+    assert.deepEqual(service.view, { maxConcurrent: 4, maxPromptBytes: DEFAULT_BUDGET, maxOutputTokens: 16384 });
     assert.equal((await service.setMaxPromptBytes(1)).ok, false);
     assert.equal((await service.setMaxPromptBytes(EXPLAIN_MAX_PROMPT_BYTES + 1)).ok, false);
     assert.equal(service.maxPromptBytes, DEFAULT_BUDGET, "a refused write keeps the effective value");

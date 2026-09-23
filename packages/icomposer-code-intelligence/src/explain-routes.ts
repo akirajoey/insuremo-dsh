@@ -5,9 +5,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { graphBaseDir, readManifest } from "./storage.ts";
-import { assertReferenceTarget, batchStatusVersion, batchRecordRelativePath, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, restoreBatchPlan, setBatchConfirmPending, supportedFolderPath, updateBatchPlan, updateBatchSettings, updateJobRecord, withExplainJobLocks, writeBatchRecordUnderLock, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
+import { EXPLAIN_ABSOLUTE_PATH_PATTERN, EXPLAIN_SECRET_PATTERN, assertReferenceTarget, batchStatusVersion, batchRecordRelativePath, listFolderEntries, loadPrepare, readBatchRecord, readJobRecord, readPreparedSources, referenceTargetOf, restoreBatchPlan, setBatchConfirmPending, supportedFolderPath, updateBatchPlan, updateBatchSettings, updateJobRecord, withExplainJobLocks, writeBatchRecordUnderLock, writeJobRecordUnderLock, validFolderPath, validReferenceTarget, type ExplainBatchRecord, type ExplainJobRecord, type ExplainReferenceTarget } from "./explain-artifacts.ts";
 import { withExplainFileLock, EXPLAIN_TASK_CONCURRENCY_MAX, EXPLAIN_TASK_CONCURRENCY_MIN } from "@icomposer/workbench-contracts/ici-explain";
-import { EXPLAIN_DEFAULT_PROMPT_BYTES } from "./explain-config.ts";
+import { EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS, EXPLAIN_DEFAULT_PROMPT_BYTES } from "./explain-config.ts";
 import { pickNativeFile, type NativePickerKind } from "./native-picker.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
@@ -16,8 +16,8 @@ export const EXPLAIN_ROUTES_PREFIX = "/api/icomposer-workbench/ici/explain" as c
 const JSON_TYPE = "application/json; charset=utf-8";
 const MAX_BODY_BYTES = 64 * 1024;
 const SAFE_NAME = /^[A-Za-z0-9._:-]{1,256}$/;
-const ABSOLUTE_PATH_PATTERN = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
-const SECRET_PATTERN = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
+const ABSOLUTE_PATH_PATTERN = EXPLAIN_ABSOLUTE_PATH_PATTERN;
+const SECRET_PATTERN = EXPLAIN_SECRET_PATTERN;
 interface Binding { list(): Promise<{ ok: boolean; value?: readonly { workspaceId: string; canonicalPath: string }[] }>; }
 interface Engine { explainPrepare(input: { workspaceId: string; query: string }, signal?: AbortSignal): Promise<{ ok: boolean; value?: any; error?: { code?: string } }>; }
 interface Llm { listProviders(): readonly { id: string }[]; listModels?(provider: string): Promise<readonly { id: string; name?: string }[]>; resolveModelInfo?(provider: string, model: string, signal?: AbortSignal): Promise<unknown>; }
@@ -26,9 +26,12 @@ export interface NativeFilePicker { pick(signal: AbortSignal): Promise<string | 
 export interface ExplainRoutesConfig { readonly nativeFilePicker?: NativeFilePicker; }
 interface Scheduler { cancelJob(jobId: string): Promise<boolean>; poke(): void; }
 interface SchedulerStatusFace { status?(): { readonly maxConcurrent: number; readonly inFlight: number }; taskInFlightCount?(root: string, batchId: string): number; }
-interface ExplainConfigFace { readonly maxConcurrent: number; readonly maxPromptBytes?: number; setMaxConcurrent(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string }>; setMaxPromptBytes?(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string }>; }
+interface ExplainConfigFace { readonly maxConcurrent: number; readonly maxPromptBytes?: number; readonly maxOutputTokens?: number; setMaxOutputTokens?(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number; maxPromptBytes?: number; maxOutputTokens?: number } } | { ok: false; code: string }>; setMaxConcurrent(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string }>; setMaxPromptBytes?(input: unknown): Promise<{ ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string }>; }
 /** TASK-123: the effective prompt budget shown to the card and used by the confirm split. */
 const DEFAULT_PROMPT_BYTES = EXPLAIN_DEFAULT_PROMPT_BYTES;
+/** TASK-125: the effective child output budget shown to the card (same single source as the scheduler). */
+const DEFAULT_MAX_OUTPUT_TOKENS = EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS;
+function maxOutputTokensOf(ctx: Context): number { const config = ctx.get("iciExplainConfig") as ExplainConfigFace | undefined; const value = config?.maxOutputTokens; return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_OUTPUT_TOKENS; }
 function promptBudgetOf(ctx: Context): number { const config = ctx.get("iciExplainConfig") as ExplainConfigFace | undefined; const value = config?.maxPromptBytes; return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_PROMPT_BYTES; }
 /** TASK-123: the same byte accounting the status route reports, so card and server agree. */
 async function promptBytesOf(root: string, prepareArtifactPath: string): Promise<number> { try { const prepare = await loadPrepare(root, prepareArtifactPath); const sources = prepare.sources.reduce((sum, ref) => sum + (ref.readable ? ref.bytes : 0), 0); return Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + sources + 1024; } catch { return 0; } }
@@ -158,23 +161,23 @@ export class ExplainRoutesService extends Service {
     }
     return output;
   }
-  private schedulerInfo(): { readonly maxConcurrent: number; readonly inFlight: number; readonly maxPromptBytes: number } {
+  private schedulerInfo(): { readonly maxConcurrent: number; readonly inFlight: number; readonly maxPromptBytes: number; readonly maxOutputTokens: number } {
     const scheduler = this.ctx.get("iciExplainScheduler") as SchedulerStatusFace | undefined;
     const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined;
     const live = scheduler?.status?.();
-    return { maxConcurrent: live?.maxConcurrent ?? config?.maxConcurrent ?? 4, inFlight: live?.inFlight ?? 0, maxPromptBytes: promptBudgetOf(this.ctx) };
+    return { maxConcurrent: live?.maxConcurrent ?? config?.maxConcurrent ?? 4, inFlight: live?.inFlight ?? 0, maxPromptBytes: promptBudgetOf(this.ctx), maxOutputTokens: maxOutputTokensOf(this.ctx) };
   }
   /**
    * TASK-111: a task's own ceiling (its setting, clamped by the Host ceiling) plus
    * its live count. The card reads both without any additional write path, and the
    * Host-wide value stays visible so the clamping is never hidden.
    */
-  private taskSchedulerInfo(root: string, batch: ExplainBatchRecord): { readonly maxConcurrent: number; readonly inFlight: number; readonly taskMaxConcurrent: number; readonly taskInFlight: number; readonly hostMaxConcurrent: number; readonly maxPromptBytes: number } {
+  private taskSchedulerInfo(root: string, batch: ExplainBatchRecord): { readonly maxConcurrent: number; readonly inFlight: number; readonly taskMaxConcurrent: number; readonly taskInFlight: number; readonly hostMaxConcurrent: number; readonly maxPromptBytes: number; readonly maxOutputTokens: number } {
     const host = this.schedulerInfo();
     const scheduler = this.ctx.get("iciExplainScheduler") as SchedulerStatusFace | undefined;
     const declared = typeof batch.maxConcurrent === "number" ? batch.maxConcurrent : host.maxConcurrent;
     const taskMaxConcurrent = Math.max(EXPLAIN_TASK_CONCURRENCY_MIN, Math.min(declared, host.maxConcurrent));
-    return { maxConcurrent: host.maxConcurrent, inFlight: host.inFlight, taskMaxConcurrent, taskInFlight: scheduler?.taskInFlightCount?.(root, batch.batchId) ?? 0, hostMaxConcurrent: host.maxConcurrent, maxPromptBytes: host.maxPromptBytes };
+    return { maxConcurrent: host.maxConcurrent, inFlight: host.inFlight, taskMaxConcurrent, taskInFlight: scheduler?.taskInFlightCount?.(root, batch.batchId) ?? 0, hostMaxConcurrent: host.maxConcurrent, maxPromptBytes: host.maxPromptBytes, maxOutputTokens: host.maxOutputTokens };
   }
   private async getJob(located: Located, res: ServerResponse): Promise<void> {
     let prepare: any; try { prepare = await loadPrepare(located.root, located.job.prepareArtifactPath); } catch { fail(res, 409, "prepare-invalidated"); return; }
@@ -563,15 +566,19 @@ export class ExplainRoutesService extends Service {
     if (typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) { fail(res, 415, "invalid-input"); return; }
     const body = await readBody(req);
     if (body === null) { fail(res, 413, "input-too-large"); return; }
-    if (!hasOnly(body, ["maxConcurrent", "maxPromptBytes"])) { fail(res, 422, "invalid-input"); return; }
-    if (!Object.prototype.hasOwnProperty.call(body, "maxConcurrent") && !Object.prototype.hasOwnProperty.call(body, "maxPromptBytes")) { fail(res, 422, "invalid-input"); return; }
+    if (!hasOnly(body, ["maxConcurrent", "maxPromptBytes", "maxOutputTokens"])) { fail(res, 422, "invalid-input"); return; }
+    if (!["maxConcurrent", "maxPromptBytes", "maxOutputTokens"].some(key => Object.prototype.hasOwnProperty.call(body, key))) { fail(res, 422, "invalid-input"); return; }
     const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined;
     if (config === undefined) { fail(res, 500, "storage-error"); return; }
-    let result: { ok: true; value: { maxConcurrent: number; maxPromptBytes?: number } } | { ok: false; code: string } = { ok: true, value: { maxConcurrent: config.maxConcurrent, maxPromptBytes: promptBudgetOf(this.ctx) } };
+    let result: { ok: true; value: { maxConcurrent: number; maxPromptBytes?: number; maxOutputTokens?: number } } | { ok: false; code: string } = { ok: true, value: { maxConcurrent: config.maxConcurrent, maxPromptBytes: promptBudgetOf(this.ctx) } };
     if (Object.prototype.hasOwnProperty.call(body, "maxConcurrent")) result = await config.setMaxConcurrent(body.maxConcurrent);
     if (result.ok && Object.prototype.hasOwnProperty.call(body, "maxPromptBytes")) {
       if (config.setMaxPromptBytes === undefined) { fail(res, 500, "storage-error"); return; }
       result = await config.setMaxPromptBytes(body.maxPromptBytes);
+    }
+    if (result.ok && Object.prototype.hasOwnProperty.call(body, "maxOutputTokens")) {
+      if (config.setMaxOutputTokens === undefined) { fail(res, 500, "storage-error"); return; }
+      result = await config.setMaxOutputTokens(body.maxOutputTokens);
     }
     if (!result.ok) { fail(res, result.code === "invalid-input" ? 422 : 500, result.code); return; }
     ok(res, { ...result.value, ...this.schedulerInfo() });

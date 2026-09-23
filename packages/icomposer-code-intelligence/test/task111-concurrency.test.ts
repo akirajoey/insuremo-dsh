@@ -168,7 +168,7 @@ test("TASK-111 two tasks keep their own ceilings, and the Host ceiling still dom
     assert.ok(other !== null);
 
     // Host ceiling 1 dominates both task settings: exactly one stream anywhere.
-    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576 } });
+    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
     fx.pump();
     await waitAllSettled(taskA.root, taskA.jobs);
     await waitAllSettled(taskB.root, taskB.jobs);

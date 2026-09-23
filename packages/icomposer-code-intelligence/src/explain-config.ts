@@ -23,19 +23,29 @@ export const EXPLAIN_DEFAULT_CONCURRENCY = 4 as const;
 export const EXPLAIN_DEFAULT_PROMPT_BYTES = 1048576;
 export const EXPLAIN_MIN_PROMPT_BYTES = 16384;
 export const EXPLAIN_MAX_PROMPT_BYTES = 8388608;
+/**
+ * TASK-125: the child explain session's output budget. It used to be hardcoded to 4096, which is
+ * inconsistent with the submit schema (technical + business up to 12k chars each). The default is
+ * 16384 and the bounds are, like the prompt budget, a typo guard rather than a product ceiling.
+ */
+export const EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS = 16384;
+export const EXPLAIN_MIN_MAX_OUTPUT_TOKENS = 1024;
+export const EXPLAIN_MAX_MAX_OUTPUT_TOKENS = 262144;
 
 /** Strict durable/effective shape: an integer in the closed 1–32 range. */
 export const explainConcurrencySchema = z.number().int().min(EXPLAIN_MIN_CONCURRENCY).max(EXPLAIN_MAX_CONCURRENCY);
 /** TASK-123: strict durable/effective shape for the prompt budget; a legacy record gets the default. */
 export const explainPromptBytesSchema = z.number().int().min(EXPLAIN_MIN_PROMPT_BYTES).max(EXPLAIN_MAX_PROMPT_BYTES);
+/** TASK-125: strict durable/effective shape for the child output budget; legacy records get the default. */
+export const explainMaxOutputTokensSchema = z.number().int().min(EXPLAIN_MIN_MAX_OUTPUT_TOKENS).max(EXPLAIN_MAX_MAX_OUTPUT_TOKENS);
 
 /** Durable Host-wide Explain configuration domain (global singleton). */
 export const explainConfigDomain = defineDomain({
   name: "ici_explain_config",
   version: 1,
   global: {
-    schema: z.object({ maxConcurrent: explainConcurrencySchema, maxPromptBytes: explainPromptBytesSchema.default(EXPLAIN_DEFAULT_PROMPT_BYTES) }),
-    initial: { maxConcurrent: EXPLAIN_DEFAULT_CONCURRENCY, maxPromptBytes: EXPLAIN_DEFAULT_PROMPT_BYTES },
+    schema: z.object({ maxConcurrent: explainConcurrencySchema, maxPromptBytes: explainPromptBytesSchema.default(EXPLAIN_DEFAULT_PROMPT_BYTES), maxOutputTokens: explainMaxOutputTokensSchema.default(EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS) }),
+    initial: { maxConcurrent: EXPLAIN_DEFAULT_CONCURRENCY, maxPromptBytes: EXPLAIN_DEFAULT_PROMPT_BYTES, maxOutputTokens: EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS },
   },
   tables: {},
 });
@@ -45,6 +55,8 @@ export interface ExplainConcurrencyView {
   readonly maxConcurrent: number;
   /** TASK-123: effective prompt budget for this Host instance. */
   readonly maxPromptBytes: number;
+  /** TASK-125: effective per-child output budget for this Host instance. */
+  readonly maxOutputTokens: number;
 }
 
 /** Outcome of the single setting write entry. */
@@ -71,6 +83,7 @@ export class ExplainConfigService extends Service {
   private domain: OpenDomain | undefined;
   private maxConcurrentValue: number = EXPLAIN_DEFAULT_CONCURRENCY;
   private maxPromptBytesValue: number = EXPLAIN_DEFAULT_PROMPT_BYTES;
+  private maxOutputTokensValue: number = EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS;
   private readonly listeners = new Set<(maxConcurrent: number) => void>();
   private writeTail: Promise<unknown> = Promise.resolve();
   private serviceDisposed = false;
@@ -79,6 +92,7 @@ export class ExplainConfigService extends Service {
     super(ctx, "iciExplainConfig" as never);
     this.setMaxConcurrent = this.setMaxConcurrent.bind(this);
     this.setMaxPromptBytes = this.setMaxPromptBytes.bind(this);
+    this.setMaxOutputTokens = this.setMaxOutputTokens.bind(this);
     this.onChange = this.onChange.bind(this);
     this.dispose = this.dispose.bind(this);
   }
@@ -98,6 +112,7 @@ export class ExplainConfigService extends Service {
       this.domain = domain;
       this.maxConcurrentValue = stored.maxConcurrent;
       this.maxPromptBytesValue = stored.maxPromptBytes;
+      this.maxOutputTokensValue = stored.maxOutputTokens;
     } catch (error) {
       await domain.close().catch(() => undefined);
       throw error;
@@ -115,9 +130,14 @@ export class ExplainConfigService extends Service {
     return this.maxPromptBytesValue;
   }
 
+  /** TASK-125: effective child output budget (fallback for a Host without this config). */
+  get maxOutputTokens(): number {
+    return this.maxOutputTokensValue;
+  }
+
   /** Detached view for status payloads. */
   get view(): ExplainConcurrencyView {
-    return { maxConcurrent: this.maxConcurrentValue, maxPromptBytes: this.maxPromptBytesValue };
+    return { maxConcurrent: this.maxConcurrentValue, maxPromptBytes: this.maxPromptBytesValue, maxOutputTokens: this.maxOutputTokensValue };
   }
 
   /**
@@ -138,7 +158,7 @@ export class ExplainConfigService extends Service {
     const domain = this.domain;
     const write = async (): Promise<ExplainConcurrencyResult> => {
       try {
-        await domain.global.set({ maxConcurrent: input });
+        await domain.global.set({ maxConcurrent: input, maxPromptBytes: this.maxPromptBytesValue, maxOutputTokens: this.maxOutputTokensValue });
       } catch {
         return { ok: false, code: "storage-error" };
       }
@@ -150,7 +170,7 @@ export class ExplainConfigService extends Service {
           // One consumer must not block the others or the committed write.
         }
       }
-      return { ok: true, value: { maxConcurrent: input, maxPromptBytes: this.maxPromptBytesValue } };
+      return { ok: true, value: { maxConcurrent: input, maxPromptBytes: this.maxPromptBytesValue, maxOutputTokens: this.maxOutputTokensValue } };
     };
     const task = this.writeTail.then(write, write);
     this.writeTail = task.then(() => undefined, () => undefined);
@@ -169,7 +189,7 @@ export class ExplainConfigService extends Service {
     const domain = this.domain;
     const write = async (): Promise<ExplainConcurrencyResult> => {
       try {
-        await domain.global.set({ maxConcurrent: this.maxConcurrentValue, maxPromptBytes: input });
+        await domain.global.set({ maxConcurrent: this.maxConcurrentValue, maxPromptBytes: input, maxOutputTokens: this.maxOutputTokensValue });
       } catch {
         return { ok: false, code: "storage-error" };
       }
@@ -177,7 +197,34 @@ export class ExplainConfigService extends Service {
       for (const listener of [...this.listeners]) {
         try { listener(this.maxConcurrentValue); } catch { /* one consumer must not block the others */ }
       }
-      return { ok: true, value: { maxConcurrent: this.maxConcurrentValue, maxPromptBytes: input } };
+      return { ok: true, value: { maxConcurrent: this.maxConcurrentValue, maxPromptBytes: input, maxOutputTokens: this.maxOutputTokensValue } };
+    };
+    const task = this.writeTail.then(write, write);
+    this.writeTail = task.then(() => undefined, () => undefined);
+    return task;
+  }
+
+  /**
+   * TASK-125: the one write entry for the child output budget. Same discipline: validate strictly,
+   * persist first, then commit; an invalid input never touches storage or the effective value.
+   */
+  setMaxOutputTokens(input: unknown): Promise<ExplainConcurrencyResult> {
+    if (this.serviceDisposed || this.domain === undefined) return Promise.resolve({ ok: false, code: "storage-error" });
+    if (typeof input !== "number" || !Number.isInteger(input) || input < EXPLAIN_MIN_MAX_OUTPUT_TOKENS || input > EXPLAIN_MAX_MAX_OUTPUT_TOKENS) {
+      return Promise.resolve({ ok: false, code: "invalid-input" });
+    }
+    const domain = this.domain;
+    const write = async (): Promise<ExplainConcurrencyResult> => {
+      try {
+        await domain.global.set({ maxConcurrent: this.maxConcurrentValue, maxPromptBytes: this.maxPromptBytesValue, maxOutputTokens: input });
+      } catch {
+        return { ok: false, code: "storage-error" };
+      }
+      this.maxOutputTokensValue = input;
+      for (const listener of [...this.listeners]) {
+        try { listener(this.maxConcurrentValue); } catch { /* one consumer must not block the others */ }
+      }
+      return { ok: true, value: { maxConcurrent: this.maxConcurrentValue, maxPromptBytes: this.maxPromptBytesValue, maxOutputTokens: input } };
     };
     const task = this.writeTail.then(write, write);
     this.writeTail = task.then(() => undefined, () => undefined);

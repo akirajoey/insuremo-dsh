@@ -127,7 +127,7 @@ test("TASK-121 (5) confirming a task whose member chain is truncated no longer f
     ctx.provide("llm", { listProviders: () => [{ id: "mvp" }], resolveModelInfo: async () => ({ provider: "mvp" }) });
     ctx.provide("iciEngine", {});
     ctx.provide("iciExplainScheduler", { poke: () => undefined, cancelJob: async () => true, taskInFlightCount: () => 0 });
-    ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4, maxPromptBytes: 1048576 } }) });
+    ctx.provide("iciExplainConfig", { maxConcurrent: 4, setMaxConcurrent: async () => ({ ok: true, value: { maxConcurrent: 4, maxPromptBytes: 1048576, maxOutputTokens: 16384 } }) });
     const fiber: any = await ctx.plugin(ExplainRoutesService); await fiber.await();
     try {
       const bytes = JSON.stringify({ provider: "mvp", model: "mvp-model", docs: [], referenceTarget: { path: "", kind: "none" }, notBefore: new Date().toISOString(), consent: true });

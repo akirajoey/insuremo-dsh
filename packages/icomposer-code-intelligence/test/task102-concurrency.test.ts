@@ -196,7 +196,7 @@ test("TASK-102: cap 1 serializes streams (no more than one active stream)", asyn
   const workspace = await createWorkspaceJobs(3);
   const fx = await fixture([workspace]);
   try {
-    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576 } });
+    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
     await fx.scheduleAll();
     await waitFor(() => fx.adapter.gates.length === 1, "one running stream");
     assert.equal(fx.adapter.maxActive, 1);
@@ -215,7 +215,7 @@ test("TASK-102: raising the cap fills the new capacity immediately", async () =>
     await fx.config.setMaxConcurrent(1);
     await fx.scheduleAll();
     await waitFor(() => fx.adapter.gates.length === 1, "initial single stream");
-    assert.deepEqual(await fx.config.setMaxConcurrent(3), { ok: true, value: { maxConcurrent: 3, maxPromptBytes: 1048576 } });
+    assert.deepEqual(await fx.config.setMaxConcurrent(3), { ok: true, value: { maxConcurrent: 3, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
     await waitFor(() => fx.adapter.gates.length === 3, "capacity filled to the new cap");
     assert.equal(fx.adapter.maxActive, 3);
     fx.pump();
@@ -230,7 +230,7 @@ test("TASK-102: lowering the cap keeps in-flight jobs and throttles only new sta
   try {
     await fx.scheduleAll();
     await waitFor(() => fx.adapter.gates.length === 4, "four running at the default cap");
-    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576 } });
+    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
     assert.equal(fx.adapter.gates.length, 4, "lowering never cancels in-flight jobs");
     assert.equal(fx.adapter.maxActive, 4);
     assert.deepEqual(fx.scheduler.status(), { maxConcurrent: 1, inFlight: 4 });
@@ -326,7 +326,7 @@ test("TASK-102: strict setting validation and storage failure keep the previous 
       assert.deepEqual(result, { ok: false, code: "invalid-input" }, `rejects ${String(invalid)}`);
       assert.equal(fx.config.maxConcurrent, 4, "invalid input never changes the effective cap");
     }
-    assert.deepEqual(await fx.config.setMaxConcurrent(8), { ok: true, value: { maxConcurrent: 8, maxPromptBytes: 1048576 } });
+    assert.deepEqual(await fx.config.setMaxConcurrent(8), { ok: true, value: { maxConcurrent: 8, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
     assert.equal(fx.config.maxConcurrent, 8);
     await fx.config.dispose();
     assert.deepEqual(await fx.config.setMaxConcurrent(2), { ok: false, code: "storage-error" });
@@ -419,7 +419,7 @@ test("TASK-102 P1-02: decreasing the cap inside the binding.get window starts no
     fx.scheduler.poke();
     await waitFor(() => getEntered, "second job parked in binding.get");
     assert.deepEqual(fx.scheduler.status(), { maxConcurrent: 2, inFlight: 1 });
-    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576 } });
+    assert.deepEqual(await fx.config.setMaxConcurrent(1), { ok: true, value: { maxConcurrent: 1, maxPromptBytes: 1048576, maxOutputTokens: 16384 } });
     releaseGet();
     await new Promise(resolve => setTimeout(resolve, 1_200));
     assert.equal(fx.adapter.gates.length, 1, "no second stream past the reduced cap");
