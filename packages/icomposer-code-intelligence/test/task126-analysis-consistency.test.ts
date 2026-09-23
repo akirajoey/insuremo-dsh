@@ -17,6 +17,7 @@ import {
 } from "../src/explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "../src/engine-version.ts";
 import { processConfirmedJob } from "../src/explain-scheduler.ts";
+import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 
 /**
  * TASK-126: the submit side and the publish side must apply ONE rule set. The publish side used to
@@ -126,7 +127,7 @@ test("TASK-126 (3) an analysis-invalid at publication is recorded as analysis-in
   }
 });
 
-test("TASK-126 (4) end to end: a varargs flow submitted by the child now reaches final", async () => {
+test("TASK-126 (4) end to end: a varargs flow reaches final AND the published artifact is readable", async () => {
   const fx = await fixture();
   const adapter = new SubmitAdapter([VARARGS_FLOW]);
   const ctx = await harness(adapter);
@@ -135,5 +136,37 @@ test("TASK-126 (4) end to end: a varargs flow submitted by the child now reaches
     await processConfirmedJob(ctx.llm, fx.root, jobIds[0], new AbortController().signal, ctx, parent);
     const after = await readJobRecord(fx.root, jobIds[0]);
     assert.equal(after?.status, "final", after?.error);
+    // TASK-129: "final" alone was never enough -- the read side (contracts validFinal) must accept
+    // the SAME payload, otherwise the card shows a final job with no artifact.
+    const readable = await readValidatedExplainFinal(fx.root, "ReduceSAAPI", workspaceId);
+    assert.notEqual(readable, null, "the published final must be readable back");
+    assert.deepEqual(readable?.final.apiAnalysis.flow, [VARARGS_FLOW]);
   } finally { parent.cancel("cancelled"); await parent.whenIdle(); await fx.cleanup(); }
+});
+
+test("TASK-126 (5) all three sides of the submit boundary agree on the same flow payloads", async () => {
+  const fx = await fixture();
+  try {
+    const prepare = await loadPrepare(fx.root, fx.prepared.artifactPath);
+    const evidence = ["src/dev/Tenant/STD_BS_PA_BUSINESS/api/ReduceSAAPI/ReduceSAAPI.groovy#1"];
+    const accepted = [
+      VARARGS_FLOW,
+      "String... names",
+      "bizUtils.getAge(...)",
+      "Tenant...TypeConverterUtils.resolve(...)",
+    ];
+    for (const [index, flow] of accepted.entries()) {
+      const payload = { technical: "t", business: "b", flow: [flow], evidence };
+      assert.equal(validAnalysis(payload as any), true, `publish side must accept ${flow}`);
+      const published = await finalizeExplain(fx.root, workspaceId, fx.prepared.artifactPath, { api: payload }, { sourceFingerprint: prepare.manifest.sourceFingerprint, graphDigest: prepare.manifest.graphDigest, engineVersion: ICI_ENGINE_VERSION }, undefined, `12600000000000${(index + 1).toString().padStart(2, "0")}`);
+      assert.deepEqual(published.artifact.apiAnalysis.flow, [flow]);
+      const readable = await readValidatedExplainFinal(fx.root, "ReduceSAAPI", workspaceId);
+      assert.notEqual(readable, null, `read side must accept ${flow}`);
+      assert.deepEqual(readable?.final.apiAnalysis.flow, [flow]);
+    }
+    // The rules that remain identical on all three sides still reject absolute paths.
+    const absolute = { technical: "t", business: "b", flow: ["/etc/passwd"], evidence };
+    assert.equal(validAnalysis(absolute as any), false);
+    await assert.rejects(() => finalizeExplain(fx.root, workspaceId, fx.prepared.artifactPath, { api: absolute }, { sourceFingerprint: prepare.manifest.sourceFingerprint, graphDigest: prepare.manifest.graphDigest, engineVersion: ICI_ENGINE_VERSION }, undefined, "12600000000000ff"));
+  } finally { await fx.cleanup(); }
 });
