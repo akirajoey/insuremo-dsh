@@ -3,7 +3,7 @@ import { lstat, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import type { IciEdge, IciNode } from "./types.ts";
 import type { LoadedGraph } from "./query.ts";
-import { readContainedExplainJson, readValidatedExplainFinal, setExplainWriterFailpoint, validExplainBatchPlan, validExplainBatchRecord, validExplainBatchJobIds, validExplainBatchShardRecord, withExplainFileLock, writeExplainFile, EXPLAIN_BATCH_INLINE_MAX, EXPLAIN_BATCH_SHARD_MAX, EXPLAIN_TASK_CONCURRENCY_MAX, EXPLAIN_TASK_CONCURRENCY_MIN, type ExplainBatchHeader, type ExplainBatchPlan, type ExplainBatchRecord as ContractExplainBatchRecord } from "@icomposer/workbench-contracts/ici-explain";
+import { canonicalFinalPath, readContainedExplainJson, readValidatedExplainFinal, setExplainWriterFailpoint, validExplainBatchPlan, validExplainBatchRecord, validExplainBatchJobIds, validExplainBatchShardRecord, withExplainFileLock, writeExplainFile, EXPLAIN_BATCH_INLINE_MAX, EXPLAIN_BATCH_SHARD_MAX, EXPLAIN_TASK_CONCURRENCY_MAX, EXPLAIN_TASK_CONCURRENCY_MIN, type ExplainBatchHeader, type ExplainBatchPlan, type ExplainBatchRecord as ContractExplainBatchRecord } from "@icomposer/workbench-contracts/ici-explain";
 import { explainBaseDir, graphBaseDir, legacyGraphBaseDir, readManifest } from "./storage.ts";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 import { HOST_INSTANCE_ID } from "./host-instance.ts";
@@ -33,7 +33,7 @@ const SECRET_PATTERN = EXPLAIN_SECRET_PATTERN;
 const ABSOLUTE_PATH_PATTERN = EXPLAIN_ABSOLUTE_PATH_PATTERN;
 const ABSOLUTE_PATH_TOKEN_PATTERN = EXPLAIN_ABSOLUTE_PATH_TOKEN_PATTERN;
 const ABSOLUTE_PATH_REPLACEMENT = EXPLAIN_ABSOLUTE_PATH_REPLACEMENT;
-export type ExplainFinalizePhase = "before-final" | "after-final" | "after-state";
+export type ExplainFinalizePhase = "before-final" | "after-final" | "after-canonical" | "after-state";
 let explainFinalizeFailpoint: ((phase: ExplainFinalizePhase) => void | Promise<void>) | undefined;
 export function setExplainFinalizeFailpoint(failpoint: ((phase: ExplainFinalizePhase) => void | Promise<void>) | undefined): void { explainFinalizeFailpoint = failpoint; }
 
@@ -111,7 +111,46 @@ function stateRel(): string { return ".metadata/icomposer/ici/explain/state.json
 function writeOptions(relativePath: string, signal?: AbortSignal): Record<string, unknown> { return relativePath === stateRel() ? { signal, lockKey: "workspace-publication" } : relativePath.includes("/finals/") ? { signal, exclusive: true } : { signal }; }
 async function writeExplain(root: string, relativePath: string, content: string, signal?: AbortSignal): Promise<void> { await writeExplainFile(root, relativePath, content, writeOptions(relativePath, signal)); }
 export async function readExplainPublicationState(root: string): Promise<unknown | null> { try { return (await readValidatedExplainFinal(root))?.state ?? null; } catch { return null; } }
-export async function restoreExplainPublicationState(root: string, state: unknown | null): Promise<void> { if (state === null) { await rm(join(root, stateRel()), { force: true }); return; } await writeExplainFile(root, stateRel(), `${JSON.stringify(state, null, 2)}\n`, { lockKey: "workspace-publication", skipFailpoint: true }); }
+/** TASK-130: the stable, canonical result file for one API (`<slug>/final.json`); one definition, in the contract package. */
+export function canonicalFinalArtifactPath(apiName: string): string { return canonicalFinalPath(apiName); }
+/** True when the text is a final artifact whose semantic digest equals `finalDigest` (same digest as the publication state). */
+function finalTextMatchesDigest(text: string, finalDigest: string): boolean { try { const value = JSON.parse(text); return digest({ ...value, generatedAt: undefined }) === finalDigest; } catch { return false; } }
+/** The immutable history file for `apiName` that carries `finalDigest`, if one exists (rollback support). */
+async function findImmutableFinalByDigest(root: string, apiName: string, finalDigest: string): Promise<string | null> {
+  try {
+    const dir = join(root, `${canonicalFinalPath(apiName)}`.slice(0, `${canonicalFinalPath(apiName)}`.lastIndexOf("/")) , "finals");
+    const entries = await readdir(dir).catch(() => [] as string[]);
+    for (const entry of entries.sort().reverse()) {
+      if (!/^[a-f0-9]{16}\.json$/.test(entry)) continue;
+      const text = await readFile(join(dir, entry), "utf8").catch(() => null);
+      if (text !== null && finalTextMatchesDigest(text, finalDigest)) return text;
+    }
+  } catch { /* fall through to "not found" */ }
+  return null;
+}
+export async function restoreExplainPublicationState(root: string, state: unknown | null): Promise<void> {
+  if (state === null) { await rm(join(root, stateRel()), { force: true }); return; }
+  await writeExplainFile(root, stateRel(), `${JSON.stringify(state, null, 2)}\n`, { lockKey: "workspace-publication", skipFailpoint: true });
+  // TASK-130: a rollback must also leave the canonical copy consistent with the restored state. When
+  // the restored publication does not point at the canonical file, the canonical copy is only kept
+  // when it is byte-identical to the file the state points at; otherwise it is removed so readers
+  // fall back to the immutable history file instead of serving a rolled-back result.
+  try {
+    const apiName = (state as { apiName?: unknown }).apiName; const finalDigestValue = (state as { finalDigest?: unknown }).finalDigest;
+    if (typeof apiName === "string" && typeof finalDigestValue === "string") {
+      const canonicalRel = canonicalFinalPath(apiName); const canonical = join(root, canonicalRel);
+      const canonicalText = await readFile(canonical, "utf8").catch(() => null);
+      if (canonicalText === null || !finalTextMatchesDigest(canonicalText, finalDigestValue)) {
+        // The canonical copy belongs to the rolled-back publication: restore it from the immutable
+        // history file that carries the restored digest (no extra state field, so an older Host can
+        // still read a new state), or remove it so readers use the recorded path.
+        const restored = await findImmutableFinalByDigest(root, apiName, finalDigestValue);
+        if (restored === null) { if (canonicalText !== null) await rm(canonical, { force: true }); }
+        else await writeExplainFile(root, canonicalRel, restored, { skipFailpoint: true });
+      }
+    }
+  } catch { /* the canonical copy is optional: readers fall back to the recorded immutable file */ }
+}
 
 async function containedFile(root: string, path: string): Promise<string> {
   if (!safeRel(path)) throw new Error("source-forbidden");
@@ -229,8 +268,13 @@ export async function finalizeExplain(root: string, workspaceId: string, prepare
   const prepare = await loadPrepare(root, preparePathRel); if (prepare.workspaceId !== workspaceId) throw new Error("prepare-invalidated"); const graphManifest = await readManifest(graphBaseDir(root, workspaceId), legacyGraphBaseDir(root, workspaceId)); if (!graphManifest || current.engineVersion !== ICI_ENGINE_VERSION || graphManifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.sourceFingerprint !== current.sourceFingerprint || prepare.manifest.graphDigest !== current.graphDigest || graphManifest.sourceFingerprint !== current.sourceFingerprint || graphManifest.graphDigest !== current.graphDigest) throw new Error("stale-snapshot"); if (!validAnalysis(analysis.api)) throw new Error("analysis-invalid");
   const selectedTarget = referenceTarget ?? (folderPath === "" ? NONE_REFERENCE_TARGET : { path: folderPath, kind: "directory" as const }); if (!validReferenceTarget(selectedTarget)) throw new Error("folder-changed"); await assertReferenceTarget(root, selectedTarget); if (selectedTarget.kind === "none") { if (folderReads.length > 0) throw new Error("folder-changed"); } else { const folderPrefix = selectedTarget.path === "" ? "" : `${selectedTarget.path}/`; const seenFolderReads = new Map<string, string>(); for (const ref of folderReads) { const validPath = selectedTarget.kind === "file" ? ref.path === selectedTarget.path : ref.path.startsWith(folderPrefix); if (!safeRel(ref.path) || !validPath || !supportedFolderFile(ref.path) || !/^[a-f0-9]{64}$/.test(ref.sha256)) throw new Error("folder-changed"); const previousDigest = seenFolderReads.get(ref.path); if (previousDigest !== undefined) { if (previousDigest !== ref.sha256) throw new Error("folder-changed"); continue; } seenFolderReads.set(ref.path, ref.sha256); try { const target = await containedFile(root, ref.path); if ((await lstat(target)).size > 64 * 1024 || digest(await readFile(target, "utf8")) !== ref.sha256) throw new Error("folder-changed"); } catch { throw new Error("folder-changed"); } } }
   const artifactPath = finalRel(prepare.api.name, finalId ?? prepare.prepareId.slice(0, 16)); const artifact: ExplainFinalArtifact = { schemaVersion: 3, kind: "final", workspaceId: prepare.workspaceId, api: prepare.api, callChain: prepare.callChain, manifest: prepare.manifest, prepareId: prepare.prepareId, sourceFingerprint: prepare.manifest.sourceFingerprint, graphDigest: prepare.manifest.graphDigest, contextHash: prepare.contextHash, generatedBy: "current-agent", verified: false, needsBusinessReview: true, generatedAt: new Date().toISOString(), apiAnalysis: { technical: analysis.api.technical, business: analysis.api.business, flow: [...analysis.api.flow].slice(0, 64), evidence: [...analysis.api.evidence].slice(0, 64) } };
-  const finalDigest = digest({ ...artifact, generatedAt: undefined }); const previousState = await readExplainPublicationState(root); try { await explainFinalizeFailpoint?.("before-final"); await writeExplain(root, artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, signal); await explainFinalizeFailpoint?.("after-final"); await writeExplain(root, stateRel(), `${JSON.stringify({ schemaVersion: 3, kind: "final", apiName: prepare.api.name, artifactPath, generatedAt: artifact.generatedAt, sourceFingerprint: artifact.sourceFingerprint, graphDigest: artifact.graphDigest, contextHash: artifact.contextHash, finalDigest }, null, 2)}\n`, signal); await explainFinalizeFailpoint?.("after-state"); } catch (cause) { try { await restoreExplainPublicationState(root, previousState); } catch { /* preserve the original publication failure; readiness remains fail-closed */ } throw cause; }
-  return { artifact, artifactPath };
+  const finalDigest = digest({ ...artifact, generatedAt: undefined }); const previousState = await readExplainPublicationState(root); const canonicalPath = canonicalFinalPath(prepare.api.name); let previousCanonical: string | null = null; try { previousCanonical = await readFile(join(root, canonicalPath), "utf8"); } catch { previousCanonical = null; } try { await explainFinalizeFailpoint?.("before-final"); await writeExplain(root, artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, signal); await explainFinalizeFailpoint?.("after-final");
+    // TASK-130: append the canonical copy inside the same transaction. A failure here fails the whole
+    // publication (the previous canonical content is restored or removed, then the publication state
+    // is rolled back), so the canonical file can never disagree with the immutable history.
+    await writeExplain(root, canonicalPath, `${JSON.stringify(artifact, null, 2)}\n`, signal);
+    await explainFinalizeFailpoint?.("after-canonical"); await writeExplain(root, stateRel(), `${JSON.stringify({ schemaVersion: 3, kind: "final", apiName: prepare.api.name, artifactPath: canonicalPath, generatedAt: artifact.generatedAt, sourceFingerprint: artifact.sourceFingerprint, graphDigest: artifact.graphDigest, contextHash: artifact.contextHash, finalDigest }, null, 2)}\n`, signal); await explainFinalizeFailpoint?.("after-state"); } catch (cause) { try { if (previousCanonical === null) await rm(join(root, canonicalPath), { force: true }); else await writeExplainFile(root, canonicalPath, previousCanonical, { skipFailpoint: true }); } catch { /* the restore below still makes readers use the immutable history */ } try { await restoreExplainPublicationState(root, previousState); } catch { /* preserve the original publication failure; readiness remains fail-closed */ } throw cause; }
+  return { artifact, artifactPath: canonicalPath };
 }
 export function prepareArtifactPath(apiName: string): string { return prepareRel(apiName); }
 export function finalArtifactPath(apiName: string, jobId: string): string { return finalRel(apiName, jobId); }

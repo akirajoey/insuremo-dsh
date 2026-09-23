@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ import AgentRegistry from "@deepseek-ai/dsh-agent";
 import AgentLoop from "@deepseek-ai/dsh-agent-loop";
 import { buildGraph } from "../src/graph.ts";
 import { ExplainRoutesService } from "../src/explain-routes.ts";
-import { computeGraphDigest, createJobRecord, finalizeExplain, listReferenceEntries, NONE_REFERENCE_TARGET, prepareExplain, readBatchRecord, readJobRecord, readReferenceText, updateJobRecord, writeBatchRecord } from "../src/explain-artifacts.ts";
+import { canonicalFinalArtifactPath, computeGraphDigest, createJobRecord, finalArtifactPath, finalizeExplain, listReferenceEntries, NONE_REFERENCE_TARGET, prepareExplain, readBatchRecord, readJobRecord, readReferenceText, updateJobRecord, writeBatchRecord } from "../src/explain-artifacts.ts";
 import { ICI_ENGINE_VERSION } from "../src/engine-version.ts";
 import { processConfirmedJob } from "../src/explain-scheduler.ts";
 import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
@@ -213,7 +214,10 @@ test("TASK-061 finalize rejects nonempty folderReads for none target", async () 
     const current = { sourceFingerprint: fx.jobs[0].job.sourceFingerprint, graphDigest: fx.jobs[0].job.graphDigest, engineVersion: ICI_ENGINE_VERSION };
     await assert.rejects(() => finalizeExplain(fx.root, "recovery", fx.jobs[0].prepared.artifactPath, analysis, current, undefined, "3333333333333333", [{ path: "ref_doc/guide.md", sha256: "a".repeat(64) }], "", NONE_REFERENCE_TARGET), /folder-changed/);
     const ok = await finalizeExplain(fx.root, "recovery", fx.jobs[0].prepared.artifactPath, analysis, current, undefined, "4444444444444444", [], "", NONE_REFERENCE_TARGET);
-    assert.ok(ok.artifactPath.includes("4444444444444444"));
+    // TASK-130: publication returns the canonical path; the immutable history file is still written.
+    assert.equal(ok.artifactPath, canonicalFinalArtifactPath("AlphaAPI"));
+    assert.equal(ok.artifactPath.endsWith("/final.json"), true);
+    assert.equal(existsSync(join(fx.root, finalArtifactPath("AlphaAPI", "4444444444444444"))), true);
   } finally { await fx.cleanup(); }
 });
 

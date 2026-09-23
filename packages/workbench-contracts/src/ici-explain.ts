@@ -132,9 +132,17 @@ export async function writeExplainAbsolute(filename: string, content: string, op
   await writeExplainFile(normalized.slice(0, index), normalized.slice(index + 1), content, options);
 }
 
+/** TASK-130: the canonical, stable result path for one API. */
+export function canonicalFinalPath(apiName: string): string { return `${ROOT}explain/${safeApiSlug(apiName)}/final.json`; }
+/** TASK-130: the immutable per-publication history path (kept forever). */
+export function immutableFinalPath(apiName: string, id: string): string { return `${ROOT}explain/${safeApiSlug(apiName)}/finals/${id}.json`; }
 function validState(value: any): boolean {
   const prefix = typeof value?.apiName === "string" ? `${ROOT}explain/${safeApiSlug(value.apiName)}/finals/` : "";
-  return exact(value, STATE_KEYS) && value.schemaVersion === 3 && value.kind === "final" && text(value.apiName, 512) && typeof value.artifactPath === "string" && value.artifactPath.length <= 512 && !value.artifactPath.includes("\\") && !value.artifactPath.split("/").includes("..") && value.artifactPath.startsWith(prefix) && /^[a-f0-9]{16}\.json$/.test(value.artifactPath.slice(value.artifactPath.lastIndexOf("/") + 1)) && text(value.generatedAt, 128) && /^[a-f0-9]{64}$/.test(value.sourceFingerprint) && /^[a-f0-9]{64}$/.test(value.graphDigest) && /^[a-f0-9]{64}$/.test(value.contextHash) && /^[a-f0-9]{64}$/.test(value.finalDigest);
+  const canonical = typeof value?.apiName === "string" ? canonicalFinalPath(value.apiName) : "";
+  const immutableOk = value?.artifactPath?.startsWith(prefix) === true && /^[a-f0-9]{16}\.json$/.test(String(value.artifactPath).slice(String(value.artifactPath).lastIndexOf("/") + 1));
+  // TASK-130: the recorded path may be the immutable history file or the canonical result file.
+  const artifactPathOk = immutableOk || (canonical !== "" && value?.artifactPath === canonical);
+  return exact(value, STATE_KEYS) && value.schemaVersion === 3 && value.kind === "final" && text(value.apiName, 512) && typeof value.artifactPath === "string" && value.artifactPath.length <= 512 && !value.artifactPath.includes("\\") && !value.artifactPath.split("/").includes("..") && artifactPathOk && text(value.generatedAt, 128) && /^[a-f0-9]{64}$/.test(value.sourceFingerprint) && /^[a-f0-9]{64}$/.test(value.graphDigest) && /^[a-f0-9]{64}$/.test(value.contextHash) && /^[a-f0-9]{64}$/.test(value.finalDigest);
 }
 function validEvidence(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every(item => typeof item === "string" && item.length <= 400 && !SECRET_PATTERN.test(item) && /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+#\d+(?:-\d+)?$/.test(item) && !item.split("#", 1)[0].split("/").some((part: string) => part === "." || part === ".." || part === ".metadata"));
@@ -173,12 +181,24 @@ export async function readValidatedExplainFinal(root: string, expectedApiName?: 
     const state = await readArtifact(root, `${ROOT}explain/state.json`);
     if (!validState(state) || (expectedApiName !== undefined && state.apiName !== expectedApiName)) return null;
     const prefix = `${ROOT}explain/${safeApiSlug(state.apiName)}/finals/`;
-    if (!state.artifactPath.startsWith(prefix)) return null;
-    const final = await readArtifact(root, state.artifactPath);
-    if (!validFinal(final, state) || (expectedWorkspaceId !== undefined && final.workspaceId !== expectedWorkspaceId)) return null;
-    const manifest = await readArtifact(root, `${ROOT}graph/current/manifest.json`);
-    if (typeof manifest?.sourceFingerprint !== "string" || typeof manifest?.graphDigest !== "string" || manifest.sourceFingerprint !== state.sourceFingerprint || manifest.graphDigest !== state.graphDigest || (final.manifest.engineVersion !== undefined && final.manifest.engineVersion !== manifest.engineVersion)) return null;
-    return { state, final, artifactPath: state.artifactPath };
+    // TASK-130: prefer the canonical <slug>/final.json; fall back to the immutable publication the
+    // state already points at (legacy workspaces have no canonical file and read exactly as before).
+    // A canonical copy that does not match the state (stale or rolled back) fails validFinal and the
+    // loop falls through to the recorded path, so a half-written canonical can never be served.
+    const canonical = canonicalFinalPath(state.apiName);
+    const candidates = canonical === state.artifactPath ? [canonical] : [canonical, state.artifactPath];
+    for (const candidate of candidates) {
+      if (candidate !== canonical && !candidate.startsWith(prefix)) return null;
+      // A missing or unreadable candidate must only skip THAT candidate (a legacy workspace has no
+      // canonical file at all), never abort the whole read.
+      let final: any;
+      try { final = await readArtifact(root, candidate); } catch { continue; }
+      if (!validFinal(final, state) || (expectedWorkspaceId !== undefined && final.workspaceId !== expectedWorkspaceId)) continue;
+      const manifest = await readArtifact(root, `${ROOT}graph/current/manifest.json`);
+      if (typeof manifest?.sourceFingerprint !== "string" || typeof manifest?.graphDigest !== "string" || manifest.sourceFingerprint !== state.sourceFingerprint || manifest.graphDigest !== state.graphDigest || (final.manifest.engineVersion !== undefined && final.manifest.engineVersion !== manifest.engineVersion)) return null;
+      return { state, final, artifactPath: candidate };
+    }
+    return null;
   } catch { return null; }
 }
 export async function readContainedExplainJson(root: string, path: string): Promise<unknown> { return readArtifact(root, path); }

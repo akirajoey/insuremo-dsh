@@ -9,7 +9,7 @@ import { EXPLAIN_ABSOLUTE_PATH_PATTERN, EXPLAIN_SECRET_PATTERN, assertReferenceT
 import { withExplainFileLock, EXPLAIN_TASK_CONCURRENCY_MAX, EXPLAIN_TASK_CONCURRENCY_MIN } from "@icomposer/workbench-contracts/ici-explain";
 import { EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS, EXPLAIN_DEFAULT_PROMPT_BYTES } from "./explain-config.ts";
 import { pickNativeFile, type NativePickerKind } from "./native-picker.ts";
-import { readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
+import { canonicalFinalPath, readValidatedExplainFinal } from "@icomposer/workbench-contracts/ici-explain";
 import { ICI_ENGINE_VERSION } from "./engine-version.ts";
 
 export const EXPLAIN_ROUTES_PREFIX = "/api/icomposer-workbench/ici/explain" as const;
@@ -161,6 +161,14 @@ export class ExplainRoutesService extends Service {
     }
     return output;
   }
+  /**
+   * TASK-130: a published result is "committed for this job" when the publication carries this job's
+   * prepare and the recorded path is either the canonical `<slug>/final.json` (new layout) or this
+   * job's immutable history file (legacy layout).
+   */
+  private static committedFor(final: { readonly artifactPath: string; readonly final: any } | null | undefined, job: { readonly jobId: string; readonly apiName: string; readonly prepareId: string }): boolean {
+    return final !== null && final !== undefined && final.final?.prepareId === job.prepareId && (final.artifactPath === canonicalFinalPath(job.apiName) || final.artifactPath.endsWith(`/${job.jobId}.json`));
+  }
   private schedulerInfo(): { readonly maxConcurrent: number; readonly inFlight: number; readonly maxPromptBytes: number; readonly maxOutputTokens: number } {
     const scheduler = this.ctx.get("iciExplainScheduler") as SchedulerStatusFace | undefined;
     const config = this.ctx.get("iciExplainConfig") as ExplainConfigFace | undefined;
@@ -182,7 +190,7 @@ export class ExplainRoutesService extends Service {
   private async getJob(located: Located, res: ServerResponse): Promise<void> {
     let prepare: any; try { prepare = await loadPrepare(located.root, located.job.prepareArtifactPath); } catch { fail(res, 409, "prepare-invalidated"); return; }
     const final = await readValidatedExplainFinal(located.root, located.job.apiName, located.job.workspaceId);
-    const committed = final?.final?.prepareId === located.job.prepareId && final.artifactPath.endsWith(`${located.job.jobId}.json`) ? final : null;
+    const committed = ExplainRoutesService.committedFor(final, located.job) ? final : null;
     ok(res, {
       job: { jobId: located.job.jobId, workspaceId: located.job.workspaceId, apiId: located.job.apiId, apiName: located.job.apiName, provider: located.job.provider, model: located.job.model, engineVersion: located.job.engineVersion, status: located.job.status, revision: located.job.revision, docs: located.job.docs, error: located.job.error, notBefore: located.job.notBefore, childSessionId: located.job.childSessionId, startedAt: located.job.startedAt, finishedAt: located.job.finishedAt, folderPath: located.job.folderPath, referenceTarget: referenceTargetOf(located.job), artifactPath: committed?.artifactPath },
       summary: { nodes: prepare.callChain.nodes.length, edges: prepare.callChain.edges.length, sourceFiles: prepare.sources.length, readableSources: prepare.sources.filter((ref: any) => ref.readable).length, references: prepare.references.filter((ref: any) => ref.readable).length, sourceBytes: prepare.sources.reduce((sum: number, ref: any) => sum + (ref.readable ? ref.bytes : 0), 0), promptBaseBytes: Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + prepare.sources.reduce((sum: number, ref: any) => sum + (ref.readable ? ref.bytes : 0), 0) + 1024, truncated: prepare.callChain.truncated === true },
@@ -231,7 +239,7 @@ export class ExplainRoutesService extends Service {
       try { const prepare = await loadPrepare(located.root, job.prepareArtifactPath); jobSourceBytes = prepare.sources.reduce((sum, ref) => sum + (ref.readable ? ref.bytes : 0), 0); promptBytes = Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + jobSourceBytes + 1024; } catch { /* status remains useful even if an old prepare was invalidated */ }
       sourceBytes += jobSourceBytes; promptBaseBytes += promptBytes; maxPromptBaseBytes = Math.max(maxPromptBaseBytes, promptBytes);
       const final = await readValidatedExplainFinal(located.root, job.apiName, job.workspaceId);
-      const artifactPath = final?.final?.prepareId === job.prepareId && final.artifactPath.endsWith(`${job.jobId}.json`) ? final.artifactPath : undefined;
+      const artifactPath = ExplainRoutesService.committedFor(final, job) ? final!.artifactPath : undefined;
       jobs.push({ jobId: job.jobId, apiName: job.apiName, status: job.status, revision: job.revision, provider: job.provider, model: job.model, childSessionId: job.childSessionId, startedAt: job.startedAt, finishedAt: job.finishedAt, ...(artifactPath === undefined ? {} : { artifactPath }), ...(job.error === undefined ? {} : { error: job.error }), promptBaseBytes: promptBytes, sourceBytes: jobSourceBytes });
     }
     const summary = await this.batchStatusSummary(located.root, located.batch);

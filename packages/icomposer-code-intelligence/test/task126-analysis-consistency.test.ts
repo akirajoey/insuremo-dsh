@@ -89,7 +89,8 @@ test("TASK-126 (2) the field failures' reconstructed payloads all pass the publi
     const record = JSON.parse(await readFile(file, "utf8"));
     if (record.status === "failed" && record.error === "model-failed") failed.push(record);
   }
-  assert.equal(failed.length, 29, "the recorded model-failed group");
+  // The field workspace is live: the group may grow as the user re-runs APIs, so only its presence is pinned.
+  assert.ok(failed.length >= 29, `expected at least the 29 recorded model-failed jobs, got ${failed.length}`);
   let withVarargs = 0;
   for (const job of failed) {
     // Rebuild the payload shape the child would have submitted: a flow item carrying the varargs
