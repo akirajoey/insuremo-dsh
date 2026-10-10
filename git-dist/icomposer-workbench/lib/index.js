@@ -5028,6 +5028,112 @@ function apply$5(ctx) {
 }
 
 //#endregion
+//#region ../icomposer-catalog/src/enumerate.ts
+/**
+* TASK-111: the single path-aware source enumerator of the workspace.
+*
+* The catalog's *summary* (`listAssets`) is keyed by asset name and bounded by
+* `MAX_ASSETS` for display. Tasks must not inherit either property: one task may
+* target every API of a workspace, and two same-named APIs in different code
+* groups are two different assets. This walk therefore yields one item per
+* **source file path**, without any count cap, so callers can (a) build the
+* complete graph and (b) detect same-name collisions instead of merging them.
+*
+* Safety rules kept from the summary scan: only regular, non-symlink files under
+* `src/dev/<tenant>/<group>/<type>/<name>/` are produced, and an unreadable entry
+* is skipped rather than inventing an asset.
+*/
+/** One directory-entry name bound (mirrors the summary scan's name handling). */
+const MAX_NAME = 512;
+function usable(name$8) {
+	return name$8 !== "" && name$8 !== "." && name$8 !== ".." && name$8.length <= MAX_NAME && !name$8.includes("/") && !name$8.includes("\\") && !name$8.includes("\0");
+}
+function contained(target, root) {
+	return target === root || target.startsWith(`${root}/`);
+}
+/**
+* The same containment rule the summary scan and the graph builder apply
+* (`scan.ts` `isContained` / `graph.ts` `isContained`): a directory may only be
+* followed when its *real* path stays inside the walk root, so a symlink at any
+* level of `<tenant>/<group>/<type>/<name>` can never widen the enumeration
+* beyond the workspace's own source tree.
+*/
+async function containedDirectory$1(dir, rootReal) {
+	try {
+		return contained(await realpath(dir), rootReal);
+	} catch {
+		return false;
+	}
+}
+async function subdirectories(dir) {
+	let names;
+	try {
+		names = await import("node:fs/promises").then((fs) => fs.readdir(dir));
+	} catch {
+		return [];
+	}
+	const out = [];
+	for (const name$8 of names.sort()) {
+		if (!usable(name$8)) continue;
+		try {
+			const info = await lstat(join(dir, name$8));
+			if (info.isDirectory() && !info.isSymbolicLink()) out.push(name$8);
+		} catch {}
+	}
+	return out;
+}
+/**
+* Every deployed api/function source of a workspace as (path, name, tenant, group),
+* in a deterministic (tenant, group, name) order. Uncapped on purpose.
+*/
+async function* enumerateSources(canonicalRootInput, types = ["api", "function"]) {
+	const workspaceReal = await realpath(canonicalRootInput).catch(() => void 0);
+	if (workspaceReal === void 0) return;
+	const devRoot = join(workspaceReal, "src", "dev");
+	const devReal = await realpath(devRoot).catch(() => void 0);
+	if (devReal === void 0) return;
+	for (const tenant of await subdirectories(devRoot)) {
+		if (!await containedDirectory$1(join(devRoot, tenant), devReal)) continue;
+		for (const group of await subdirectories(join(devRoot, tenant))) {
+			const groupDir = join(devRoot, tenant, group);
+			if (!await containedDirectory$1(groupDir, devReal)) continue;
+			for (const type of types) {
+				const typeDir = join(groupDir, type);
+				if (!await containedDirectory$1(typeDir, devReal)) continue;
+				for (const name$8 of await subdirectories(typeDir)) {
+					const absolutePath = join(typeDir, name$8, `${name$8}.groovy`);
+					try {
+						const info = await lstat(absolutePath);
+						if (!info.isFile() || info.isSymbolicLink()) continue;
+						if (!contained(await realpath(absolutePath), devReal)) continue;
+					} catch {
+						continue;
+					}
+					yield {
+						name: name$8,
+						type,
+						tenant,
+						group,
+						relativePath: `src/dev/${tenant}/${group}/${type}/${name$8}/${name$8}.groovy`,
+						absolutePath
+					};
+				}
+			}
+		}
+	}
+}
+/** Names discovered at more than one source path: these are two distinct assets, never one. */
+function duplicateNames(discoveries) {
+	const pathsByName = /* @__PURE__ */ new Map();
+	for (const item of discoveries) {
+		const paths = pathsByName.get(item.name) ?? /* @__PURE__ */ new Set();
+		paths.add(item.relativePath);
+		pathsByName.set(item.name, paths);
+	}
+	return [...pathsByName.entries()].filter(([, paths]) => paths.size > 1).map(([name$8]) => name$8).sort();
+}
+
+//#endregion
 //#region ../icomposer-catalog/src/scan.ts
 const META_LIMIT$3 = 256 * 1024;
 const GROOVY_LIMIT$3 = 2 * 1024 * 1024;
@@ -5427,7 +5533,10 @@ var IcomposerCatalogService = class extends Service {
 	constructor(ctx) {
 		super(ctx, "icomposerCatalog");
 		const self = this;
-		const face = Object.freeze({ listAssets: (input, signal) => self.listAssets(input, signal) });
+		const face = Object.freeze({
+			listAssets: (input, signal) => self.listAssets(input, signal),
+			listSourcesComplete: (input, signal) => self.listSourcesComplete(input, signal)
+		});
 		ctx.set("icomposerCatalog", face);
 		ctx.effect(() => () => {
 			self.#disposed = true;
@@ -5474,6 +5583,56 @@ var IcomposerCatalogService = class extends Service {
 				ok: true,
 				value: Object.freeze(catalog)
 			};
+		});
+	}
+	/**
+	* TASK-111: complete api/function enumeration (uncapped, path-identified) for
+	* task target resolution and graph building. Same-name discoveries are reported,
+	* never merged; the display-oriented `listAssets` keeps its own 5000-item bound.
+	*/
+	async listSourcesComplete(input, signal) {
+		if (this.#disposed) return err$8("service-disposed", "catalog service is disposed");
+		if (signal?.aborted) return err$8("cancelled", "operation was cancelled");
+		if (!input || typeof input.workspaceId !== "string" || !input.workspaceId) return err$8("invalid-workspace-id", "workspace id is invalid");
+		return this.enqueue(async () => {
+			if (this.#disposed) return err$8("service-disposed");
+			if (signal?.aborted) return err$8("cancelled");
+			const bindingSvc = this.ctx.get("workspaceBinding");
+			if (!bindingSvc) return err$8("service-disposed");
+			const res = await bindingSvc.get(input.workspaceId);
+			if (!res.ok) {
+				const raw = res.error.code;
+				const code = typeof raw === "string" ? raw : void 0;
+				if (code === "workspace-not-found") return err$8("workspace-not-found", "workspace does not exist");
+				if (code && PASSTHROUGH_CODES$4.has(code)) return err$8(code);
+				return err$8("storage-error");
+			}
+			try {
+				const entries = [];
+				for await (const item of enumerateSources(res.value.canonicalPath)) {
+					if (signal?.aborted) return err$8("cancelled", "operation was cancelled");
+					entries.push({
+						name: item.name,
+						type: item.type,
+						tenant: item.tenant,
+						group: item.group,
+						sourcePath: item.relativePath
+					});
+				}
+				return {
+					ok: true,
+					value: Object.freeze({
+						entries: Object.freeze(entries),
+						duplicateNames: Object.freeze(duplicateNames(entries.map((entry) => ({
+							...entry,
+							relativePath: entry.sourcePath,
+							absolutePath: ""
+						}))))
+					})
+				};
+			} catch {
+				return err$8("storage-error");
+			}
 		});
 	}
 	enqueue(fn) {
@@ -7343,14 +7502,14 @@ function verifyUtilsOutputSchema() {
 
 //#endregion
 //#region ../icomposer-verify/src/ici-tools.ts
-const TOOL_ENTRY_LIMIT = 50;
-function clipEntries(items) {
-	return items.slice(0, TOOL_ENTRY_LIMIT);
+const TOOL_ENTRY_LIMIT$1 = 50;
+function clipEntries$1(items) {
+	return items.slice(0, TOOL_ENTRY_LIMIT$1);
 }
-function errorText$1(code) {
+function errorText$2(code) {
 	return `icomposer tools error: ${code}`;
 }
-function objectSchema2$1(properties, required$1) {
+function objectSchema2$2(properties, required$1) {
 	const requiredSet = new Set(required$1);
 	return {
 		type: "object",
@@ -7371,7 +7530,7 @@ function registerIciTools(ctx, defineTool$1) {
 	disposers.push(ctx.systemPrompt.section({
 		name: "tool:ici_query",
 		order: 150,
-		text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. No InsureMO binding is required and the operation is read-only."
+		text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Use it after a capability hit to inspect one API. To DISCOVER which APIs can do something (by capability, in natural language) use ici_search first; this tool walks a graph, it does not search explanations. No InsureMO binding is required and the operation is read-only."
 	}));
 	disposers.push(ctx.tools.register(defineTool$1({
 		name: "icomposer_catalog_list",
@@ -7399,10 +7558,10 @@ function registerIciTools(ctx, defineTool$1) {
 				const v = value;
 				if (v.error !== void 0) return [{
 					type: "text",
-					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$1(v.error.code)
+					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$2(v.error.code)
 				}];
 				const c = v.counts;
-				const lines = [`workspace ${v.workspace_id}: ${c.total} assets (api ${c.api}, function ${c.function}, batch ${c.batch}, model ${c.model}) truncated=${v.truncated ?? false}`, ...clipEntries(v.entries ?? []).map((e) => `${e.type}\t${e.name}\t${e.joinStatus}`)];
+				const lines = [`workspace ${v.workspace_id}: ${c.total} assets (api ${c.api}, function ${c.function}, batch ${c.batch}, model ${c.model}) truncated=${v.truncated ?? false}`, ...clipEntries$1(v.entries ?? []).map((e) => `${e.type}\t${e.name}\t${e.joinStatus}`)];
 				return [{
 					type: "text",
 					text: lines.join("\n")
@@ -7429,7 +7588,7 @@ function registerIciTools(ctx, defineTool$1) {
 				workspace_id: args.workspace_id,
 				counts: { ...res.value.counts },
 				truncated: res.value.truncated,
-				entries: clipEntries([...res.value.entries.map((e) => ({
+				entries: clipEntries$1([...res.value.entries.map((e) => ({
 					name: e.name,
 					type: e.type,
 					joinStatus: e.joinStatus
@@ -7465,9 +7624,9 @@ function registerIciTools(ctx, defineTool$1) {
 				const v = value;
 				if (v.error !== void 0) return [{
 					type: "text",
-					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$1(v.error.code)
+					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$2(v.error.code)
 				}];
-				const lines = [`workspace ${v.workspace_id}: ${v.count ?? 0} operations shown of ${v.total ?? 0} truncated=${v.truncated ?? false}`, ...clipEntries(v.operations ?? []).map((o) => `${o.method.toUpperCase()}\t${o.client}\t${o.operationId}\t${o.path}`)];
+				const lines = [`workspace ${v.workspace_id}: ${v.count ?? 0} operations shown of ${v.total ?? 0} truncated=${v.truncated ?? false}`, ...clipEntries$1(v.operations ?? []).map((o) => `${o.method.toUpperCase()}\t${o.client}\t${o.operationId}\t${o.path}`)];
 				return [{
 					type: "text",
 					text: lines.join("\n")
@@ -7497,7 +7656,7 @@ function registerIciTools(ctx, defineTool$1) {
 				count: res.value.operations.length,
 				total: res.value.counts.operations,
 				truncated: res.value.truncated,
-				operations: clipEntries([...res.value.operations.map((o) => ({
+				operations: clipEntries$1([...res.value.operations.map((o) => ({
 					client: o.client,
 					method: o.method,
 					path: o.path,
@@ -7526,10 +7685,10 @@ function registerIciTools(ctx, defineTool$1) {
 				const v = value;
 				if (v.error !== void 0) return [{
 					type: "text",
-					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$1(v.error.code)
+					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$2(v.error.code)
 				}];
 				const header = `workspace ${v.workspace_id}: ${v.mode} ${v.count ?? 0} results truncated=${v.truncated ?? false}`;
-				const body = v.mode === "list" ? clipEntries(v.classes ?? []).map((c) => `${c.className}\t${c.methodCount}`) : clipEntries(v.matches ?? []).map((m) => `${m.className}.${m.method ?? "*"}\t${m.description ?? ""}`);
+				const body = v.mode === "list" ? clipEntries$1(v.classes ?? []).map((c) => `${c.className}\t${c.methodCount}`) : clipEntries$1(v.matches ?? []).map((m) => `${m.className}.${m.method ?? "*"}\t${m.description ?? ""}`);
 				return [{
 					type: "text",
 					text: [header, ...body].join("\n")
@@ -7557,7 +7716,7 @@ function registerIciTools(ctx, defineTool$1) {
 					mode: "list",
 					count: res$1.value.count,
 					truncated: res$1.value.truncated,
-					classes: clipEntries([...res$1.value.classes.map((c) => ({
+					classes: clipEntries$1([...res$1.value.classes.map((c) => ({
 						className: c.className,
 						methodCount: c.methodCount,
 						...c.description === void 0 ? {} : { description: c.description }
@@ -7578,7 +7737,7 @@ function registerIciTools(ctx, defineTool$1) {
 				mode: "search",
 				count: res.value.count,
 				truncated: res.value.truncated,
-				matches: clipEntries([...res.value.matches.map((m) => ({
+				matches: clipEntries$1([...res.value.matches.map((m) => ({
 					className: m.className,
 					...m.method === void 0 ? {} : { method: m.method },
 					...m.description === void 0 ? {} : { description: m.description }
@@ -7637,7 +7796,7 @@ function registerIciTools(ctx, defineTool$1) {
 					stale: { type: "boolean" },
 					lines: {
 						type: "array",
-						items: objectSchema2$1({
+						items: objectSchema2$2({
 							depth: {
 								type: "integer",
 								required: true
@@ -7650,7 +7809,7 @@ function registerIciTools(ctx, defineTool$1) {
 					},
 					paths: {
 						type: "array",
-						items: objectSchema2$1({
+						items: objectSchema2$2({
 							apiId: {
 								type: "string",
 								required: true
@@ -7661,7 +7820,7 @@ function registerIciTools(ctx, defineTool$1) {
 							}
 						}, ["apiId", "hops"])
 					},
-					confidenceCounts: objectSchema2$1({
+					confidenceCounts: objectSchema2$2({
 						static: { type: "integer" },
 						platform: { type: "integer" },
 						inferred: { type: "integer" }
@@ -7680,7 +7839,7 @@ function registerIciTools(ctx, defineTool$1) {
 				const v = value;
 				if (v.error !== void 0) return [{
 					type: "text",
-					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$1(v.error.code)
+					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$2(v.error.code)
 				}];
 				const header = `workspace ${v.workspace_id}: ici ${v.mode} truncated=${v.truncated ?? false}${v.stale === true ? " STALE (sources changed since last build)" : ""}`;
 				const body = v.mode === "api-chain" ? (v.lines ?? []).map((l) => `${"  ".repeat(l.depth)}${l.label}`) : (v.paths ?? []).map((p) => `${p.apiId}\n${p.hops.map((h) => `  ${h}`).join("\n")}`);
@@ -7715,7 +7874,7 @@ function registerIciTools(ctx, defineTool$1) {
 					matched: [...res$1.value.matched],
 					truncated: res$1.value.truncated,
 					...res$1.value.stale === true ? { stale: true } : {},
-					paths: clipEntries([...res$1.value.paths]).map((p) => ({
+					paths: clipEntries$1([...res$1.value.paths]).map((p) => ({
 						apiId: p.apiId,
 						hops: p.hops.map((h) => h.nodeId)
 					})),
@@ -7735,7 +7894,7 @@ function registerIciTools(ctx, defineTool$1) {
 			};
 			const lines = [];
 			const visit$6 = (node, depth) => {
-				if (lines.length >= TOOL_ENTRY_LIMIT * 8) return;
+				if (lines.length >= TOOL_ENTRY_LIMIT$1 * 8) return;
 				const n = node;
 				const edgeKind = n.edge?.kind ?? "ROOT";
 				const ref = n.ref !== void 0 ? ` (${n.ref})` : "";
@@ -7753,6 +7912,159 @@ function registerIciTools(ctx, defineTool$1) {
 				truncated: res.value.truncated,
 				...res.value.stale === true ? { stale: true } : {},
 				lines
+			};
+		}
+	})));
+	return disposers;
+}
+
+//#endregion
+//#region ../icomposer-verify/src/ici-search-tool.ts
+const TOOL_ENTRY_LIMIT = 50;
+function clipEntries(items) {
+	return items.slice(0, TOOL_ENTRY_LIMIT);
+}
+function errorText$1(code) {
+	return `icomposer tools error: ${code}`;
+}
+function objectSchema2$1(properties, required$1) {
+	const requiredSet = new Set(required$1);
+	return {
+		type: "object",
+		additionalProperties: false,
+		properties: Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, requiredSet.has(key) ? {
+			...value,
+			required: true
+		} : value]))
+	};
+}
+/**
+* Register the read-only iComposer Code Intelligence semantic search Agent
+* tool using the host defineTool factory.
+* @returns one disposer for the registered tool.
+*/
+function registerIciSearchTool(ctx, defineTool$1) {
+	const disposers = [];
+	disposers.push(ctx.tools.register(defineTool$1({
+		name: "ici_search",
+		description: "Find APIs by what they DO, in natural language -- capability discovery over the workspace API explanations (iComposer Code Intelligence). Use this FIRST for questions like 'which APIs can modify the group policy member', 'is there an API that cancels a rider', or 'what handles claim rejection', instead of grepping the source tree. Returns ranked APIs (apiId/apiName/score/evidence); follow up with ici_query (query=api-chain) for the call chain of a hit. Local term-frequency ranking is used and the result is marked degraded when the embedding index or the Workbench Active Profile is unavailable.",
+		parameters: {
+			workspace_id: {
+				type: "string",
+				required: true,
+				description: "Registered workspace id; no InsureMO binding required."
+			},
+			query: {
+				type: "string",
+				required: true,
+				description: "Natural-language query text."
+			},
+			mode: {
+				type: "string",
+				enum: [
+					"technical",
+					"business",
+					"all"
+				],
+				description: "Which embedding space to score; default all."
+			},
+			top: {
+				type: "number",
+				description: "Maximum results (default 10, cap 50)."
+			}
+		},
+		output: {
+			schema: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					workspace_id: {
+						type: "string",
+						required: true
+					},
+					truncated: { type: "boolean" },
+					stale: { type: "boolean" },
+					degraded: { type: "boolean" },
+					rows: {
+						type: "array",
+						items: objectSchema2$1({
+							rank: {
+								type: "integer",
+								required: true
+							},
+							apiId: {
+								type: "string",
+								required: true
+							},
+							apiName: {
+								type: "string",
+								required: true
+							},
+							score: {
+								type: "number",
+								required: true
+							},
+							evidence: { type: "string" }
+						}, [
+							"rank",
+							"apiId",
+							"apiName",
+							"score"
+						])
+					},
+					error: {
+						type: "object",
+						additionalProperties: false,
+						properties: { code: {
+							type: "string",
+							required: true
+						} }
+					}
+				}
+			},
+			render: (_args, value) => {
+				const v = value;
+				if (v.error !== void 0) return [{
+					type: "text",
+					text: typeof v.error.guidance === "string" ? v.error.guidance : errorText$1(v.error.code)
+				}];
+				const lines = [`workspace ${v.workspace_id}: ${v.rows?.length ?? 0} results${v.degraded === true ? " (degraded: local ranking, no embedding index/profile)" : ""}`, ...(v.rows ?? []).map((r) => `${r.rank}. ${r.apiName} (${r.score.toFixed(4)})`)];
+				return [{
+					type: "text",
+					text: lines.join("\n")
+				}];
+			}
+		},
+		isConcurrencySafe: () => true,
+		async execute(rawArgs, exec) {
+			const args = rawArgs;
+			const ici = ctx.get("iciEngine");
+			if (!ici) return {
+				workspace_id: args.workspace_id,
+				error: { code: "cli-error" }
+			};
+			const res = await ici.search({
+				workspaceId: args.workspace_id,
+				query: args.query,
+				...args.mode === void 0 ? {} : { mode: args.mode },
+				...args.top === void 0 ? {} : { top: args.top }
+			}, exec.signal);
+			if (!res.ok) return {
+				workspace_id: args.workspace_id,
+				error: { code: res.error.code }
+			};
+			return {
+				workspace_id: args.workspace_id,
+				truncated: res.value.truncated,
+				...res.value.stale === true ? { stale: true } : {},
+				...res.value.degraded === true ? { degraded: true } : {},
+				rows: clipEntries([...res.value.rows]).map((r, i) => ({
+					rank: i + 1,
+					apiId: r.apiId,
+					apiName: r.apiName,
+					score: r.score,
+					...r.evidence === "" ? {} : { evidence: r.evidence }
+				}))
 			};
 		}
 	})));
@@ -8083,6 +8395,70 @@ function err$4(code, message = code) {
 		text: `icomposer tools error: ${code}${message === code ? "" : ` — ${message}`}`
 	}];
 }
+/** TASK-114: at most this many blockers travel into the tool result (and the model context). */
+const MAX_BLOCKED_LINES = 5;
+const blockedApi = (row) => row.api_name ?? row.apiName ?? "";
+const blockedJob = (row) => row.job_id ?? row.jobId ?? "";
+const blockedCreated = (row) => row.created_at ?? row.createdAt ?? "";
+const SAFE_TOKEN = /^[^\s]{1,128}$/;
+/**
+* TASK-114: render the blocking jobs as one parsable metadata line each
+* (`blocked=job-active api=… job=… status=… created=…`), so the card can name the
+* blocker and offer a single cancel. No artifact path or prepare detail is included.
+*/
+function blockedLines(value) {
+	const rows = Array.isArray(value.blockers) ? value.blockers.slice(0, MAX_BLOCKED_LINES) : [];
+	const lines = [];
+	for (const row of rows) {
+		const api = SAFE_TOKEN.test(blockedApi(row)) ? blockedApi(row) : "";
+		const job = /^[a-f0-9]{16}$/.test(blockedJob(row)) ? blockedJob(row) : "";
+		const status = typeof row?.status === "string" && SAFE_TOKEN.test(row.status) ? row.status : "";
+		const created = !Number.isNaN(Date.parse(blockedCreated(row))) && blockedCreated(row) !== "" ? blockedCreated(row) : "";
+		if (api === "" || job === "") continue;
+		lines.push(`blocked=job-active api=${api} old_job=${job} status=${status || "unknown"} created=${created || "unknown"}`);
+	}
+	const more = typeof value.blockersMore === "number" && value.blockersMore > 0 ? value.blockersMore : 0;
+	if (more > 0) lines.push(`blocked_more=${more}`);
+	return lines;
+}
+/** TASK-114: the failure text keeps the stable `icomposer tools error:` prefix and adds the blocker lines. */
+function errBlocked(code, message, value) {
+	const lines = blockedLines(value);
+	const memberConflicts = typeof value.memberConflicts === "number" && value.memberConflicts > 0 ? value.memberConflicts : 0;
+	if (memberConflicts > 0) lines.push(`member_conflict=${memberConflicts}`);
+	const head = `icomposer tools error: ${code}${message === code ? "" : ` — ${message}`}`;
+	const members = typeof value.memberConflicts === "number" && value.memberConflicts > 0 ? value.memberConflicts : 0;
+	const parts = [];
+	if (lines.length > 0) parts.push("The blocking card is an earlier explanation task that is still waiting: cancel it from this card, then run the task again. Do not just repeat the call.");
+	if (members > 0) parts.push("Some of these APIs already belong to another task card: open that card and confirm or cancel it there — this card cannot cancel its members.");
+	const advice = parts.length === 0 ? "" : `\n${parts.join(" ")}`;
+	return [{
+		type: "text",
+		text: `${head}${advice}${lines.length > 0 ? `\n${lines.join("\n")}` : ""}`
+	}];
+}
+/** TASK-114: keep the blocking-job identity in the structured error (metadata only, bounded). */
+function toolError(error$2) {
+	const source = Array.isArray(error$2.blockers) ? error$2.blockers : [];
+	const blockers = source.slice(0, MAX_BLOCKED_LINES).map((row) => ({
+		...typeof row.apiId === "string" ? { api_id: row.apiId } : {},
+		...typeof row.apiName === "string" ? { api_name: row.apiName } : {},
+		...typeof row.jobId === "string" ? { job_id: row.jobId } : {},
+		...typeof row.status === "string" ? { status: row.status } : {},
+		...typeof row.createdAt === "string" ? { created_at: row.createdAt } : {}
+	}));
+	const more = typeof error$2.blockersMore === "number" && error$2.blockersMore > 0 ? error$2.blockersMore : source.length - blockers.length;
+	const members = typeof error$2.memberConflicts === "number" && error$2.memberConflicts > 0 ? error$2.memberConflicts : 0;
+	return {
+		error: {
+			code: error$2.code,
+			...error$2.message === void 0 ? {} : { message: error$2.message }
+		},
+		...blockers.length === 0 ? {} : { blockers },
+		...more > 0 ? { blockers_more: more } : {},
+		...members > 0 ? { member_conflicts: members } : {}
+	};
+}
 function get(ctx) {
 	return ctx.get("iciEngine");
 }
@@ -8091,18 +8467,36 @@ const obj = (properties) => ({
 	additionalProperties: false,
 	properties
 });
-const explainErrorOutput = obj({ error: {
-	type: "object",
-	additionalProperties: false,
-	properties: {
-		code: {
-			type: "string",
-			required: true
+const explainErrorOutput = obj({
+	error: {
+		type: "object",
+		additionalProperties: false,
+		properties: {
+			code: {
+				type: "string",
+				required: true
+			},
+			message: { type: "string" }
 		},
-		message: { type: "string" }
+		required: true
 	},
-	required: true
-} });
+	blockers: {
+		type: "array",
+		items: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				api_id: { type: "string" },
+				api_name: { type: "string" },
+				job_id: { type: "string" },
+				status: { type: "string" },
+				created_at: { type: "string" }
+			}
+		}
+	},
+	blockers_more: { type: "integer" },
+	member_conflicts: { type: "integer" }
+});
 const explainSingleOutput = obj({
 	artifact_path: {
 		type: "string",
@@ -8134,6 +8528,29 @@ const explainSingleOutput = obj({
 	default_provider: { type: "string" },
 	default_model: { type: "string" }
 });
+const explainTaskOutput = obj({
+	batch_id: {
+		type: "string",
+		required: true
+	},
+	jobs_count: {
+		type: "integer",
+		required: true
+	},
+	targets: {
+		type: "integer",
+		required: true
+	},
+	duplicates: { type: "integer" },
+	concurrency: { type: "integer" },
+	selector_kind: { type: "string" },
+	selector_label: { type: "string" },
+	api_id: { type: "string" },
+	api_name: { type: "string" },
+	job_id: { type: "string" },
+	default_provider: { type: "string" },
+	default_model: { type: "string" }
+});
 const explainBatchOutput = obj({
 	batch_id: {
 		type: "string",
@@ -8143,6 +8560,9 @@ const explainBatchOutput = obj({
 		type: "integer",
 		required: true
 	},
+	targets: { type: "integer" },
+	duplicates: { type: "integer" },
+	concurrency: { type: "integer" },
 	jobs: {
 		type: "array",
 		required: true,
@@ -8187,6 +8607,7 @@ const explainBatchOutput = obj({
 	default_model: { type: "string" }
 });
 const INLINE_CARD_GUIDANCE = "confirmation card is inline in this current DSH Web conversation at this ici_explain call; ask the user to configure it here.";
+const TASK_CARD_RULE = "One conversation task is ONE ici_explain call and therefore ONE card: pass every target of the task in that single call (query for one API, queries for all of them). Never split a task into several calls or several cards, never drop or narrow targets to fit a limit, and never call ici_explain once per API. The tool either prepares the whole task or returns an explicit error; it never truncates silently. The card carries the task-wide model, reference target, earliest start time, and the task `concurrency` (how many targets of THIS task may be analyzed at the same time); the Host-wide ceiling still caps it.";
 /**
 * Register the single agent-facing explain tool. TASK-051 B redesign:
 * `ici_explain` is prepare-only — it validates graph freshness and persists a
@@ -8200,11 +8621,11 @@ function registerIciExplainTools(ctx, defineTool$1) {
 	ds.push(ctx.systemPrompt.section({
 		name: "tool:ici_explain",
 		order: 150,
-		text: "ici_explain prepares bounded source-backed explanation plans: it validates the local graph is fresh, then persists schema-3 prepare metadata (complete bounded call chains, exact source ranges with hashes, reference candidates) and awaiting-input job records under .metadata/icomposer/ici/explain/. It does not call any model, read source contents into the transcript, or mark readiness. For a group or multiple APIs, make ONE ici_explain call with the queries array (2-10 entries); never call ici_explain repeatedly once per API. After success, the confirmation card is inline at this ici_explain tool call in the current DSH Web conversation on the active 3080 server; ask the user to configure it there, not in a separate Workbench app, CLI, or desktop. Do not use bash or cat to inspect job files to find or advance the card. The user confirms one workspace-relative reference file or directory target, model, and earliest not-before time in the Workbench batch card; the Host queues fresh restricted background Explain Agents during idle maintenance."
+		text: `${TASK_CARD_RULE} ici_explain prepares bounded source-backed explanation plans: it validates the local graph is fresh, then persists schema-3 prepare metadata (complete bounded call chains, exact source ranges with hashes, reference candidates) and awaiting-input job records under .metadata/icomposer/ici/explain/. It does not call any model, read source contents into the transcript, or mark readiness. For one API pass 'query'; for a named set pass 'queries'; for a code group pass 'group'; for the whole workspace pass 'all' — the Host resolves the complete target set for group/all, so never enumerate, shorten, or filter the targets yourself. Make exactly ONE call per task: never call ici_explain repeatedly once per API and never split a task across calls. A refusal (empty result, ambiguous group, same-named APIs at several paths, or an API that already has an active job) is reported explicitly; pass it on to the user instead of working around it. When the refusal is job-active, the result lists the blocking cards (blocked= lines with apiName/jobId/status/createdAt): tell the user those earlier cards are still waiting and that the card offers one cancel per blocker, then the task can be run again. Never repeat the same call hoping it succeeds, and never cancel or adopt anything yourself. After success, the confirmation card is inline at this ici_explain tool call in the current DSH Web conversation on the active 3080 server; ask the user to configure it there, not in a separate Workbench app, CLI, or desktop. Do not use bash or cat to inspect job files to find or advance the card. The user confirms one workspace-relative reference file or directory target, model, and earliest not-before time in the Workbench batch card; the Host queues fresh restricted background Explain Agents during idle maintenance.`
 	}));
 	ds.push(ctx.tools.register(defineTool$1({
 		name: "ici_explain",
-		description: "Prepare (only) a source-backed explanation plan for one API, or one batch of 2-10 APIs, in a registered workspace. Pass exactly one of query and queries. No model call and no readiness change.",
+		description: "Prepare (only) ONE source-backed explanation task in a registered workspace. Target the task with exactly one of: `query` (one API), `queries` (an explicit list), `group` (one code group — the host resolves every API of that group), or `all` (every API of the workspace). The host resolves the complete target set; never enumerate targets yourself, never split a task into several calls, and never narrow the user's selection. Optional `concurrency` sets how many targets of this task may run at once (default 4, Host ceiling still applies). No model call and no readiness change.",
 		parameters: {
 			workspace_id: {
 				type: "string",
@@ -8214,17 +8635,28 @@ function registerIciExplainTools(ctx, defineTool$1) {
 			queries: {
 				type: "array",
 				items: { type: "string" }
-			}
+			},
+			group: { type: "string" },
+			all: { type: "boolean" },
+			concurrency: { type: "integer" }
 		},
 		output: {
 			schema: { oneOf: [
+				explainTaskOutput,
 				explainSingleOutput,
 				explainBatchOutput,
 				explainErrorOutput
 			] },
-			render: (_a$2, v) => v?.error ? err$4(v.error.code, v.error.message) : v?.batch_id ? [{
+			render: (_a$2, v) => v?.error ? Array.isArray(v.blockers) && v.blockers.length > 0 || v.member_conflicts > 0 ? errBlocked(v.error.code, v.error.message, {
+				blockers: v.blockers,
+				blockersMore: v.blockers_more,
+				memberConflicts: v.member_conflicts
+			}) : err$4(v.error.code, v.error.message) : v?.batch_id && v?.selector_kind ? [{
 				type: "text",
-				text: `batch=${v.batch_id} jobs=${v.jobs_count}; ${INLINE_CARD_GUIDANCE}`
+				text: `batch=${v.batch_id} selector=${v.selector_kind}${v.selector_label ? ` label=${v.selector_label}` : ""} targets=${v.targets} unique=${v.jobs_count} concurrency=${v.concurrency}${v.duplicates ? ` duplicates=${v.duplicates}` : ""}${v.default_provider && v.default_model ? ` default=${v.default_provider}/${v.default_model}` : ""}; ${INLINE_CARD_GUIDANCE}`
+			}] : v?.batch_id ? [{
+				type: "text",
+				text: `batch=${v.batch_id} targets=${v.targets} unique=${v.jobs_count} concurrency=${v.concurrency}${v.duplicates ? ` duplicates=${v.duplicates}` : ""}${v.default_provider && v.default_model ? ` default=${v.default_provider}/${v.default_model}` : ""}; ${INLINE_CARD_GUIDANCE}`
 			}] : [{
 				type: "text",
 				text: `prepare=${v.artifact_path} job=${v.job_id} status=${v.status}; chain=${v.chain_nodes} nodes/${v.chain_edges} edges${v.truncated ? " (truncated)" : ""}, sources=${v.source_files}, refs=${v.references}${v.default_provider && v.default_model ? ` default=${v.default_provider}/${v.default_model}` : ""}. Select a workspace-relative file or directory and confirm the explicit model in the Workbench card, then Start. ${INLINE_CARD_GUIDANCE}`
@@ -8235,75 +8667,72 @@ function registerIciExplainTools(ctx, defineTool$1) {
 			const engine = get(ctx);
 			if (!engine) return { error: { code: "cli-error" } };
 			const workspaceId = typeof raw.workspace_id === "string" ? raw.workspace_id : "";
-			const queryProvided = Object.prototype.hasOwnProperty.call(raw, "query");
-			const queriesProvided = Object.prototype.hasOwnProperty.call(raw, "queries");
-			const hasQuery = typeof raw.query === "string" && raw.query.trim().length > 0;
-			if (queryProvided === queriesProvided) return { error: {
+			const query = typeof raw.query === "string" && raw.query.trim().length > 0 ? raw.query.trim() : void 0;
+			const queries = Array.isArray(raw.queries) && raw.queries.length >= 1 && raw.queries.every((item) => typeof item === "string" && item.length <= 512 && item.trim().length > 0) ? raw.queries : void 0;
+			const group = typeof raw.group === "string" && raw.group.trim().length > 0 && raw.group.trim().length <= 512 ? raw.group.trim() : void 0;
+			const all = raw.all === true;
+			if (raw.queries !== void 0 && queries === void 0) return { error: {
 				code: "invalid-workspace-id",
-				message: "pass exactly one of query or queries (2-10 non-empty strings)"
+				message: "queries must be a non-empty array of non-empty API names"
 			} };
-			if (queriesProvided) {
-				const queries = Array.isArray(raw.queries) && raw.queries.length >= 2 && raw.queries.length <= 10 && raw.queries.every((query) => typeof query === "string" && query.length <= 512 && query.trim().length > 0) ? raw.queries : null;
-				if (!queries || !engine.explainPrepareBatch) return { error: {
-					code: "invalid-workspace-id",
-					message: "queries must contain 2-10 non-empty API queries"
-				} };
-				const r$1 = await engine.explainPrepareBatch({
-					workspaceId,
-					queries
-				}, e.signal);
-				if (!r$1.ok) return { error: {
-					code: r$1.error.code,
-					message: r$1.error.message
-				} };
-				const v$1 = r$1.value;
-				return {
-					batch_id: v$1.batchId,
-					jobs_count: v$1.jobs.length,
-					jobs: v$1.jobs.map((job) => ({
-						api_id: job.apiId,
-						api_name: job.apiName,
-						job_id: job.jobId,
-						status: job.jobStatus,
-						artifact_path: job.artifactPath,
-						chain_nodes: job.chainNodes,
-						chain_edges: job.chainEdges,
-						truncated: job.truncated,
-						reused: job.reused
-					})),
-					...e.agent?.options?.provider && e.agent.options.model ? {
-						default_provider: e.agent.options.provider,
-						default_model: e.agent.options.model
-					} : {}
-				};
-			}
-			if (!workspaceId || !hasQuery) return { error: {
+			if (raw.query !== void 0 && query === void 0) return { error: {
 				code: "invalid-workspace-id",
-				message: "query is required"
+				message: "query must be a non-empty API name"
 			} };
-			const r = await engine.explainPrepare({
+			if (raw.group !== void 0 && group === void 0) return { error: {
+				code: "invalid-workspace-id",
+				message: "group must be a non-empty group name"
+			} };
+			const selected = [
+				query !== void 0,
+				queries !== void 0,
+				group !== void 0,
+				all
+			].filter(Boolean).length;
+			if (selected !== 1) return { error: {
+				code: "invalid-workspace-id",
+				message: "pass exactly one of query, queries, group, or all"
+			} };
+			const concurrencyProvided = Object.prototype.hasOwnProperty.call(raw, "concurrency");
+			const concurrency = typeof raw.concurrency === "number" && Number.isInteger(raw.concurrency) && raw.concurrency >= 1 && raw.concurrency <= 32 ? raw.concurrency : null;
+			if (concurrencyProvided && concurrency === null) return { error: {
+				code: "invalid-workspace-id",
+				message: "concurrency must be an integer from 1 to 32"
+			} };
+			if (!engine.explainPrepareTask) return { error: {
+				code: "cli-error",
+				message: "task preparation is unavailable"
+			} };
+			const selector = query !== void 0 ? {
+				kind: "api",
+				query
+			} : queries !== void 0 ? {
+				kind: "queries",
+				queries
+			} : group !== void 0 ? {
+				kind: "group",
+				group
+			} : { kind: "all" };
+			const r = await engine.explainPrepareTask({
 				workspaceId,
-				query: raw.query
+				selector,
+				...concurrency === null ? {} : { maxConcurrent: concurrency }
 			}, e.signal);
-			if (!r.ok) return { error: {
-				code: r.error.code,
-				message: r.error.message
-			} };
+			if (!r.ok) return toolError(r.error);
 			const v = r.value;
+			const only = v.jobs.length === 1 ? v.jobs[0] : void 0;
 			return {
-				artifact_path: v.artifactPath,
-				job_id: v.jobId,
-				status: v.jobStatus,
-				api_id: v.api.id,
-				api_name: v.api.name,
-				chain_nodes: v.callChain.nodes.length,
-				chain_edges: v.callChain.edges.length,
-				truncated: v.callChain.truncated === true,
-				source_files: v.sources.length,
-				references: v.references.length,
-				manifest: {
-					source_fingerprint: v.manifest.sourceFingerprint,
-					graph_digest: v.manifest.graphDigest
+				batch_id: v.batchId,
+				jobs_count: v.jobs.length,
+				targets: typeof v.requestedCount === "number" ? v.requestedCount : v.jobs.length,
+				duplicates: typeof v.duplicates === "number" ? v.duplicates : 0,
+				concurrency: concurrency ?? 4,
+				selector_kind: v.selector?.kind,
+				...v.selector?.label === void 0 ? {} : { selector_label: v.selector.label },
+				...only === void 0 ? {} : {
+					api_id: only.apiId,
+					api_name: only.apiName,
+					job_id: only.jobId
 				},
 				...e.agent?.options?.provider && e.agent.options.model ? {
 					default_provider: e.agent.options.provider,
@@ -8343,6 +8772,7 @@ function registerIcomposerToolsWith(ctx, defineTool$1) {
 		text: "icomposer_verify_utils lists utility classes or searches utility methods of a registered workspace using the Workbench Active Profile for CLI authentication. It fails closed when that profile is unavailable."
 	}));
 	disposers.push(...registerIciTools(ctx, defineTool$1));
+	disposers.push(...registerIciSearchTool(ctx, defineTool$1));
 	disposers.push(...registerIciJobTools(ctx, defineTool$1));
 	disposers.push(...registerIciExplainTools(ctx, defineTool$1));
 	return disposers;
@@ -9083,23 +9513,69 @@ function resolveQueryNodes(nodes, query, kind) {
 	}
 	return [...matches.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
-/** Rust resolve_focus_id: focus must resolve to exactly one function node. */
+/**
+* TASK-119: exact-first target resolution. Unlike `resolveQueryNodes` (the fuzzy SEARCH
+* surface, which keeps its substring + comma semantics), this matches a target by its
+* identifier only: an exact id, then an exact (case-insensitive) name, then an exact id
+* without the `kind:` prefix. It never abbreviates and never splits on commas.
+*/
+function resolveExactNames(nodes, query, kind) {
+	const wanted = query.trim();
+	if (wanted === "") return [];
+	const wantedLower = wanted.toLowerCase();
+	const prefixed = kind === void 0 ? "" : `${kind}:`;
+	const exactCase = [];
+	const exactLower = [];
+	for (const node of nodes) {
+		if (kind !== void 0 && node.kind !== kind) continue;
+		const idWithoutKind = prefixed !== "" && node.id.startsWith(prefixed) ? node.id.slice(prefixed.length) : node.id;
+		if (node.name === wanted || node.id === wanted || idWithoutKind === wanted) {
+			exactCase.push(node);
+			continue;
+		}
+		if (node.name.toLowerCase() === wantedLower || node.id.toLowerCase() === wantedLower || idWithoutKind.toLowerCase() === wantedLower) exactLower.push(node);
+	}
+	const chosen = exactCase.length > 0 ? exactCase : exactLower;
+	return [...chosen].sort((a, b) => a.id.localeCompare(b.id));
+}
+/** TASK-119: substring matches used ONLY to build the candidate list of a failed target resolution. */
+function resolveSubstringCandidates(nodes, query, kind) {
+	const wanted = query.trim().toLowerCase();
+	if (wanted === "") return [];
+	const matches = /* @__PURE__ */ new Map();
+	for (const node of nodes) {
+		if (kind !== void 0 && node.kind !== kind) continue;
+		if (node.id.toLowerCase().includes(wanted) || node.name.toLowerCase().includes(wanted)) matches.set(node.id, node);
+	}
+	return [...matches.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+/**
+* Rust resolve_focus_id: focus must resolve to exactly one function node.
+* TASK-119: exact-first, like `resolveSingleStart` — a focus that is only a substring of a
+* function name is reported with candidates instead of being bound to the longer name.
+*/
 function resolveFocusId(nodes, focus) {
 	if (focus === void 0 || focus === "") return { ok: true };
-	const matches = resolveQueryNodes(nodes, focus, "function");
-	if (matches.length === 0) return {
-		ok: false,
-		reason: "not-found",
-		candidates: candidatesOf(matches)
+	const exact$2 = resolveExactNames(nodes, focus, "function");
+	if (exact$2.length === 1) return {
+		ok: true,
+		focusId: exact$2[0].id
 	};
-	if (matches.length > 1) return {
+	if (exact$2.length > 1) return {
 		ok: false,
 		reason: "ambiguous",
-		candidates: matches.slice(0, MAX_CANDIDATES).map((n) => n.id)
+		candidates: exact$2.slice(0, MAX_CANDIDATES).map((n) => n.id)
+	};
+	const candidates = resolveSubstringCandidates(nodes, focus, "function").slice(0, MAX_CANDIDATES).map((n) => n.id);
+	if (candidates.length === 0) return {
+		ok: false,
+		reason: "not-found",
+		candidates: []
 	};
 	return {
-		ok: true,
-		focusId: matches[0].id
+		ok: false,
+		reason: "ambiguous",
+		candidates
 	};
 }
 function candidatesOf(nodes) {
@@ -9492,21 +9968,34 @@ function collectReachable(root, into) {
 	into.add(root.id);
 	for (const child of root.children ?? []) collectReachable(child, into);
 }
+/**
+* TASK-119: an api target resolves by EXACT name only (case-sensitive id/name first, then a
+* case-insensitive name). A query that is merely a substring of an api name — the reported
+* `AddRiderAPI_NONILP` vs `QuoteAddRiderAPI_NONILP` pair — is never bound to a longer name,
+* and a comma inside a name is part of that name (no OR list; `ici_query` keeps the fuzzy
+* multi-part search). Candidates are still reported so the caller can name the exact API.
+*/
 function resolveSingleStart(nodes, query) {
-	const matches = resolveQueryNodes(nodes, query, "api");
-	if (matches.length === 0) return {
+	const exact$2 = resolveExactNames(nodes, query, "api");
+	if (exact$2.length === 1) return {
+		ok: true,
+		node: exact$2[0]
+	};
+	if (exact$2.length > 1) return {
+		ok: false,
+		reason: "ambiguous",
+		candidates: exact$2.slice(0, 20).map((n) => n.id)
+	};
+	const candidates = resolveSubstringCandidates(nodes, query, "api").slice(0, 20).map((n) => n.id);
+	if (candidates.length === 0) return {
 		ok: false,
 		reason: "not-found",
 		candidates: []
 	};
-	if (matches.length > 1) return {
+	return {
 		ok: false,
 		reason: "ambiguous",
-		candidates: matches.slice(0, 20).map((n) => n.id)
-	};
-	return {
-		ok: true,
-		node: matches[0]
+		candidates
 	};
 }
 function countTreeNodes(nodes) {
@@ -9750,9 +10239,16 @@ async function writeExplainAbsolute(filename, content, options = {}) {
 	if (index < 0) throw new Error("artifact-path");
 	await writeExplainFile(normalized.slice(0, index), normalized.slice(index + 1), content, options);
 }
+/** TASK-130: the canonical, stable result path for one API. */
+function canonicalFinalPath(apiName) {
+	return `${ROOT}explain/${safeApiSlug(apiName)}/final.json`;
+}
 function validState(value) {
 	const prefix = typeof value?.apiName === "string" ? `${ROOT}explain/${safeApiSlug(value.apiName)}/finals/` : "";
-	return exact$1(value, STATE_KEYS) && value.schemaVersion === 3 && value.kind === "final" && text(value.apiName, 512) && typeof value.artifactPath === "string" && value.artifactPath.length <= 512 && !value.artifactPath.includes("\\") && !value.artifactPath.split("/").includes("..") && value.artifactPath.startsWith(prefix) && /^[a-f0-9]{16}\.json$/.test(value.artifactPath.slice(value.artifactPath.lastIndexOf("/") + 1)) && text(value.generatedAt, 128) && /^[a-f0-9]{64}$/.test(value.sourceFingerprint) && /^[a-f0-9]{64}$/.test(value.graphDigest) && /^[a-f0-9]{64}$/.test(value.contextHash) && /^[a-f0-9]{64}$/.test(value.finalDigest);
+	const canonical = typeof value?.apiName === "string" ? canonicalFinalPath(value.apiName) : "";
+	const immutableOk = value?.artifactPath?.startsWith(prefix) === true && /^[a-f0-9]{16}\.json$/.test(String(value.artifactPath).slice(String(value.artifactPath).lastIndexOf("/") + 1));
+	const artifactPathOk = immutableOk || canonical !== "" && value?.artifactPath === canonical;
+	return exact$1(value, STATE_KEYS) && value.schemaVersion === 3 && value.kind === "final" && text(value.apiName, 512) && typeof value.artifactPath === "string" && value.artifactPath.length <= 512 && !value.artifactPath.includes("\\") && !value.artifactPath.split("/").includes("..") && artifactPathOk && text(value.generatedAt, 128) && /^[a-f0-9]{64}$/.test(value.sourceFingerprint) && /^[a-f0-9]{64}$/.test(value.graphDigest) && /^[a-f0-9]{64}$/.test(value.contextHash) && /^[a-f0-9]{64}$/.test(value.finalDigest);
 }
 function validEvidence$1(value) {
 	return Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every((item) => typeof item === "string" && item.length <= 400 && !SECRET_PATTERN$3.test(item) && /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+#\d+(?:-\d+)?$/.test(item) && !item.split("#", 1)[0].split("/").some((part) => part === "." || part === ".." || part === ".metadata"));
@@ -9845,7 +10341,7 @@ function validFinal(value, state) {
 		"business",
 		"flow",
 		"evidence"
-	]) || !text(value.apiAnalysis.technical, 12e3) || !text(value.apiAnalysis.business, 12e3) || !Array.isArray(value.apiAnalysis.flow) || value.apiAnalysis.flow.length > 64 || !value.apiAnalysis.flow.every((item) => text(item, 500) && !String(item).startsWith("/") && !String(item).includes("..")) || !validEvidence$1(value.apiAnalysis.evidence)) return false;
+	]) || !text(value.apiAnalysis.technical, 12e3) || !text(value.apiAnalysis.business, 12e3) || !Array.isArray(value.apiAnalysis.flow) || value.apiAnalysis.flow.length > 64 || !value.apiAnalysis.flow.every((item) => text(item, 500) && !String(item).startsWith("/")) || !validEvidence$1(value.apiAnalysis.evidence)) return false;
 	return digest$3({
 		...value,
 		generatedAt: void 0
@@ -9856,16 +10352,26 @@ async function readValidatedExplainFinal(root, expectedApiName, expectedWorkspac
 		const state = await readArtifact(root, `${ROOT}explain/state.json`);
 		if (!validState(state) || expectedApiName !== void 0 && state.apiName !== expectedApiName) return null;
 		const prefix = `${ROOT}explain/${safeApiSlug(state.apiName)}/finals/`;
-		if (!state.artifactPath.startsWith(prefix)) return null;
-		const final = await readArtifact(root, state.artifactPath);
-		if (!validFinal(final, state) || expectedWorkspaceId !== void 0 && final.workspaceId !== expectedWorkspaceId) return null;
-		const manifest = await readArtifact(root, `${ROOT}graph/current/manifest.json`);
-		if (typeof manifest?.sourceFingerprint !== "string" || typeof manifest?.graphDigest !== "string" || manifest.sourceFingerprint !== state.sourceFingerprint || manifest.graphDigest !== state.graphDigest || final.manifest.engineVersion !== void 0 && final.manifest.engineVersion !== manifest.engineVersion) return null;
-		return {
-			state,
-			final,
-			artifactPath: state.artifactPath
-		};
+		const canonical = canonicalFinalPath(state.apiName);
+		const candidates = canonical === state.artifactPath ? [canonical] : [canonical, state.artifactPath];
+		for (const candidate of candidates) {
+			if (candidate !== canonical && !candidate.startsWith(prefix)) return null;
+			let final;
+			try {
+				final = await readArtifact(root, candidate);
+			} catch {
+				continue;
+			}
+			if (!validFinal(final, state) || expectedWorkspaceId !== void 0 && final.workspaceId !== expectedWorkspaceId) continue;
+			const manifest = await readArtifact(root, `${ROOT}graph/current/manifest.json`);
+			if (typeof manifest?.sourceFingerprint !== "string" || typeof manifest?.graphDigest !== "string" || manifest.sourceFingerprint !== state.sourceFingerprint || manifest.graphDigest !== state.graphDigest || final.manifest.engineVersion !== void 0 && final.manifest.engineVersion !== manifest.engineVersion) return null;
+			return {
+				state,
+				final,
+				artifactPath: candidate
+			};
+		}
+		return null;
 	} catch {
 		return null;
 	}
@@ -9873,21 +10379,154 @@ async function readValidatedExplainFinal(root, expectedApiName, expectedWorkspac
 async function readContainedExplainJson(root, path) {
 	return readArtifact(root, path);
 }
+/** TASK-111: task-level concurrency bounds (they mirror explain-config's Host bounds). */
+const EXPLAIN_TASK_CONCURRENCY_MIN = 1;
+const EXPLAIN_TASK_CONCURRENCY_MAX = 32;
+/**
+* TASK-111 P2: the batch job list is stored as immutable shard files and the batch
+* record is only the header that points at one generation of them. The numbers bound
+* ONE FILE, never the number of targets: a task keeps every target, and the shard
+* count grows with it. A header that would need more than `INLINE_MAX` ids carries no
+* inline list at all, so a reader that ignores the shard fields fails loudly instead
+* of silently seeing a prefix.
+*/
+const EXPLAIN_BATCH_INLINE_MAX = 512;
+const EXPLAIN_BATCH_SHARD_MAX = 512;
+/** TASK-111 removed the former hard 10-job ceiling: one task carries every target. */
 function validExplainBatchJobIds(value) {
-	return Array.isArray(value) && value.length >= 1 && value.length <= 10 && value.every((id) => typeof id === "string" && /^[a-f0-9]{16}$/.test(id)) && new Set(value).size === value.length;
+	return Array.isArray(value) && value.length >= 1 && value.every((id) => typeof id === "string" && /^[a-f0-9]{16}$/.test(id)) && new Set(value).size === value.length;
+}
+function validShardList(value) {
+	return Array.isArray(value) && value.length >= 1 && value.length <= EXPLAIN_BATCH_SHARD_MAX && value.every((id) => typeof id === "string" && /^[a-f0-9]{16}$/.test(id));
+}
+function validExplainBatchShards(value) {
+	if (!allowed$1(value, [
+		"generation",
+		"count",
+		"dir"
+	], [
+		"generation",
+		"count",
+		"dir"
+	])) return false;
+	const row = value;
+	return Number.isSafeInteger(row.generation) && row.generation >= 1 && Number.isSafeInteger(row.count) && row.count >= 1 && row.dir === `gen-${row.generation}`;
+}
+function validExplainBatchShardRecord(value) {
+	if (!allowed$1(value, [
+		"schemaVersion",
+		"kind",
+		"batchId",
+		"generation",
+		"index",
+		"jobIds"
+	], [
+		"schemaVersion",
+		"kind",
+		"batchId",
+		"generation",
+		"index",
+		"jobIds"
+	])) return false;
+	const row = value;
+	return row.schemaVersion === 1 && row.kind === "explain-batch-shard" && /^[a-f0-9]{16}$/.test(row.batchId) && Number.isSafeInteger(row.generation) && row.generation >= 1 && Number.isSafeInteger(row.index) && row.index >= 0 && validShardList(row.jobIds);
+}
+function validExplainTaskSelector(value) {
+	if (!allowed$1(value, ["kind", "label"], ["kind"])) return false;
+	const row = value;
+	if (![
+		"api",
+		"group",
+		"all",
+		"queries"
+	].includes(row.kind)) return false;
+	if (row.label === void 0) return row.kind === "all" || row.kind === "queries";
+	return text(row.label, 512);
+}
+const REFERENCE_TEXT_EXTENSIONS = new Set([
+	".md",
+	".txt",
+	".json",
+	".yaml",
+	".yml",
+	".csv",
+	".log"
+]);
+function validPlanReferenceTarget(value) {
+	if (typeof value !== "object" || value === null || Object.keys(value).length !== 2) return false;
+	const target = value;
+	if (target.kind === "none") return target.path === "";
+	if (target.kind !== "file" && target.kind !== "directory") return false;
+	const path = target.path;
+	if (typeof path !== "string" || path.length > 512 || path.startsWith("/") || path.includes("\\") || path.includes("\0") || path.startsWith(".metadata")) return false;
+	if (path !== "" && path.split("/").some((part) => part === "" || part === "." || part === "..")) return false;
+	if (target.kind === "directory") return true;
+	const dot = path.lastIndexOf(".");
+	return dot > 0 && REFERENCE_TEXT_EXTENSIONS.has(path.slice(dot).toLowerCase());
+}
+function utcTime(value) {
+	return typeof value === "string" && value.length <= 128 && !Number.isNaN(Date.parse(value)) && value.endsWith("Z");
+}
+function validExplainBatchPlan(value) {
+	if (!allowed$1(value, [
+		"provider",
+		"model",
+		"referenceTarget",
+		"notBefore",
+		"confirmedAt"
+	], [
+		"provider",
+		"model",
+		"referenceTarget",
+		"notBefore",
+		"confirmedAt"
+	])) return false;
+	const row = value;
+	return text(row.provider, 256) && text(row.model, 256) && validPlanReferenceTarget(row.referenceTarget) && utcTime(row.notBefore) && utcTime(row.confirmedAt);
 }
 function validExplainBatchRecord(value) {
-	if (!exact$1(value, [
+	const keys = [
 		"schemaVersion",
 		"kind",
 		"batchId",
 		"workspaceId",
 		"jobIds",
+		"jobShards",
+		"jobCount",
+		"createdAt",
+		"updatedAt",
+		"maxConcurrent",
+		"requestedCount",
+		"selector",
+		"plan",
+		"confirmPending",
+		"confirmOwner"
+	];
+	if (!allowed$1(value, keys, [
+		"schemaVersion",
+		"kind",
+		"batchId",
+		"workspaceId",
 		"createdAt",
 		"updatedAt"
 	])) return false;
 	const row = value;
-	return row.schemaVersion === 1 && row.kind === "explain-batch" && /^[a-f0-9]{16}$/.test(row.batchId) && text(row.workspaceId, 256) && validExplainBatchJobIds(row.jobIds) && text(row.createdAt, 128) && text(row.updatedAt, 128);
+	if (row.schemaVersion !== 1 || row.kind !== "explain-batch" || !/^[a-f0-9]{16}$/.test(row.batchId) || !text(row.workspaceId, 256) || !text(row.createdAt, 128) || !text(row.updatedAt, 128)) return false;
+	const inline = row.jobIds !== void 0;
+	const sharded = row.jobShards !== void 0;
+	if (inline === sharded) return false;
+	if (inline && !validExplainBatchJobIds(row.jobIds)) return false;
+	if (inline && row.jobIds !== void 0 && row.jobIds.length > EXPLAIN_BATCH_INLINE_MAX) return false;
+	if (sharded && !validExplainBatchShards(row.jobShards)) return false;
+	if (sharded && (!Number.isSafeInteger(row.jobCount) || (row.jobCount ?? 0) < (row.jobShards?.count ?? 1))) return false;
+	if (inline && row.jobCount !== void 0 && row.jobCount !== row.jobIds?.length) return false;
+	if (row.maxConcurrent !== void 0 && (!Number.isInteger(row.maxConcurrent) || row.maxConcurrent < EXPLAIN_TASK_CONCURRENCY_MIN || row.maxConcurrent > EXPLAIN_TASK_CONCURRENCY_MAX)) return false;
+	if (row.requestedCount !== void 0 && (!Number.isInteger(row.requestedCount) || row.requestedCount < (inline ? row.jobIds?.length ?? 0 : row.jobCount ?? 0))) return false;
+	if (row.selector !== void 0 && !validExplainTaskSelector(row.selector)) return false;
+	if (row.plan !== void 0 && !validExplainBatchPlan(row.plan)) return false;
+	if (row.confirmPending !== void 0 && typeof row.confirmPending !== "boolean") return false;
+	if (row.confirmOwner !== void 0 && (row.confirmPending !== true || typeof row.confirmOwner !== "string" || row.confirmOwner.length > 64)) return false;
+	return true;
 }
 
 //#endregion
@@ -10238,6 +10877,19 @@ async function runExplainDeterministic(deps, input, options) {
 const ICI_ENGINE_VERSION = "0.2.0";
 
 //#endregion
+//#region ../icomposer-code-intelligence/src/host-instance.ts
+/**
+* TASK-111: identity of the running Host process.
+*
+* Recovery may only repair state that belongs to a *previous* process. Timestamps
+* cannot prove ownership (same-millisecond writes, repeated recovery), so every
+* record a process creates carries this id, and recovery skips anything stamped
+* with its own id. A crash + restart therefore produces a new id and heals the old
+* records, while a live confirmation is never mistaken for a leftover.
+*/
+const HOST_INSTANCE_ID = `host-${randomUUID()}`.slice(0, 40);
+
+//#endregion
 //#region ../icomposer-code-intelligence/src/explain-artifacts.ts
 const EXPLAIN_PROMPT_VERSION = "explain-mvp-v1";
 const MAX_EXPLAIN_SOURCE_BYTES = 256 * 1024;
@@ -10250,10 +10902,20 @@ const NONE_REFERENCE_TARGET = {
 	path: "",
 	kind: "none"
 };
-const SECRET_PATTERN$2 = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
-const ABSOLUTE_PATH_PATTERN$2 = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
-const ABSOLUTE_PATH_TOKEN_PATTERN = /\/(?:Users|home|private|tmp|var|opt|etc)\/[^\s"'`<>()[\]{}]+|[A-Za-z]:[\\/][^\s"'`<>()[\]{}]+/gi;
-const ABSOLUTE_PATH_REPLACEMENT = "[absolute-path-redacted]";
+/**
+* TASK-125: ONE definition of the secret/absolute-path guards for the whole package (the scheduler
+* and the routes used to carry their own copies). The Windows-drive branch needs a negative
+* lookbehind so a URL scheme is not mistaken for a drive letter: `http://gateway.mo-fo/` must not
+* match, while `C:\` and `C:/` (and the POSIX roots) still do.
+*/
+const EXPLAIN_SECRET_PATTERN = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
+const EXPLAIN_ABSOLUTE_PATH_PATTERN = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|(?<![A-Za-z0-9])[A-Za-z]:[\\/]/i;
+const EXPLAIN_ABSOLUTE_PATH_TOKEN_PATTERN = /\/(?:Users|home|private|tmp|var|opt|etc)\/[^\s"'`<>()[\]{}]+|(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s"'`<>()[\]{}]+/gi;
+const EXPLAIN_ABSOLUTE_PATH_REPLACEMENT = "[absolute-path-redacted]";
+const SECRET_PATTERN$2 = EXPLAIN_SECRET_PATTERN;
+const ABSOLUTE_PATH_PATTERN$2 = EXPLAIN_ABSOLUTE_PATH_PATTERN;
+const ABSOLUTE_PATH_TOKEN_PATTERN = EXPLAIN_ABSOLUTE_PATH_TOKEN_PATTERN;
+const ABSOLUTE_PATH_REPLACEMENT = EXPLAIN_ABSOLUTE_PATH_REPLACEMENT;
 let explainFinalizeFailpoint;
 function digest$2(value) {
 	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -10358,6 +11020,83 @@ async function listReferenceEntries(root, target, subpath = "") {
 		path: entry.path.startsWith(nestedPrefix) ? entry.path.slice(nestedPrefix.length) : entry.path
 	}));
 }
+/**
+* TASK-125: the initial child message carries only paths, so the child reads on demand. This is
+* the read surface for that workflow: the whitelist is the prepared artifact itself
+* (prepare.sources ∪ readable prepare.references) and NOTHING else, large files are read by line
+* range, and every returned slice is re-scanned fail-closed (secrets / absolute paths).
+*/
+const MAX_PREPARED_READ_BYTES = 256 * 1024;
+/** Refuse absurdly large files outright before reading anything into memory. */
+const MAX_PREPARED_FILE_BYTES = 8 * 1024 * 1024;
+/** Every path the read tool may serve: all prepared source paths plus readable prepared references. */
+function preparedReadPaths(prepare) {
+	const paths = /* @__PURE__ */ new Set();
+	for (const ref of prepare.sources) if (typeof ref.path === "string" && ref.path !== "") paths.add(ref.path);
+	for (const ref of prepare.references) if (ref.readable && typeof ref.path === "string" && ref.path !== "") paths.add(ref.path);
+	return [...paths];
+}
+/** The one prepared ref a whitelisted path resolves to (sources win over references). */
+function preparedRefOf(prepare, path) {
+	return prepare.sources.find((ref) => ref.path === path) ?? prepare.references.find((ref) => ref.path === path && ref.readable);
+}
+async function readPreparedText(root, prepare, path, startLine, endLine) {
+	if (typeof path !== "string" || !safeRel(path)) throw new Error("source-forbidden");
+	const ref = preparedRefOf(prepare, path);
+	if (ref === void 0) throw new Error("source-forbidden");
+	let file;
+	try {
+		file = await containedFile(root, path);
+	} catch {
+		throw new Error("source-forbidden");
+	}
+	const size = (await lstat(file)).size;
+	if (size > MAX_PREPARED_FILE_BYTES) throw new Error("source-oversize");
+	const raw = await readFile(file);
+	let content;
+	try {
+		content = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+	} catch {
+		throw new Error("source-forbidden");
+	}
+	const lines = content.split("\n");
+	const requestedFirst = Math.trunc(startLine ?? ref.startLine ?? 1);
+	const requestedLast = Math.trunc(endLine ?? ref.endLine ?? lines.length);
+	if (!Number.isFinite(requestedFirst) || !Number.isFinite(requestedLast)) throw new Error("source-range");
+	const from = Math.max(1, Math.min(requestedFirst, requestedLast));
+	const requestedTo = Math.max(1, Math.max(requestedFirst, requestedLast));
+	if (from > lines.length) throw new Error(`source-range: startLine ${from} is past the end of ${path} (totalLines ${lines.length})`);
+	const to = Math.min(lines.length, requestedTo);
+	const parts = [];
+	let bytes = 0;
+	let cursor = from;
+	let truncated = false;
+	for (; cursor <= to; cursor++) {
+		const part = lines[cursor - 1] ?? "";
+		const add = Buffer.byteLength(part, "utf8") + (parts.length === 0 ? 0 : 1);
+		if (parts.length > 0 && bytes + add > MAX_PREPARED_READ_BYTES) {
+			truncated = true;
+			break;
+		}
+		parts.push(part);
+		bytes += add;
+		if (bytes > MAX_PREPARED_READ_BYTES) break;
+	}
+	const slice = parts.join("\n");
+	const lastCovered = parts.length === 0 ? from : from + parts.length - 1;
+	if (SECRET_PATTERN$2.test(slice) || ABSOLUTE_PATH_PATTERN$2.test(slice)) throw new Error("source-forbidden");
+	return {
+		path,
+		content: slice,
+		bytes: Buffer.byteLength(slice, "utf8"),
+		sha256: digest$2(slice),
+		startLine: from,
+		endLine: lastCovered,
+		totalLines: lines.length,
+		truncated,
+		...truncated ? { nextStartLine: lastCovered + 1 } : {}
+	};
+}
 async function readReferenceText(root, target, relativePath) {
 	if (!validReferenceTarget(target) || typeof relativePath !== "string" || !validFolderPath(relativePath)) throw new Error("folder-forbidden");
 	if (target.kind === "none") throw new Error("folder-forbidden");
@@ -10423,6 +11162,31 @@ async function readExplainPublicationState(root) {
 		return null;
 	}
 }
+/** True when the text is a final artifact whose semantic digest equals `finalDigest` (same digest as the publication state). */
+function finalTextMatchesDigest(text$1, finalDigest) {
+	try {
+		const value = JSON.parse(text$1);
+		return digest$2({
+			...value,
+			generatedAt: void 0
+		}) === finalDigest;
+	} catch {
+		return false;
+	}
+}
+/** The immutable history file for `apiName` that carries `finalDigest`, if one exists (rollback support). */
+async function findImmutableFinalByDigest(root, apiName, finalDigest) {
+	try {
+		const dir = join(root, `${canonicalFinalPath(apiName)}`.slice(0, `${canonicalFinalPath(apiName)}`.lastIndexOf("/")), "finals");
+		const entries = await readdir(dir).catch(() => []);
+		for (const entry of entries.sort().reverse()) {
+			if (!/^[a-f0-9]{16}\.json$/.test(entry)) continue;
+			const text$1 = await readFile(join(dir, entry), "utf8").catch(() => null);
+			if (text$1 !== null && finalTextMatchesDigest(text$1, finalDigest)) return text$1;
+		}
+	} catch {}
+	return null;
+}
 async function restoreExplainPublicationState(root, state) {
 	if (state === null) {
 		await rm(join(root, stateRel()), { force: true });
@@ -10432,6 +11196,21 @@ async function restoreExplainPublicationState(root, state) {
 		lockKey: "workspace-publication",
 		skipFailpoint: true
 	});
+	try {
+		const apiName = state.apiName;
+		const finalDigestValue = state.finalDigest;
+		if (typeof apiName === "string" && typeof finalDigestValue === "string") {
+			const canonicalRel = canonicalFinalPath(apiName);
+			const canonical = join(root, canonicalRel);
+			const canonicalText = await readFile(canonical, "utf8").catch(() => null);
+			if (canonicalText === null || !finalTextMatchesDigest(canonicalText, finalDigestValue)) {
+				const restored = await findImmutableFinalByDigest(root, apiName, finalDigestValue);
+				if (restored === null) {
+					if (canonicalText !== null) await rm(canonical, { force: true });
+				} else await writeExplainFile(root, canonicalRel, restored, { skipFailpoint: true });
+			}
+		}
+	} catch {}
 }
 async function containedFile(root, path) {
 	if (!safeRel(path)) throw new Error("source-forbidden");
@@ -10555,6 +11334,25 @@ function chain(graph, start) {
 			});
 			else paths.push([...item.path, edge.to]);
 		}
+	}
+	const selected = new Set(nodes.map((node) => node.nodeId));
+	for (const node of nodes) for (const id of node.directCalls) {
+		if (!selected.has(id)) continue;
+		const key = `${node.nodeId}|${id}|CALLS`;
+		if (edgeKeys.has(key)) continue;
+		if (edges.length >= MAX_EXPLAIN_EDGES) break;
+		const source = graph.edges.find((edge) => edge.from === node.nodeId && edge.to === id && edge.kind === "CALLS");
+		if (source === void 0) continue;
+		edgeKeys.add(key);
+		edges.push({
+			from: source.from,
+			to: source.to,
+			kind: source.kind,
+			source: source.source,
+			confidence: source.confidence,
+			evidence: source.evidence.slice(0, 400),
+			ownerFile: source.ownerFile ?? ""
+		});
 	}
 	return {
 		nodes: nodes.sort((a, b) => a.nodeId.localeCompare(b.nodeId)),
@@ -10717,7 +11515,7 @@ function validPrepareShape(value) {
 		"method",
 		"model",
 		"batch"
-	].includes(node.kind) || node.owner !== void 0 && !validText(node.owner, 512) || node.signature !== void 0 && !validText(node.signature, 2e3) || node.sourceHash !== void 0 && !/^[a-f0-9]{16,64}$/.test(node.sourceHash) || typeof node.sourceFile !== "string" || node.sourceFile !== "" && !safeRel(node.sourceFile) || !Array.isArray(node.directCalls) || node.directCalls.some((id) => !ids.includes(id)) || new Set(node.directCalls).size !== node.directCalls.length || !Array.isArray(node.pathFromApi) || node.pathFromApi.some((id) => !ids.includes(id)) || typeof node.cycle !== "boolean" || typeof node.repeated !== "boolean" || node.startLine !== void 0 && (!Number.isInteger(node.startLine) || node.startLine < 1 || node.startLine > 1e7) || node.endLine !== void 0 && (!Number.isInteger(node.endLine) || node.endLine < (node.startLine ?? 1) || node.endLine > 1e7)) return false;
+	].includes(node.kind) || node.owner !== void 0 && !validText(node.owner, 512) || node.signature !== void 0 && !validText(node.signature, 2e3) || node.sourceHash !== void 0 && !/^[a-f0-9]{16,64}$/.test(node.sourceHash) || typeof node.sourceFile !== "string" || node.sourceFile !== "" && !safeRel(node.sourceFile) || !Array.isArray(node.directCalls) || new Set(node.directCalls).size !== node.directCalls.length || !Array.isArray(node.pathFromApi) || value.callChain.truncated !== true && (node.directCalls.some((id) => !ids.includes(id)) || node.pathFromApi.some((id) => !ids.includes(id))) || typeof node.cycle !== "boolean" || typeof node.repeated !== "boolean" || node.startLine !== void 0 && (!Number.isInteger(node.startLine) || node.startLine < 1 || node.startLine > 1e7) || node.endLine !== void 0 && (!Number.isInteger(node.endLine) || node.endLine < (node.startLine ?? 1) || node.endLine > 1e7)) return false;
 	const edgeKeys = /* @__PURE__ */ new Set();
 	for (const edge of value.callChain.edges) {
 		if (!exact(edge, [
@@ -10741,7 +11539,9 @@ function validPrepareShape(value) {
 		if (edgeKeys.has(key)) return false;
 		edgeKeys.add(key);
 	}
-	for (const node of value.callChain.nodes) for (const id of node.directCalls) if (!edgeKeys.has(`${node.nodeId}|${id}|CALLS`)) return false;
+	if (value.callChain.truncated !== true) {
+		for (const node of value.callChain.nodes) for (const id of node.directCalls) if (!edgeKeys.has(`${node.nodeId}|${id}|CALLS`)) return false;
+	}
 	return digest$2({
 		api: value.api.id,
 		callChain: value.callChain,
@@ -10807,13 +11607,20 @@ async function readPreparedSources(root, workspaceId, artifactPath, nodeIds, ref
 	if (signal?.aborted) throw new DOMException("aborted", "AbortError");
 	return result;
 }
+/**
+* TASK-126: one rule set on both sides of the submit boundary. The flow items used to also reject
+* any ".." substring here while the submit tool only applied fixedText, so a perfectly normal
+* Groovy varargs rendering such as `Long.valueOf(String.valueOf(...))` was accepted by the child
+* and then refused at publication as analysis-invalid (which the job mapped to model-failed).
+* Path-traversal defence stays where it belongs: the evidence pattern plus the segmented part check.
+*/
 function validAnalysis(analysis) {
 	return exact(analysis, [
 		"technical",
 		"business",
 		"flow",
 		"evidence"
-	]) && validText(analysis.technical, 12e3) && validText(analysis.business, 12e3) && Array.isArray(analysis.flow) && analysis.flow.length <= 64 && analysis.flow.every((item) => validText(item, 500) && !String(item).startsWith("/") && !String(item).includes("..")) && validEvidence(analysis.evidence);
+	]) && validText(analysis.technical, 12e3) && validText(analysis.business, 12e3) && Array.isArray(analysis.flow) && analysis.flow.length <= 64 && analysis.flow.every((item) => validText(item, 500) && !String(item).startsWith("/")) && validEvidence(analysis.evidence);
 }
 async function finalizeExplain(root, workspaceId, preparePathRel, analysis, current, signal, finalId, folderReads = [], folderPath = "", referenceTarget) {
 	const prepare = await loadPrepare(root, preparePathRel);
@@ -10821,11 +11628,6 @@ async function finalizeExplain(root, workspaceId, preparePathRel, analysis, curr
 	const graphManifest = await readManifest(graphBaseDir(root, workspaceId), legacyGraphBaseDir(root, workspaceId));
 	if (!graphManifest || current.engineVersion !== ICI_ENGINE_VERSION || graphManifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.sourceFingerprint !== current.sourceFingerprint || prepare.manifest.graphDigest !== current.graphDigest || graphManifest.sourceFingerprint !== current.sourceFingerprint || graphManifest.graphDigest !== current.graphDigest) throw new Error("stale-snapshot");
 	if (!validAnalysis(analysis.api)) throw new Error("analysis-invalid");
-	for (const ref of [...prepare.sources, ...prepare.references]) if (ref.readable) {
-		const target = await containedFile(root, ref.path);
-		if ((await lstat(target)).size > MAX_EXPLAIN_SOURCE_BYTES) throw new Error("source-changed");
-		if (digest$2(await readFile(target, "utf8")) !== ref.sha256) throw new Error("source-changed");
-	}
 	const selectedTarget = referenceTarget ?? (folderPath === "" ? NONE_REFERENCE_TARGET : {
 		path: folderPath,
 		kind: "directory"
@@ -10836,13 +11638,22 @@ async function finalizeExplain(root, workspaceId, preparePathRel, analysis, curr
 		if (folderReads.length > 0) throw new Error("folder-changed");
 	} else {
 		const folderPrefix = selectedTarget.path === "" ? "" : `${selectedTarget.path}/`;
-		const seenFolderReads = /* @__PURE__ */ new Set();
+		const seenFolderReads = /* @__PURE__ */ new Map();
 		for (const ref of folderReads) {
 			const validPath = selectedTarget.kind === "file" ? ref.path === selectedTarget.path : ref.path.startsWith(folderPrefix);
-			if (!safeRel(ref.path) || !validPath || !supportedFolderFile(ref.path) || !/^[a-f0-9]{64}$/.test(ref.sha256) || seenFolderReads.has(ref.path)) throw new Error("folder-changed");
-			seenFolderReads.add(ref.path);
-			const target = await containedFile(root, ref.path);
-			if ((await lstat(target)).size > 64 * 1024 || digest$2(await readFile(target, "utf8")) !== ref.sha256) throw new Error("folder-changed");
+			if (!safeRel(ref.path) || !validPath || !supportedFolderFile(ref.path) || !/^[a-f0-9]{64}$/.test(ref.sha256)) throw new Error("folder-changed");
+			const previousDigest = seenFolderReads.get(ref.path);
+			if (previousDigest !== void 0) {
+				if (previousDigest !== ref.sha256) throw new Error("folder-changed");
+				continue;
+			}
+			seenFolderReads.set(ref.path, ref.sha256);
+			try {
+				const target = await containedFile(root, ref.path);
+				if ((await lstat(target)).size > 64 * 1024 || digest$2(await readFile(target, "utf8")) !== ref.sha256) throw new Error("folder-changed");
+			} catch {
+				throw new Error("folder-changed");
+			}
 		}
 	}
 	const artifactPath = finalRel(prepare.api.name, finalId ?? prepare.prepareId.slice(0, 16));
@@ -10873,15 +11684,24 @@ async function finalizeExplain(root, workspaceId, preparePathRel, analysis, curr
 		generatedAt: void 0
 	});
 	const previousState = await readExplainPublicationState(root);
+	const canonicalPath = canonicalFinalPath(prepare.api.name);
+	let previousCanonical = null;
+	try {
+		previousCanonical = await readFile(join(root, canonicalPath), "utf8");
+	} catch {
+		previousCanonical = null;
+	}
 	try {
 		await explainFinalizeFailpoint?.("before-final");
 		await writeExplain(root, artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, signal);
 		await explainFinalizeFailpoint?.("after-final");
+		await writeExplain(root, canonicalPath, `${JSON.stringify(artifact, null, 2)}\n`, signal);
+		await explainFinalizeFailpoint?.("after-canonical");
 		await writeExplain(root, stateRel(), `${JSON.stringify({
 			schemaVersion: 3,
 			kind: "final",
 			apiName: prepare.api.name,
-			artifactPath,
+			artifactPath: canonicalPath,
 			generatedAt: artifact.generatedAt,
 			sourceFingerprint: artifact.sourceFingerprint,
 			graphDigest: artifact.graphDigest,
@@ -10891,13 +11711,17 @@ async function finalizeExplain(root, workspaceId, preparePathRel, analysis, curr
 		await explainFinalizeFailpoint?.("after-state");
 	} catch (cause) {
 		try {
+			if (previousCanonical === null) await rm(join(root, canonicalPath), { force: true });
+			else await writeExplainFile(root, canonicalPath, previousCanonical, { skipFailpoint: true });
+		} catch {}
+		try {
 			await restoreExplainPublicationState(root, previousState);
 		} catch {}
 		throw cause;
 	}
 	return {
 		artifact,
-		artifactPath
+		artifactPath: canonicalPath
 	};
 }
 function computeGraphDigest(graph) {
@@ -10918,6 +11742,8 @@ const JOB_KEYS = [
 	"workspaceId",
 	"apiName",
 	"apiId",
+	"batchId",
+	"host",
 	"prepareArtifactPath",
 	"contextHash",
 	"prepareId",
@@ -10948,6 +11774,8 @@ const JOB_ERRORS = new Set([
 	"source-changed",
 	"folder-changed",
 	"analysis-invalid",
+	"source-oversize",
+	"source-range",
 	"prepare-invalidated",
 	"input-too-large",
 	"output-oversize",
@@ -10971,6 +11799,9 @@ function jobRel(jobId) {
 	if (!/^[a-f0-9]{16}$/.test(jobId)) throw new Error("invalid-job-id");
 	return `.metadata/icomposer/ici/explain/jobs/${jobId}/job.json`;
 }
+function jobRecordPath(root, jobId) {
+	return join(explainBaseDir(root), "jobs", jobId, "job.json");
+}
 function jobRecordRelativePath(jobId) {
 	return jobRel(jobId);
 }
@@ -10988,6 +11819,7 @@ async function createJobRecord(root, input) {
 		schemaVersion: 1,
 		kind: "explain-job",
 		...input,
+		host: input.host ?? HOST_INSTANCE_ID,
 		engineVersion: input.engineVersion ?? ICI_ENGINE_VERSION,
 		referenceTarget,
 		folderPath: referenceTarget.path,
@@ -10997,6 +11829,7 @@ async function createJobRecord(root, input) {
 		updatedAt: now
 	};
 	if (!validJobRecord(record)) throw new Error("confirmation-invalid");
+	bumpBatchStatusVersion(root, record.batchId);
 	await writeExplain(root, jobRel(record.jobId), `${JSON.stringify(record, null, 2)}\n`);
 	return record;
 }
@@ -11005,7 +11838,7 @@ function optionalUtcTime(value) {
 }
 function validJobRecord(value) {
 	const r = value;
-	return allowed(value, JOB_KEYS, JOB_KEYS.filter((key) => key !== "error" && key !== "notBefore" && key !== "engineVersion" && key !== "referenceTarget" && key !== "folderPath" && key !== "childSessionId" && key !== "startedAt" && key !== "finishedAt")) && (r.error === void 0 || typeof r.error === "string") && (r.notBefore === void 0 || typeof r.notBefore === "string" && !Number.isNaN(Date.parse(r.notBefore)) && r.notBefore.endsWith("Z")) && optionalUtcTime(r.startedAt) && optionalUtcTime(r.finishedAt) && (r.childSessionId === void 0 || typeof r.childSessionId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(r.childSessionId)) ? r.schemaVersion === 1 && r.kind === "explain-job" && /^[a-f0-9]{16}$/.test(r.jobId) && validText(r.workspaceId, 256) && validText(r.apiName, 512) && validText(r.apiId, 512) && typeof r.prepareArtifactPath === "string" && r.prepareArtifactPath.startsWith(".metadata/icomposer/ici/explain/") && !r.prepareArtifactPath.includes("..") && /^[a-f0-9]{64}$/.test(r.contextHash) && /^[a-f0-9]{32}$/.test(r.prepareId) && /^[a-f0-9]{64}$/.test(r.sourceFingerprint) && /^[a-f0-9]{64}$/.test(r.graphDigest) && (r.engineVersion === void 0 || validText(r.engineVersion, 64)) && (r.provider === null || validText(r.provider, 256)) && (r.model === null || validText(r.model, 256)) && Array.isArray(r.docs) && r.docs.length <= 50 && r.docs.every((doc) => typeof doc.path === "string" && safeRel(doc.path) && /^[a-f0-9]{64}$/.test(doc.sha256)) && (r.folderPath === void 0 || validFolderPath(r.folderPath)) && (r.referenceTarget !== void 0 && validReferenceTarget(r.referenceTarget) || r.folderPath !== void 0 && validFolderPath(r.folderPath)) && (r.referenceTarget === void 0 || r.folderPath === void 0 || r.referenceTarget.path === r.folderPath) && (r.status !== "scheduled" || r.notBefore !== void 0) && [
+	return allowed(value, JOB_KEYS, JOB_KEYS.filter((key) => key !== "error" && key !== "notBefore" && key !== "engineVersion" && key !== "batchId" && key !== "host" && key !== "referenceTarget" && key !== "folderPath" && key !== "childSessionId" && key !== "startedAt" && key !== "finishedAt")) && (r.error === void 0 || typeof r.error === "string") && (r.notBefore === void 0 || typeof r.notBefore === "string" && !Number.isNaN(Date.parse(r.notBefore)) && r.notBefore.endsWith("Z")) && optionalUtcTime(r.startedAt) && optionalUtcTime(r.finishedAt) && (r.childSessionId === void 0 || typeof r.childSessionId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(r.childSessionId)) ? r.schemaVersion === 1 && r.kind === "explain-job" && /^[a-f0-9]{16}$/.test(r.jobId) && validText(r.workspaceId, 256) && validText(r.apiName, 512) && validText(r.apiId, 512) && typeof r.prepareArtifactPath === "string" && r.prepareArtifactPath.startsWith(".metadata/icomposer/ici/explain/") && !r.prepareArtifactPath.includes("..") && /^[a-f0-9]{64}$/.test(r.contextHash) && /^[a-f0-9]{32}$/.test(r.prepareId) && /^[a-f0-9]{64}$/.test(r.sourceFingerprint) && /^[a-f0-9]{64}$/.test(r.graphDigest) && (r.engineVersion === void 0 || validText(r.engineVersion, 64)) && (r.batchId === void 0 || /^[a-f0-9]{16}$/.test(r.batchId)) && (r.host === void 0 || validText(r.host, 64)) && (r.provider === null || validText(r.provider, 256)) && (r.model === null || validText(r.model, 256)) && Array.isArray(r.docs) && r.docs.length <= 50 && r.docs.every((doc) => typeof doc.path === "string" && safeRel(doc.path) && /^[a-f0-9]{64}$/.test(doc.sha256)) && (r.folderPath === void 0 || validFolderPath(r.folderPath)) && (r.referenceTarget !== void 0 && validReferenceTarget(r.referenceTarget) || r.folderPath !== void 0 && validFolderPath(r.folderPath)) && (r.referenceTarget === void 0 || r.folderPath === void 0 || r.referenceTarget.path === r.folderPath) && (r.status !== "scheduled" || r.notBefore !== void 0) && [
 		"awaiting-input",
 		"scheduled",
 		"confirmed",
@@ -11084,12 +11917,14 @@ async function updateJobRecord(root, jobId, expectedRevision, patch) {
 			],
 			scheduled: [
 				"scheduled",
+				"awaiting-input",
 				"running",
 				"cancelled",
 				"failed"
 			],
 			confirmed: [
 				"confirmed",
+				"awaiting-input",
 				"running",
 				"cancelled",
 				"failed"
@@ -11107,6 +11942,7 @@ async function updateJobRecord(root, jobId, expectedRevision, patch) {
 			interrupted: ["interrupted"]
 		};
 		if (patch.status !== void 0 && !transitions[current.status].includes(patch.status)) throw new Error("invalid-state-transition");
+		if (patch.status !== void 0 && patch.status !== current.status) bumpBatchStatusVersion(root, current.batchId);
 		const next = {
 			...current,
 			...patch,
@@ -11132,6 +11968,7 @@ async function withExplainJobLocks(root, jobIds, task) {
 }
 async function writeJobRecordUnderLock(root, record, skipFailpoint = false) {
 	if (!validJobRecord(record)) throw new Error("confirmation-invalid");
+	bumpBatchStatusVersion(root, record.batchId);
 	await writeExplainFile(root, jobRel(record.jobId), `${JSON.stringify(record, null, 2)}\n`, {
 		skipLock: true,
 		skipFailpoint
@@ -11153,16 +11990,60 @@ function batchRecordRelativePath(batchId) {
 function newBatchId() {
 	return createHash("sha256").update(`${Date.now()}|${Math.random()}|${process.pid}`).digest("hex").slice(0, 16);
 }
+function batchDir(root) {
+	return join(explainBaseDir(root), "batches");
+}
 const validBatchRecord = validExplainBatchRecord;
-async function writeBatchRecord(root, record, signal) {
-	if (!validBatchRecord(record)) throw new Error("confirmation-invalid");
-	await writeExplain(root, batchRel(record.batchId), `${JSON.stringify(record, null, 2)}\n`, signal);
+/**
+* TASK-111 P2 disk forms. The header is the only mutable file: it points either at an
+* inline list (small task) or at one immutable shard generation. Shards are written
+* BEFORE the header switches, so a crash leaves the old complete generation or the new
+* complete generation referenced — never a mixture — and a missing shard makes the task
+* unreadable instead of silently short.
+*/
+function shardDirRel(batchId, generation) {
+	return `.metadata/icomposer/ici/explain/batches/${batchId}/gen-${generation}`;
 }
-async function writeBatchRecordUnderLock(root, record) {
-	if (!validBatchRecord(record)) throw new Error("confirmation-invalid");
-	await writeExplainFile(root, batchRel(record.batchId), `${JSON.stringify(record, null, 2)}\n`, { skipLock: true });
+function shardRel(batchId, generation, index) {
+	return `${shardDirRel(batchId, generation)}/shard-${index}.json`;
 }
-async function readBatchRecord(root, batchId) {
+/**
+* Generation numbers are never reused: the next generation is one past the highest
+* directory this task already owns, so a leftover from a failed swap can never be
+* overwritten while another reader may still reference it.
+*/
+async function nextGeneration(root, batchId) {
+	let entries = [];
+	try {
+		entries = await readdir(join(explainBaseDir(root), "batches", batchId));
+	} catch {
+		return 1;
+	}
+	let highest = 0;
+	for (const entry of entries) {
+		const match = /^gen-(\d+)$/.exec(entry);
+		if (match) highest = Math.max(highest, Number(match[1]));
+	}
+	return highest + 1;
+}
+/** Keep the current and the previous generation, so a reader that already resolved the old header still completes. */
+async function pruneGenerations(root, batchId, keep) {
+	let entries = [];
+	try {
+		entries = await readdir(join(explainBaseDir(root), "batches", batchId));
+	} catch {
+		return;
+	}
+	for (const entry of entries) {
+		const match = /^gen-(\d+)$/.exec(entry);
+		if (!match) continue;
+		if (Number(match[1]) < keep) await rm(join(explainBaseDir(root), "batches", batchId, entry), {
+			recursive: true,
+			force: true
+		}).catch(() => void 0);
+	}
+}
+async function readBatchHeader(root, batchId) {
 	try {
 		const value = await readContainedExplainJson(root, batchRel(batchId));
 		return validBatchRecord(value) ? value : null;
@@ -11170,6 +12051,576 @@ async function readBatchRecord(root, batchId) {
 		return null;
 	}
 }
+/** Expand a header into the complete record; null means "fail loudly", never "partial". */
+async function expandBatch(root, header) {
+	if (header.jobIds !== void 0) return {
+		...header,
+		jobIds: header.jobIds,
+		jobCount: header.jobIds.length
+	};
+	const shards = header.jobShards;
+	if (shards === void 0) return null;
+	const ids = [];
+	for (let index = 0; index < shards.count; index += 1) {
+		let value;
+		try {
+			value = await readContainedExplainJson(root, shardRel(header.batchId, shards.generation, index));
+		} catch {
+			return null;
+		}
+		if (!validExplainBatchShardRecord(value)) return null;
+		if (value.batchId !== header.batchId || value.generation !== shards.generation || value.index !== index) return null;
+		ids.push(...value.jobIds);
+	}
+	if (ids.length !== header.jobCount || new Set(ids).size !== ids.length) return null;
+	return {
+		...header,
+		jobIds: ids
+	};
+}
+/** Write the header for a complete record: inline when small, otherwise a fresh immutable generation. */
+async function writeBatchTask(root, record, options = {}) {
+	const ids = [...record.jobIds];
+	if (!validExplainBatchJobIds(ids)) throw new Error("confirmation-invalid");
+	const base = {
+		...record,
+		jobIds: void 0,
+		jobCount: ids.length
+	};
+	delete base.jobIds;
+	delete base.jobShards;
+	const previous = await readBatchHeader(root, record.batchId);
+	if (ids.length <= EXPLAIN_BATCH_INLINE_MAX) {
+		const header$1 = {
+			...base,
+			jobIds: ids
+		};
+		if (!validBatchRecord(header$1)) throw new Error("confirmation-invalid");
+		await writeExplainFile(root, batchRel(record.batchId), `${JSON.stringify(header$1, null, 2)}\n`, {
+			...options.skipLock === true ? { skipLock: true } : {},
+			...options.signal === void 0 ? {} : { signal: options.signal }
+		});
+		if (previous?.jobShards !== void 0) await rm(join(explainBaseDir(root), "batches", record.batchId), {
+			recursive: true,
+			force: true
+		}).catch(() => void 0);
+		return;
+	}
+	const generation = await nextGeneration(root, record.batchId);
+	const count = Math.ceil(ids.length / EXPLAIN_BATCH_SHARD_MAX);
+	for (let index = 0; index < count; index += 1) {
+		const chunk = ids.slice(index * EXPLAIN_BATCH_SHARD_MAX, (index + 1) * EXPLAIN_BATCH_SHARD_MAX);
+		const shard = {
+			schemaVersion: 1,
+			kind: "explain-batch-shard",
+			batchId: record.batchId,
+			generation,
+			index,
+			jobIds: chunk
+		};
+		if (!validExplainBatchShardRecord(shard)) throw new Error("confirmation-invalid");
+		await writeExplainFile(root, shardRel(record.batchId, generation, index), `${JSON.stringify(shard, null, 2)}\n`, {
+			skipLock: true,
+			exclusive: true
+		});
+	}
+	const header = {
+		...base,
+		jobShards: {
+			generation,
+			count,
+			dir: `gen-${generation}`
+		}
+	};
+	if (!validBatchRecord(header)) throw new Error("confirmation-invalid");
+	await writeExplainFile(root, batchRel(record.batchId), `${JSON.stringify(header, null, 2)}\n`, {
+		...options.skipLock === true ? { skipLock: true } : {},
+		...options.signal === void 0 ? {} : { signal: options.signal }
+	});
+	await pruneGenerations(root, record.batchId, generation - 1);
+}
+async function writeBatchRecord(root, record, signal) {
+	await writeBatchTask(root, record, { signal });
+}
+async function writeBatchRecordUnderLock(root, record) {
+	await writeBatchTask(root, record, { skipLock: true });
+}
+/**
+* TASK-111 P2 test seam: a hook that runs after the header is read and before it is
+* expanded, so a controlled interleaving can swap the generation at exactly the moment
+* an in-flight reader already resolved the previous one.
+*/
+let batchReadObserver;
+/**
+* TASK-111 P2: a generation swap must never surface as `recordMissing` to a reader that
+* had already resolved the previous header. Expansion is retried (bounded) against a
+* freshly read header, so a concurrent swap simply resolves the new generation; only a
+* header whose CURRENT generation is incomplete still fails loudly.
+*/
+async function readBatchRecord(root, batchId) {
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const header = await readBatchHeader(root, batchId);
+		if (header === null) return null;
+		if (batchReadObserver !== void 0) {
+			const observer = batchReadObserver;
+			batchReadObserver = void 0;
+			await observer(batchId);
+		}
+		const expanded = await expandBatch(root, header);
+		if (expanded !== null) return expanded;
+	}
+	return null;
+}
+/**
+* TASK-111 P4: per-task status version. Every seam that can change a member's status
+* (record write, create, or removal) bumps it, so the status route may cache its summary
+* and still answer with real counts; the map is per process, so a restart rebuilds it.
+*/
+const batchStatusVersions = /* @__PURE__ */ new Map();
+function bumpBatchStatusVersion(root, batchId) {
+	if (batchId === void 0) return;
+	const key = `${root}\0${batchId}`;
+	batchStatusVersions.set(key, (batchStatusVersions.get(key) ?? 0) + 1);
+}
+/** Current version of one task's member statuses (0 when this process has seen no write yet). */
+function batchStatusVersion(root, batchId) {
+	return batchStatusVersions.get(`${root}\0${batchId}`) ?? 0;
+}
+/** TASK-111: remove a job record this task created (rollback of a failed task creation); never used on reused records. */
+/**
+* TASK-116 FIX-3: drop a job record this call created AND the now-empty job directory, so a
+* rolled-back task leaves no residue in `.metadata/...(jobs/<id>/)` for an operator to trip
+* over. Deleting the owned directory is chosen over teaching `listJobs` to ignore empty
+* directories: the latter would leave unreadable leftovers on disk forever.
+*/
+async function removeJobRecord(root, jobId, batchId) {
+	bumpBatchStatusVersion(root, batchId);
+	try {
+		await rm(jobRecordPath(root, jobId), { force: true });
+		await rm(join(explainBaseDir(root), "jobs", jobId), {
+			recursive: true,
+			force: true
+		});
+	} catch {}
+}
+/**
+* TASK-111: mark active jobs whose task record is gone as cancelled, so a partially
+* written task never stays claimable. Ownership is decided by `host` (the process that
+* created the record): recovery never repairs a record created by the live process,
+*/
+async function recoverOrphanJobs(root, instanceId = HOST_INSTANCE_ID) {
+	let recovered = 0;
+	for (const job of await listActiveJobs(root)) {
+		if (job.batchId === void 0) continue;
+		if (job.host === instanceId) continue;
+		const batch = await readBatchRecord(root, job.batchId);
+		if (batch !== null && batch.jobIds.includes(job.jobId)) continue;
+		await updateJobRecord(root, job.jobId, job.revision, {
+			status: "cancelled",
+			error: "interrupted"
+		}).then(() => {
+			recovered += 1;
+		}).catch(() => void 0);
+	}
+	return recovered;
+}
+/** TASK-111: every job id of every readable batch record in this workspace (used to attribute legacy jobs, which carry no `batchId`, to their task). */
+async function listBatchJobIds(root) {
+	const map$6 = /* @__PURE__ */ new Map();
+	let ids;
+	try {
+		ids = await readdir(batchDir(root));
+	} catch {
+		return map$6;
+	}
+	for (const file of ids) {
+		const batchId = file.endsWith(".json") ? file.slice(0, -5) : "";
+		if (!/^[a-f0-9]{16}$/.test(batchId)) continue;
+		const record = await readBatchRecord(root, batchId);
+		if (!record) continue;
+		for (const jobId of record.jobIds) if (!map$6.has(jobId)) map$6.set(jobId, batchId);
+	}
+	return map$6;
+}
+/**
+* TASK-111: persist the plan the user confirmed once for this task. The task record
+* — not a member job — is the source of truth for the model, reference target, and
+* not-before, so retry replacements and restarts keep the same decision.
+*/
+async function updateBatchPlan(root, batchId, plan) {
+	if (!validExplainBatchPlan(plan)) throw new Error("confirmation-invalid");
+	return withExplainFileLock(root, batchRel(batchId), async () => {
+		const current = await readBatchHeader(root, batchId);
+		if (!current) throw new Error("batch-missing");
+		const { confirmPending: _pending, confirmOwner: _owner,...rest } = current;
+		const header = {
+			...rest,
+			plan,
+			updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+		};
+		if (!validBatchRecord(header)) throw new Error("confirmation-invalid");
+		await writeExplainFile(root, batchRel(batchId), `${JSON.stringify(header, null, 2)}\n`, { skipLock: true });
+		const expanded = await expandBatch(root, header);
+		if (expanded === null) throw new Error("batch-missing");
+		return expanded;
+	});
+}
+/**
+* TASK-111 confirmation gate. `setBatchConfirmPending(true)` arms the gate BEFORE
+* any member is written, so the scheduler refuses to claim this task while the
+* members are being committed; `updateBatchPlan` is the single commit point that
+* writes the plan and clears the gate together. A crash between the two is healed
+* by `recoverPendingConfirms`, which returns every member to awaiting-input.
+*/
+async function setBatchConfirmPending(root, batchId, pending, owner = HOST_INSTANCE_ID) {
+	return withExplainFileLock(root, batchRel(batchId), async () => {
+		const current = await readBatchHeader(root, batchId);
+		if (!current) throw new Error("batch-missing");
+		const { confirmPending: _armed, confirmOwner: _owner,...rest } = current;
+		const header = {
+			...rest,
+			...pending ? {
+				confirmPending: true,
+				confirmOwner: owner
+			} : {},
+			updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+		};
+		if (!validBatchRecord(header)) throw new Error("confirmation-invalid");
+		await writeExplainFile(root, batchRel(batchId), `${JSON.stringify(header, null, 2)}\n`, { skipLock: true });
+		const expanded = await expandBatch(root, header);
+		if (expanded === null) throw new Error("batch-missing");
+		return expanded;
+	});
+}
+/** TASK-111 startup recovery for a confirmation that never committed: clear the gate and un-schedule its members. */
+async function recoverPendingConfirms(root, instanceId = HOST_INSTANCE_ID) {
+	let healed = 0;
+	let names;
+	try {
+		names = await readdir(batchDir(root));
+	} catch {
+		return 0;
+	}
+	for (const file of names) {
+		const batchId = file.endsWith(".json") ? file.slice(0, -5) : "";
+		if (!/^[a-f0-9]{16}$/.test(batchId)) continue;
+		const record = await readBatchRecord(root, batchId);
+		if (!record || record.confirmPending !== true) continue;
+		if (record.confirmOwner === instanceId) continue;
+		for (const jobId of record.jobIds) {
+			const job = await readJobRecord(root, jobId);
+			if (!job || !["scheduled", "confirmed"].includes(job.status)) continue;
+			await updateJobRecord(root, jobId, job.revision, { status: "awaiting-input" }).catch(() => void 0);
+		}
+		await setBatchConfirmPending(root, batchId, false).catch(() => void 0);
+		healed += 1;
+	}
+	return healed;
+}
+/** TASK-111: restore (or clear) the task plan after a failed confirmation, so no half-confirmed plan survives. */
+async function restoreBatchPlan(root, batchId, plan) {
+	return withExplainFileLock(root, batchRel(batchId), async () => {
+		const current = await readBatchHeader(root, batchId);
+		if (!current) throw new Error("batch-missing");
+		const { plan: _dropped,...rest } = current;
+		const header = {
+			...rest,
+			...plan === void 0 ? {} : { plan },
+			updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+		};
+		if (!validBatchRecord(header)) throw new Error("confirmation-invalid");
+		await writeExplainFile(root, batchRel(batchId), `${JSON.stringify(header, null, 2)}\n`, { skipLock: true });
+		const expanded = await expandBatch(root, header);
+		if (expanded === null) throw new Error("batch-missing");
+		return expanded;
+	});
+}
+/** TASK-111: rewrite only the task-level concurrency of one batch record; other tasks and the Host setting stay untouched. */
+async function updateBatchSettings(root, batchId, maxConcurrent) {
+	if (!Number.isInteger(maxConcurrent) || maxConcurrent < EXPLAIN_TASK_CONCURRENCY_MIN || maxConcurrent > EXPLAIN_TASK_CONCURRENCY_MAX) throw new Error("confirmation-invalid");
+	return withExplainFileLock(root, batchRel(batchId), async () => {
+		const current = await readBatchHeader(root, batchId);
+		if (!current) throw new Error("batch-missing");
+		const header = {
+			...current,
+			maxConcurrent,
+			updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+		};
+		if (!validBatchRecord(header)) throw new Error("confirmation-invalid");
+		await writeExplainFile(root, batchRel(batchId), `${JSON.stringify(header, null, 2)}\n`, { skipLock: true });
+		const expanded = await expandBatch(root, header);
+		if (expanded === null) throw new Error("batch-missing");
+		return expanded;
+	});
+}
+
+//#endregion
+//#region ../icomposer-code-intelligence/src/explain-config.ts
+/**
+* TASK-102: the one Host-wide ICI Explain scheduling setting.
+*
+* Scope is deliberately the CURRENT Host instance: every workspace, session,
+* and batch scheduled by this process shares one maximum-concurrency cap. The
+* value is durable (storage-domain global) so a restart remembers it, but it
+* is NOT a cross-process limit — two Host processes keep separate caps.
+*/
+const EXPLAIN_MIN_CONCURRENCY = 1;
+const EXPLAIN_MAX_CONCURRENCY = 32;
+const EXPLAIN_DEFAULT_CONCURRENCY = 4;
+/**
+* TASK-123: the prompt budget is a Host-wide input-size policy, configurable in BOTH directions.
+* The default is 1 MiB (a 1M-context model covers one API's prepared material without being cut).
+* The bounds below are a deliberate typo guard only — they are NOT a product ceiling: raise or
+* lower the value freely inside them. The per-file source/reference caps (256 KiB) stay separate.
+*/
+const EXPLAIN_DEFAULT_PROMPT_BYTES = 1048576;
+const EXPLAIN_MIN_PROMPT_BYTES = 16384;
+const EXPLAIN_MAX_PROMPT_BYTES = 8388608;
+/**
+* TASK-125: the child explain session's output budget. It used to be hardcoded to 4096, which is
+* inconsistent with the submit schema (technical + business up to 12k chars each). The default is
+* 16384 and the bounds are, like the prompt budget, a typo guard rather than a product ceiling.
+*/
+const EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS = 16384;
+const EXPLAIN_MIN_MAX_OUTPUT_TOKENS = 1024;
+const EXPLAIN_MAX_MAX_OUTPUT_TOKENS = 262144;
+/** Strict durable/effective shape: an integer in the closed 1–32 range. */
+const explainConcurrencySchema = number().int().min(EXPLAIN_MIN_CONCURRENCY).max(EXPLAIN_MAX_CONCURRENCY);
+/** TASK-123: strict durable/effective shape for the prompt budget; a legacy record gets the default. */
+const explainPromptBytesSchema = number().int().min(EXPLAIN_MIN_PROMPT_BYTES).max(EXPLAIN_MAX_PROMPT_BYTES);
+/** TASK-125: strict durable/effective shape for the child output budget; legacy records get the default. */
+const explainMaxOutputTokensSchema = number().int().min(EXPLAIN_MIN_MAX_OUTPUT_TOKENS).max(EXPLAIN_MAX_MAX_OUTPUT_TOKENS);
+/** Durable Host-wide Explain configuration domain (global singleton). */
+const explainConfigDomain = defineDomain({
+	name: "ici_explain_config",
+	version: 1,
+	global: {
+		schema: object({
+			maxConcurrent: explainConcurrencySchema,
+			maxPromptBytes: explainPromptBytesSchema.default(EXPLAIN_DEFAULT_PROMPT_BYTES),
+			maxOutputTokens: explainMaxOutputTokensSchema.default(EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS)
+		}),
+		initial: {
+			maxConcurrent: EXPLAIN_DEFAULT_CONCURRENCY,
+			maxPromptBytes: EXPLAIN_DEFAULT_PROMPT_BYTES,
+			maxOutputTokens: EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS
+		}
+	},
+	tables: {}
+});
+/**
+* The single owner of the Explain concurrency setting (`ctx.iciExplainConfig`).
+*
+* Both the scheduler and the routes read the effective value from this one
+* service, so no caller opens the domain twice and no in-memory copy can drift
+* from the durable one: every accepted write persists FIRST and only then
+* moves the effective value and wakes the scheduler.
+*/
+var ExplainConfigService = class extends Service {
+	static inject = ["storageDomain"];
+	domain;
+	maxConcurrentValue = EXPLAIN_DEFAULT_CONCURRENCY;
+	maxPromptBytesValue = EXPLAIN_DEFAULT_PROMPT_BYTES;
+	maxOutputTokensValue = EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS;
+	listeners = /* @__PURE__ */ new Set();
+	writeTail = Promise.resolve();
+	serviceDisposed = false;
+	constructor(ctx) {
+		super(ctx, "iciExplainConfig");
+		this.setMaxConcurrent = this.setMaxConcurrent.bind(this);
+		this.setMaxPromptBytes = this.setMaxPromptBytes.bind(this);
+		this.setMaxOutputTokens = this.setMaxOutputTokens.bind(this);
+		this.onChange = this.onChange.bind(this);
+		this.dispose = this.dispose.bind(this);
+	}
+	async [Service.init]() {
+		const storage = this.ctx.get("storageDomain");
+		if (storage === void 0) throw new Error("iciExplainConfig: storageDomain is unavailable");
+		const domain = await storage.open(explainConfigDomain);
+		try {
+			const stored = explainConfigDomain.global.schema.parse(domain.global.get());
+			this.domain = domain;
+			this.maxConcurrentValue = stored.maxConcurrent;
+			this.maxPromptBytesValue = stored.maxPromptBytes;
+			this.maxOutputTokensValue = stored.maxOutputTokens;
+		} catch (error$2) {
+			await domain.close().catch(() => void 0);
+			throw error$2;
+		}
+		this.ctx.effect(() => () => this.dispose(), "iciExplainConfig.dispose");
+	}
+	/** Effective cap for the current Host instance. */
+	get maxConcurrent() {
+		return this.maxConcurrentValue;
+	}
+	/** TASK-123: effective prompt budget (fallback for a Host without this config). */
+	get maxPromptBytes() {
+		return this.maxPromptBytesValue;
+	}
+	/** TASK-125: effective child output budget (fallback for a Host without this config). */
+	get maxOutputTokens() {
+		return this.maxOutputTokensValue;
+	}
+	/** Detached view for status payloads. */
+	get view() {
+		return {
+			maxConcurrent: this.maxConcurrentValue,
+			maxPromptBytes: this.maxPromptBytesValue,
+			maxOutputTokens: this.maxOutputTokensValue
+		};
+	}
+	/**
+	* The one write entry: validate strictly, persist through the domain, then
+	* commit the effective value. Invalid input never touches storage or the
+	* effective value; a persistence failure returns `storage-error` with the
+	* previous value still in force.
+	*/
+	setMaxConcurrent(input) {
+		if (this.serviceDisposed || this.domain === void 0) return Promise.resolve({
+			ok: false,
+			code: "storage-error"
+		});
+		if (typeof input !== "number" || !Number.isInteger(input) || input < EXPLAIN_MIN_CONCURRENCY || input > EXPLAIN_MAX_CONCURRENCY) return Promise.resolve({
+			ok: false,
+			code: "invalid-input"
+		});
+		const domain = this.domain;
+		const write = async () => {
+			try {
+				await domain.global.set({
+					maxConcurrent: input,
+					maxPromptBytes: this.maxPromptBytesValue,
+					maxOutputTokens: this.maxOutputTokensValue
+				});
+			} catch {
+				return {
+					ok: false,
+					code: "storage-error"
+				};
+			}
+			this.maxConcurrentValue = input;
+			for (const listener of [...this.listeners]) try {
+				listener(input);
+			} catch {}
+			return {
+				ok: true,
+				value: {
+					maxConcurrent: input,
+					maxPromptBytes: this.maxPromptBytesValue,
+					maxOutputTokens: this.maxOutputTokensValue
+				}
+			};
+		};
+		const task = this.writeTail.then(write, write);
+		this.writeTail = task.then(() => void 0, () => void 0);
+		return task;
+	}
+	/**
+	* TASK-123: the one write entry for the prompt budget. Same discipline as the concurrency
+	* value: validate strictly, persist first, then commit; an invalid input never touches storage.
+	*/
+	setMaxPromptBytes(input) {
+		if (this.serviceDisposed || this.domain === void 0) return Promise.resolve({
+			ok: false,
+			code: "storage-error"
+		});
+		if (typeof input !== "number" || !Number.isInteger(input) || input < EXPLAIN_MIN_PROMPT_BYTES || input > EXPLAIN_MAX_PROMPT_BYTES) return Promise.resolve({
+			ok: false,
+			code: "invalid-input"
+		});
+		const domain = this.domain;
+		const write = async () => {
+			try {
+				await domain.global.set({
+					maxConcurrent: this.maxConcurrentValue,
+					maxPromptBytes: input,
+					maxOutputTokens: this.maxOutputTokensValue
+				});
+			} catch {
+				return {
+					ok: false,
+					code: "storage-error"
+				};
+			}
+			this.maxPromptBytesValue = input;
+			for (const listener of [...this.listeners]) try {
+				listener(this.maxConcurrentValue);
+			} catch {}
+			return {
+				ok: true,
+				value: {
+					maxConcurrent: this.maxConcurrentValue,
+					maxPromptBytes: input,
+					maxOutputTokens: this.maxOutputTokensValue
+				}
+			};
+		};
+		const task = this.writeTail.then(write, write);
+		this.writeTail = task.then(() => void 0, () => void 0);
+		return task;
+	}
+	/**
+	* TASK-125: the one write entry for the child output budget. Same discipline: validate strictly,
+	* persist first, then commit; an invalid input never touches storage or the effective value.
+	*/
+	setMaxOutputTokens(input) {
+		if (this.serviceDisposed || this.domain === void 0) return Promise.resolve({
+			ok: false,
+			code: "storage-error"
+		});
+		if (typeof input !== "number" || !Number.isInteger(input) || input < EXPLAIN_MIN_MAX_OUTPUT_TOKENS || input > EXPLAIN_MAX_MAX_OUTPUT_TOKENS) return Promise.resolve({
+			ok: false,
+			code: "invalid-input"
+		});
+		const domain = this.domain;
+		const write = async () => {
+			try {
+				await domain.global.set({
+					maxConcurrent: this.maxConcurrentValue,
+					maxPromptBytes: this.maxPromptBytesValue,
+					maxOutputTokens: input
+				});
+			} catch {
+				return {
+					ok: false,
+					code: "storage-error"
+				};
+			}
+			this.maxOutputTokensValue = input;
+			for (const listener of [...this.listeners]) try {
+				listener(this.maxConcurrentValue);
+			} catch {}
+			return {
+				ok: true,
+				value: {
+					maxConcurrent: this.maxConcurrentValue,
+					maxPromptBytes: this.maxPromptBytesValue,
+					maxOutputTokens: input
+				}
+			};
+		};
+		const task = this.writeTail.then(write, write);
+		this.writeTail = task.then(() => void 0, () => void 0);
+		return task;
+	}
+	/** Observe committed cap changes (the scheduler uses this to fill capacity). */
+	onChange(listener) {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
+	}
+	/** Drain pending writes, then close the domain exactly once. */
+	async dispose() {
+		if (this.serviceDisposed) return;
+		this.serviceDisposed = true;
+		this.listeners.clear();
+		await this.writeTail.catch(() => void 0);
+		const domain = this.domain;
+		this.domain = void 0;
+		await domain?.close();
+	}
+};
 
 //#endregion
 //#region ../icomposer-code-intelligence/src/explain-native.ts
@@ -11179,6 +12630,59 @@ function err$2(code, message = code) {
 		error: {
 			code,
 			message
+		}
+	};
+}
+/** TASK-114: how many blockers travel into the tool result (and the model context). */
+const MAX_BLOCKED_TARGETS = 5;
+/** Structured conflict: an already-active job blocks the task, and the caller needs its identity. */
+var BlockedByActiveJob = class extends Error {
+	blockers;
+	blockersMore;
+	memberConflicts;
+	constructor(blockers, total, memberConflicts = 0) {
+		const legacy = blockers.map((entry) => `${entry.apiName} (${entry.jobId}, ${entry.status}, since ${entry.createdAt})`).join("; ");
+		const parts = [
+			legacy,
+			total > blockers.length ? `+${total - blockers.length} more` : "",
+			memberConflicts > 0 ? `${memberConflicts} target${memberConflicts === 1 ? "" : "s"} already belong to another task card (handle them in that card: confirm or cancel)` : ""
+		].filter((part) => part !== "");
+		super(`job-active: ${parts.join("; ")}`);
+		this.blockers = blockers;
+		this.blockersMore = Math.max(0, total - blockers.length);
+		this.memberConflicts = memberConflicts;
+		this.name = "BlockedByActiveJob";
+	}
+};
+/**
+* TASK-114 (legacy-only): only a standalone legacy job (no task id) may be offered as a
+* blocker the user can cancel from this card. A member of another task is reported as a
+* member conflict instead: it must be handled in its own card, never cancelled from here.
+*/
+function blockedBy(job) {
+	return job.batchId === void 0 || job.batchId === null ? new BlockedByActiveJob([blockedTargetOf(job)], 1) : new BlockedByActiveJob([], 0, 1);
+}
+/** Metadata-only projection of a blocking job: no artifact path and no prepare detail. */
+function blockedTargetOf(job) {
+	return {
+		apiId: job.apiId,
+		apiName: job.apiName,
+		jobId: job.jobId,
+		status: job.status,
+		createdAt: job.createdAt
+	};
+}
+/** Convert a BlockedByActiveJob into the result the engine face returns; other errors fall through. */
+function blockedResult(cause) {
+	if (!(cause instanceof BlockedByActiveJob)) return void 0;
+	return {
+		ok: false,
+		error: {
+			code: "job-active",
+			message: cause.message,
+			blockers: cause.blockers,
+			blockersMore: cause.blockersMore,
+			...cause.memberConflicts > 0 ? { memberConflicts: cause.memberConflicts } : {}
 		}
 	};
 }
@@ -11217,7 +12721,7 @@ async function runPrepare(deps, input, options) {
 	try {
 		return await withPrepareTransaction(base.value.canonicalPath, input.workspaceId, async () => {
 			const existing = await findActiveJobByApiId(base.value.canonicalPath, input.workspaceId, base.value.start.id);
-			if (existing) return err$2("job-active");
+			if (existing) throw blockedBy(existing);
 			const prepared = await prepareExplain(base.value.canonicalPath, input.workspaceId, base.value.graph, base.value.start, await deps.refs(base.value.canonicalPath), o.signal);
 			if (prepared.artifact.manifest.engineVersion !== ICI_ENGINE_VERSION) throw new Error("stale-snapshot");
 			const job = await createJobRecord(base.value.canonicalPath, {
@@ -11253,16 +12757,25 @@ async function runPrepare(deps, input, options) {
 			};
 		});
 	} catch (cause) {
+		const blocked = blockedResult(cause);
+		if (blocked !== void 0) return blocked;
 		const stale = cause instanceof Error && cause.message === "stale-snapshot";
 		return o.signal?.aborted ? err$2("cancelled") : stale ? err$2("stale-snapshot", "stale-snapshot: run ici_build to refresh the ICI graph before explaining") : err$2("storage-error");
 	}
 }
-/** Prepare several API explanations as one durable, single-confirmation batch. */
+/**
+* TASK-111: prepare every target of one task as ONE durable, single-confirmation
+* task card. The former 2-10 window is gone: the caller passes all targets of the
+* task, duplicates are reported instead of silently shrinking the list, and the
+* task-level concurrency travels with the task record.
+*/
 async function runPrepareBatch(deps, input, options) {
 	const o = opts(options);
 	if (deps.disposed()) return err$2("service-disposed");
 	if (o.signal?.aborted) return err$2("cancelled");
-	if (typeof input?.workspaceId !== "string" || !input.workspaceId || !Array.isArray(input.queries) || input.queries.length < 2 || input.queries.length > 10 || input.queries.some((query) => typeof query !== "string" || query.length > 512 || !query.trim())) return err$2("invalid-workspace-id", "queries must contain 2-10 non-empty API queries");
+	if (typeof input?.workspaceId !== "string" || !input.workspaceId || !Array.isArray(input.queries) || input.queries.length < 1 || input.queries.some((query) => typeof query !== "string" || query.length > 512 || !query.trim())) return err$2("invalid-workspace-id", "queries must contain at least one non-empty API query");
+	if (input.maxConcurrent !== void 0 && (!Number.isInteger(input.maxConcurrent) || input.maxConcurrent < EXPLAIN_MIN_CONCURRENCY || input.maxConcurrent > EXPLAIN_MAX_CONCURRENCY)) return err$2("invalid-workspace-id", `concurrency must be an integer from ${EXPLAIN_MIN_CONCURRENCY} to ${EXPLAIN_MAX_CONCURRENCY}`);
+	const requestedCount = input.queries.length;
 	const bases = [];
 	for (const query of input.queries) {
 		const base = await deps.loadBase(input.workspaceId, query);
@@ -11277,6 +12790,9 @@ async function runPrepareBatch(deps, input, options) {
 			const rows = [];
 			const created = [];
 			const seen = /* @__PURE__ */ new Set();
+			const conflicts = [];
+			let memberConflicts = 0;
+			const batchId = newBatchId();
 			try {
 				const refs = await deps.refs(root);
 				for (const base of bases) {
@@ -11285,24 +12801,15 @@ async function runPrepareBatch(deps, input, options) {
 					seen.add(base.start.id);
 					const existing = await findActiveJobByApiId(root, input.workspaceId, base.start.id);
 					if (existing) {
-						const prepared$1 = await loadPrepare(root, existing.prepareArtifactPath);
-						rows.push({
-							apiId: existing.apiId,
-							apiName: existing.apiName,
-							jobId: existing.jobId,
-							artifactPath: existing.prepareArtifactPath,
-							jobStatus: existing.status,
-							chainNodes: prepared$1.callChain.nodes.length,
-							chainEdges: prepared$1.callChain.edges.length,
-							truncated: prepared$1.callChain.truncated === true,
-							reused: true
-						});
+						if (existing.batchId === void 0) conflicts.push(blockedTargetOf(existing));
+						else memberConflicts += 1;
 						continue;
 					}
 					const prepared = await prepareExplain(root, input.workspaceId, base.graph, base.start, refs, o.signal);
 					if (prepared.artifact.manifest.engineVersion !== ICI_ENGINE_VERSION) throw new Error("stale-snapshot");
 					const job = await createJobRecord(root, {
 						jobId: newJobId(),
+						batchId,
 						workspaceId: input.workspaceId,
 						apiName: prepared.artifact.api.name,
 						apiId: prepared.artifact.api.id,
@@ -11332,13 +12839,17 @@ async function runPrepareBatch(deps, input, options) {
 						reused: false
 					});
 				}
-				const batchId = newBatchId();
+				if (conflicts.length > 0 || memberConflicts > 0) throw new BlockedByActiveJob(conflicts.slice(0, MAX_BLOCKED_TARGETS), conflicts.length, memberConflicts);
+				const duplicates = requestedCount - rows.length;
 				await writeBatchRecord(root, {
 					schemaVersion: 1,
 					kind: "explain-batch",
 					batchId,
 					workspaceId: input.workspaceId,
 					jobIds: rows.map((row) => row.jobId),
+					maxConcurrent: input.maxConcurrent ?? EXPLAIN_DEFAULT_CONCURRENCY,
+					requestedCount,
+					...input.selector === void 0 ? {} : { selector: input.selector },
 					createdAt: (/* @__PURE__ */ new Date()).toISOString(),
 					updatedAt: (/* @__PURE__ */ new Date()).toISOString()
 				}, o.signal);
@@ -11347,22 +12858,225 @@ async function runPrepareBatch(deps, input, options) {
 					value: {
 						batchId,
 						workspaceId: input.workspaceId,
-						jobs: rows
+						jobs: rows,
+						requestedCount,
+						duplicates
 					}
 				};
 			} catch (cause) {
-				for (const job of created) await updateJobRecord(root, job.jobId, job.revision, {
-					status: "cancelled",
-					error: "storage-error"
-				}).catch(() => void 0);
+				for (const job of created) await removeJobRecord(root, job.jobId).catch(() => void 0);
 				throw cause;
 			}
 		});
 	} catch (cause) {
 		if (o.signal?.aborted) return err$2("cancelled");
 		if (cause instanceof Error && cause.message === "stale-snapshot") return err$2("stale-snapshot", "stale-snapshot: run ici_build to refresh the ICI graph before explaining");
+		const blocked = blockedResult(cause);
+		if (blocked !== void 0) return blocked;
 		return err$2("storage-error");
 	}
+}
+/**
+* TASK-111: resolve one task selector to its COMPLETE target list host-side, so
+* the caller never enumerates targets and never splits a task into several cards.
+* A same-name collision is two different assets and is refused with bounded
+* candidates instead of being merged; an empty resolution is refused as well.
+*/
+async function resolveTaskTargets(deps, workspaceId, selector) {
+	if (selector.kind === "api") {
+		const name$8 = selector.query;
+		if (deps.catalog === void 0) return {
+			ok: true,
+			names: [name$8],
+			label: name$8
+		};
+		const listing$1 = await deps.catalog(workspaceId);
+		if (!listing$1.ok) return {
+			ok: false,
+			code: listing$1.error.code,
+			message: listing$1.error.message
+		};
+		const paths = listing$1.value.entries.filter((entry) => entry.type === "api" && entry.name === name$8).map((entry) => entry.sourcePath);
+		if (paths.length > 1) return {
+			ok: false,
+			code: "ambiguous-target",
+			message: `api name ${name$8} exists at ${paths.length} source paths: ${boundedCandidates(paths)}`
+		};
+		return {
+			ok: true,
+			names: [name$8],
+			label: name$8
+		};
+	}
+	if (selector.kind === "queries") {
+		const names = [...selector.queries];
+		if (names.length === 0) return {
+			ok: false,
+			code: "no-targets",
+			message: "no API targets were given"
+		};
+		if (deps.catalog === void 0) return {
+			ok: true,
+			names
+		};
+		const listing$1 = await deps.catalog(workspaceId);
+		if (!listing$1.ok) return {
+			ok: false,
+			code: listing$1.error.code,
+			message: listing$1.error.message
+		};
+		const collisions$1 = names.filter((name$8) => listing$1.value.entries.filter((entry) => entry.type === "api" && entry.name === name$8).length > 1);
+		if (collisions$1.length > 0) return {
+			ok: false,
+			code: "ambiguous-target",
+			message: `api names exist at several source paths: ${boundedCandidates([...new Set(collisions$1)])}`
+		};
+		return {
+			ok: true,
+			names
+		};
+	}
+	if (deps.catalog === void 0) return {
+		ok: false,
+		code: "storage-error",
+		message: "catalog listing is unavailable"
+	};
+	const listing = await deps.catalog(workspaceId);
+	if (!listing.ok) return {
+		ok: false,
+		code: listing.error.code,
+		message: listing.error.message
+	};
+	const apis = listing.value.entries.filter((entry) => entry.type === "api");
+	if (selector.kind === "all") {
+		if (apis.length === 0) return {
+			ok: false,
+			code: "no-targets",
+			message: "this workspace has no API target"
+		};
+		const collisions$1 = [...new Set(apis.map((entry) => entry.name))].filter((name$8) => apis.filter((entry) => entry.name === name$8).length > 1);
+		if (collisions$1.length > 0) return {
+			ok: false,
+			code: "ambiguous-target",
+			message: `all cannot be resolved: same-named APIs exist at several source paths: ${boundedCandidates(collisions$1)}`
+		};
+		return {
+			ok: true,
+			names: apis.map((entry) => entry.name).sort(),
+			label: "all"
+		};
+	}
+	const wanted = selector.group;
+	const matched = apis.filter((entry) => entry.group.toLowerCase() === wanted.toLowerCase());
+	const tenants = [...new Set(matched.map((entry) => entry.tenant))].sort();
+	if (tenants.length > 1) return {
+		ok: false,
+		code: "ambiguous-target",
+		message: `group ${wanted} exists in several tenants: ${boundedCandidates(tenants)}`
+	};
+	if (matched.length === 0) {
+		const groups = [...new Set(apis.map((entry) => entry.group))].sort();
+		const similar = groups.filter((group) => group.toLowerCase().includes(wanted.toLowerCase()));
+		return {
+			ok: false,
+			code: "group-not-found",
+			message: `no group named ${wanted}; candidates: ${boundedCandidates(similar) || "none"}`
+		};
+	}
+	const collisions = [...new Set(matched.map((entry) => entry.name))].filter((name$8) => matched.filter((entry) => entry.name === name$8).length > 1);
+	if (collisions.length > 0) return {
+		ok: false,
+		code: "ambiguous-target",
+		message: `group ${wanted} contains same-named APIs at several source paths: ${boundedCandidates(collisions)}`
+	};
+	return {
+		ok: true,
+		names: matched.map((entry) => entry.name).sort(),
+		label: wanted
+	};
+}
+/** Bounded candidate list for diagnostics: counts stay exact, the response never grows with the workspace. */
+function boundedCandidates(values, limit = 10) {
+	return values.length <= limit ? values.join(", ") : `${values.slice(0, limit).join(", ")} … (+${values.length - limit} more)`;
+}
+/**
+* TASK-116: read-only resolution of the legacy blockers a batch cancel would target.
+* The host re-resolves the selector against the CURRENT catalog/graph, so the answer is
+* what exists now — never a claim that it equals the original task's target list. Nothing
+* is written here: members of other tasks are counted, never offered as cancellable.
+*/
+async function runBlockedTargets(deps, input) {
+	if (deps.disposed()) return err$2("service-disposed");
+	if (typeof input?.workspaceId !== "string" || !input.workspaceId) return err$2("invalid-workspace-id", "workspace id is invalid");
+	const resolved$1 = await resolveTaskTargets(deps, input.workspaceId, input.selector);
+	if (!resolved$1.ok) return err$2(resolved$1.code, resolved$1.message);
+	const blockers = [];
+	const seenJobs = /* @__PURE__ */ new Set();
+	let memberConflicts = 0;
+	let unresolved = 0;
+	let root = "";
+	for (const name$8 of resolved$1.names) {
+		const base = await deps.loadBase(input.workspaceId, name$8);
+		if (!base.ok) {
+			unresolved += 1;
+			continue;
+		}
+		if (root === "") root = base.value.canonicalPath;
+		const existing = await findActiveJobByApiId(base.value.canonicalPath, input.workspaceId, base.value.start.id);
+		if (existing === null) continue;
+		if (existing.batchId !== void 0) {
+			memberConflicts += 1;
+			continue;
+		}
+		if (seenJobs.has(existing.jobId)) continue;
+		seenJobs.add(existing.jobId);
+		blockers.push(blockedTargetOf(existing));
+	}
+	return {
+		ok: true,
+		value: {
+			blockers,
+			memberConflicts,
+			targets: resolved$1.names.length,
+			unresolved,
+			root
+		}
+	};
+}
+/**
+* TASK-111: the single task entry point. `query`, `queries`, `group`, and `all`
+* all produce ONE task record with the complete target set, and the task-level
+* concurrency travels with it. Legacy `explainPrepareBatch`/`explainPrepare`
+* stay available for existing records and callers.
+*/
+async function runPrepareTask(deps, input, options) {
+	const o = opts(options);
+	if (deps.disposed()) return err$2("service-disposed");
+	if (o.signal?.aborted) return err$2("cancelled");
+	if (typeof input?.workspaceId !== "string" || !input.workspaceId) return err$2("invalid-workspace-id", "workspace id is invalid");
+	const resolved$1 = await resolveTaskTargets(deps, input.workspaceId, input.selector);
+	if (!resolved$1.ok) return err$2(resolved$1.code, resolved$1.message);
+	if (resolved$1.names.length === 0) return err$2("no-targets", "no API targets were resolved");
+	const batch = await runPrepareBatch(deps, {
+		workspaceId: input.workspaceId,
+		queries: resolved$1.names,
+		maxConcurrent: input.maxConcurrent,
+		selector: {
+			kind: input.selector.kind,
+			...resolved$1.label === void 0 ? {} : { label: resolved$1.label }
+		}
+	}, o);
+	if (!batch.ok) return batch;
+	return {
+		ok: true,
+		value: {
+			...batch.value,
+			selector: {
+				kind: input.selector.kind,
+				...resolved$1.label === void 0 ? {} : { label: resolved$1.label }
+			}
+		}
+	};
 }
 /** Internal source reader used by host maintenance and tests; it is intentionally not registered as an agent tool. */
 async function runSource(deps, input, options) {
@@ -11875,6 +13589,12 @@ const PASSTHROUGH_CODES = new Set([
 	"service-disposed",
 	"cancelled"
 ]);
+function ok$1(value) {
+	return {
+		ok: true,
+		value
+	};
+}
 function err$1(code, message = code) {
 	return {
 		ok: false,
@@ -11887,6 +13607,58 @@ function err$1(code, message = code) {
 function clampInt(value, fallback, min, max) {
 	if (value === void 0 || !Number.isFinite(value)) return fallback;
 	return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+const LOCAL_STOPWORDS = new Set([
+	"the",
+	"a",
+	"an",
+	"of",
+	"for",
+	"and",
+	"or",
+	"to",
+	"in",
+	"on",
+	"with",
+	"which",
+	"what",
+	"can",
+	"is",
+	"are",
+	"does",
+	"do",
+	"api",
+	"apis",
+	"how",
+	"that",
+	"this",
+	"by",
+	"at",
+	"from"
+]);
+/** Query terms for the offline scorer: lowercase word-ish tokens, stopwords and 1-char noise removed. */
+function localQueryTerms(query) {
+	const terms = String(query ?? "").toLowerCase().split(/[^a-z0-9_.]+/).filter((term) => term.length >= 2 && !LOCAL_STOPWORDS.has(term));
+	return [...new Set(terms)].slice(0, 16);
+}
+function countOccurrences(text$1, term) {
+	if (term === "" || text$1 === "") return 0;
+	let count = 0;
+	let index = text$1.indexOf(term);
+	while (index !== -1) {
+		count++;
+		index = text$1.indexOf(term, index + term.length);
+	}
+	return count;
+}
+/** Short, honest evidence line: which mode text matched and how many query terms it contained. */
+function localEvidence(doc, terms, mode) {
+	const fields = mode === "technical" ? ["technical"] : mode === "business" ? ["business"] : ["technical", "business"];
+	const matched = fields.filter((field) => {
+		const text$1 = String((field === "technical" ? doc.technicalText : doc.businessText) ?? "").toLowerCase();
+		return terms.some((term) => text$1.includes(term));
+	});
+	return matched.length === 0 ? "name-match" : `${matched.join("+")}-term-match`;
 }
 var IciEngineService = class extends Service {
 	static inject = [
@@ -11917,6 +13689,8 @@ var IciEngineService = class extends Service {
 			explainContext: (input, options) => self.explainContext(input, options),
 			explainPrepare: (input, options) => self.explainPrepare(input, options),
 			explainPrepareBatch: (input, options) => self.explainPrepareBatch(input, options),
+			explainPrepareTask: (input, options) => self.explainPrepareTask(input, options),
+			explainBlockedTargets: (input) => self.explainBlockedTargets(input),
 			explainSource: (input, options) => self.explainSource(input, options),
 			explainFinalize: (input, options) => self.explainFinalize(input, options),
 			explainDeterministic: (input, options) => self.explainDeterministic(input, options)
@@ -11942,12 +13716,25 @@ var IciEngineService = class extends Service {
 			const catalogRes = await this.listCatalog(input.workspaceId, signal);
 			if (!catalogRes.ok) return catalogRes;
 			const entries = catalogRes.value.entries;
-			const normalized = entries.map((e) => ({
+			const complete = await this.listSourcesComplete(input.workspaceId);
+			if (complete.duplicateNames.length > 0) {
+				const shown = complete.duplicateNames.slice(0, 10).join(", ");
+				const suffix = complete.duplicateNames.length > 10 ? ` … (+${complete.duplicateNames.length - 10} more)` : "";
+				return err$1("ambiguous-target", `same asset names exist at several source paths: ${shown}${suffix}; rename or remove the duplicates before building the graph`);
+			}
+			const known = new Set(entries.map((entry) => `${entry.type}:${entry.name}`));
+			const additions = complete.entries.filter((entry) => !known.has(`${entry.type}:${entry.name}`));
+			const normalized = [...entries.map((e) => ({
 				name: e.name,
 				type: e.type,
 				sourcePath: e.sourcePath,
 				metadata: e.metadata
-			}));
+			})), ...additions.map((entry) => ({
+				name: entry.name,
+				type: entry.type,
+				sourcePath: entry.sourcePath,
+				metadata: void 0
+			}))];
 			try {
 				const { nodes, edges, sourceFingerprint } = await buildGraph(canonicalPath, normalized, onProgress, signal);
 				if (signal?.aborted) return err$1("cancelled");
@@ -11986,6 +13773,60 @@ var IciEngineService = class extends Service {
 	}
 	normalizeOptions(options) {
 		return options instanceof AbortSignal ? { signal: options } : options ?? {};
+	}
+	/**
+	* TASK-111: complete, path-identified api/function listing. `listAssets` keeps its
+	* 5000-item display bound; the graph must not inherit it, and two same-named assets at
+	* different paths are two assets — reported, never merged.
+	*/
+	async listSourcesComplete(workspaceId) {
+		const catalog = this.ctx.get("icomposerCatalog");
+		if (catalog?.listSourcesComplete === void 0) return {
+			entries: [],
+			duplicateNames: []
+		};
+		try {
+			const res = await catalog.listSourcesComplete({ workspaceId });
+			if (!res.ok || res.value === void 0) return {
+				entries: [],
+				duplicateNames: []
+			};
+			return {
+				entries: res.value.entries.map((entry) => ({
+					name: entry.name,
+					type: entry.type,
+					sourcePath: entry.sourcePath
+				})),
+				duplicateNames: [...res.value.duplicateNames]
+			};
+		} catch {
+			return {
+				entries: [],
+				duplicateNames: []
+			};
+		}
+	}
+	/**
+	* TASK-111: the exact entry set the graph is built from — the capped catalog listing
+	* PLUS every api/function source the complete enumeration found. The staleness check
+	* must fingerprint this same set, otherwise a workspace beyond the catalog display
+	* bound would look stale forever.
+	*/
+	async graphEntries(workspaceId) {
+		const catalogRes = await this.listCatalog(workspaceId);
+		const entries = catalogRes.ok ? catalogRes.value?.entries ?? [] : [];
+		const complete = await this.listSourcesComplete(workspaceId);
+		const known = new Set(entries.map((entry) => `${entry.type}:${entry.name}`));
+		return [...entries.map((e) => ({
+			name: e.name,
+			type: e.type,
+			sourcePath: e.sourcePath,
+			metadata: e.metadata
+		})), ...complete.entries.filter((entry) => !known.has(`${entry.type}:${entry.name}`)).map((entry) => ({
+			name: entry.name,
+			type: entry.type,
+			sourcePath: entry.sourcePath
+		}))];
 	}
 	async listCatalog(workspaceId, signal) {
 		const catalog = this.ctx.get("icomposerCatalog");
@@ -12039,16 +13880,13 @@ var IciEngineService = class extends Service {
 		};
 		let stale = snapshot.manifest.engineVersion !== this.#engineVersion ? true : void 0;
 		try {
-			const catalogRes = await this.listCatalog(workspaceId, signal);
-			if (catalogRes.ok) {
-				const entries = catalogRes.value.entries.map((e) => ({
-					name: e.name,
-					type: e.type,
-					sourcePath: e.sourcePath
-				}));
-				const sources = await collectSources(canonicalPath, entries, signal);
-				if (fingerprintSources(sources.values()) !== snapshot.manifest.sourceFingerprint) stale = true;
-			}
+			const entries = (await this.graphEntries(workspaceId)).map((e) => ({
+				name: e.name,
+				type: e.type,
+				sourcePath: e.sourcePath
+			}));
+			const sources = await collectSources(canonicalPath, entries, signal);
+			if (fingerprintSources(sources.values()) !== snapshot.manifest.sourceFingerprint) stale = true;
 		} catch {}
 		return {
 			ok: true,
@@ -12161,6 +13999,55 @@ var IciEngineService = class extends Service {
 			};
 		});
 	}
+	/**
+	* TASK-132: an offline, dependency-free ranking used when the embedding path is unavailable (no
+	* Active Profile, no network, no embedding endpoint). It scores the SAME explanation docs the
+	* embedding index is built from -- term frequency over the technical/business text plus an API-name
+	* match bonus -- and marks the result `degraded` so callers can present it as best-effort rather
+	* than embedding-ranked. It writes nothing and needs no profile.
+	*/
+	async #localSearch(input, graph, canonicalPath, mode, top, reason) {
+		let docs = [];
+		try {
+			docs = await loadSearchDocs(canonicalPath, graph);
+		} catch {
+			docs = [];
+		}
+		const terms = localQueryTerms(input.query);
+		const rows = [];
+		for (const doc of docs) {
+			const technical = typeof doc.technicalText === "string" ? doc.technicalText.toLowerCase() : "";
+			const business = typeof doc.businessText === "string" ? doc.businessText.toLowerCase() : "";
+			const name$8 = String(doc.apiName ?? "").toLowerCase();
+			const text$1 = mode === "technical" ? technical : mode === "business" ? business : `${technical}\n${business}`;
+			let score = 0;
+			for (const term of terms) {
+				const hits = countOccurrences(text$1, term);
+				if (hits > 0) score += 1 + Math.log(1 + hits);
+				if (name$8.includes(term)) score += 2;
+			}
+			if (terms.length === 0) score = name$8 === input.query.trim().toLowerCase() ? 1 : 0;
+			if (score <= 0) continue;
+			rows.push({
+				apiId: doc.apiId,
+				apiName: doc.apiName,
+				score: Number((score / (terms.length || 1)).toFixed(6)),
+				evidence: localEvidence(doc, terms, mode),
+				downstream: []
+			});
+		}
+		rows.sort((a, b) => b.score - a.score || a.apiName.localeCompare(b.apiName));
+		const limited = rows.slice(0, top);
+		const best = limited[0]?.score ?? 0;
+		if (best > 0) for (const row of limited) row.score = Number((row.score / best).toFixed(6));
+		return {
+			workspaceId: input.workspaceId,
+			rows: limited,
+			truncated: rows.length > limited.length,
+			degraded: true,
+			degradedReason: reason
+		};
+	}
 	async search(input, options) {
 		const opts$1 = this.normalizeOptions(options);
 		const signal = opts$1.signal;
@@ -12178,7 +14065,7 @@ var IciEngineService = class extends Service {
 			const mode = input.mode ?? "all";
 			const top = clampInt(input.top, 10, 1, 50);
 			const profile = await resolveActiveProfileAuth(this.ctx, signal, input.workspaceId);
-			if (!profile.ok) return profile;
+			if (!profile.ok) return ok$1(await this.#localSearch(input, graph, canonicalPath, mode, top, `no-profile:${profile.error.code}`));
 			const outcome = await embeddingLease({
 				auth: this.ctx.get("imoAuth"),
 				profile: profile.value,
@@ -12200,10 +14087,7 @@ var IciEngineService = class extends Service {
 			}));
 			if (!outcome.ok) {
 				const failure$8 = outcome;
-				return {
-					ok: false,
-					error: failure$8.error
-				};
+				return ok$1(await this.#localSearch(input, graph, canonicalPath, mode, top, `embedding-unavailable:${failure$8.error.code}`));
 			}
 			const value = outcome.value;
 			return {
@@ -12295,10 +14179,11 @@ var IciEngineService = class extends Service {
 		const { graph, canonicalPath, stale } = ctxLoad;
 		const start = resolveSingleStart(graph.nodes.values(), query);
 		if (!start.ok) {
-			const label = start.reason === "ambiguous" ? "ambiguous api match" : "no api matched";
+			const label = start.reason === "ambiguous" ? "no exact api name matched (a substring is not enough); use the full API name" : "no api matched";
+			const code = start.reason === "ambiguous" ? "ambiguous-target" : "no-match";
 			return {
 				ok: false,
-				result: err$1("no-match", `${label}: ${query}; candidates: ${start.candidates.join(", ") || "none"}`)
+				result: err$1(code, `${label}: ${query}; candidates: ${start.candidates.join(", ") || "none"}`)
 			};
 		}
 		return {
@@ -12341,6 +14226,23 @@ var IciEngineService = class extends Service {
 				} : result.result;
 			},
 			refs: (path) => this.listRefDocNames(path),
+			catalog: async (workspaceId) => {
+				const catalog = this.ctx.get("icomposerCatalog");
+				if (catalog?.listSourcesComplete === void 0) return err$1("storage-error", "catalog source listing is unavailable");
+				const res = await catalog.listSourcesComplete({ workspaceId });
+				if (!res.ok || res.value === void 0) {
+					const raw = res.error?.code;
+					const code = typeof raw === "string" ? raw : void 0;
+					return err$1(code && PASSTHROUGH_CODES.has(code) ? code : "storage-error", res.error?.message ?? "catalog listing failed");
+				}
+				return {
+					ok: true,
+					value: {
+						entries: res.value.entries,
+						duplicateNames: res.value.duplicateNames
+					}
+				};
+			},
 			current: async (id) => {
 				const result = await this.loadQueryContext(id);
 				if (!result.ok) return result.result;
@@ -12361,6 +14263,14 @@ var IciEngineService = class extends Service {
 	}
 	async explainPrepareBatch(input, options) {
 		return runPrepareBatch(this.nativeExplainDeps(), input, options);
+	}
+	/** TASK-116: read-only legacy blockers of a selector, re-resolved against the current catalog/graph. */
+	async explainBlockedTargets(input) {
+		return runBlockedTargets(this.nativeExplainDeps(), input);
+	}
+	/** TASK-111: one task entry point — `query`/`queries`/`group`/`all` all resolve host-side into ONE task record. */
+	async explainPrepareTask(input, options) {
+		return runPrepareTask(this.nativeExplainDeps(), input, options);
 	}
 	async explainSource(input, options) {
 		return runSource(this.nativeExplainDeps(), input, options);
@@ -12409,143 +14319,95 @@ var IciEngineService = class extends Service {
 };
 
 //#endregion
-//#region ../icomposer-code-intelligence/src/explain-config.ts
+//#region ../icomposer-code-intelligence/src/explain-prompt.ts
 /**
-* TASK-102: the one Host-wide ICI Explain scheduling setting.
+* TASK-131: user-owned prompt overrides, cached inside the ici result tree.
 *
-* Scope is deliberately the CURRENT Host instance: every workspace, session,
-* and batch scheduled by this process shares one maximum-concurrency cap. The
-* value is durable (storage-domain global) so a restart remembers it, but it
-* is NOT a cross-process limit — two Host processes keep separate caps.
+* Two optional files under `<workspace>/.metadata/icomposer/ici/explain/prompt/`:
+*   system-prompt.md -> extends the child's system section
+*   instruction.md   -> replaces the first block of the initial message
+*
+* The path is fixed (no parameter, no traversal surface) and BOTH files are read fresh for every
+* child creation, so editing a file takes effect on the next job without restarting the Host.
+* A missing, empty, oversized, non-UTF-8 or unreadable file simply falls back to the built-in
+* default: a broken prompt file must never fail a job.
 */
-const EXPLAIN_MIN_CONCURRENCY = 1;
-const EXPLAIN_MAX_CONCURRENCY = 32;
-const EXPLAIN_DEFAULT_CONCURRENCY = 4;
-/** Strict durable/effective shape: an integer in the closed 1–32 range. */
-const explainConcurrencySchema = number().int().min(EXPLAIN_MIN_CONCURRENCY).max(EXPLAIN_MAX_CONCURRENCY);
-/** Durable Host-wide Explain configuration domain (global singleton). */
-const explainConfigDomain = defineDomain({
-	name: "ici_explain_config",
-	version: 1,
-	global: {
-		schema: object({ maxConcurrent: explainConcurrencySchema }),
-		initial: { maxConcurrent: EXPLAIN_DEFAULT_CONCURRENCY }
-	},
-	tables: {}
-});
+const EXPLAIN_PROMPT_DIR = "prompt";
+const EXPLAIN_SYSTEM_PROMPT_FILE = "system-prompt.md";
+const EXPLAIN_INSTRUCTION_FILE = "instruction.md";
+const MAX_EXPLAIN_SYSTEM_PROMPT_BYTES = 16 * 1024;
+const MAX_EXPLAIN_INSTRUCTION_BYTES = 8 * 1024;
 /**
-* The single owner of the Explain concurrency setting (`ctx.iciExplainConfig`).
-*
-* Both the scheduler and the routes read the effective value from this one
-* service, so no caller opens the domain twice and no in-memory copy can drift
-* from the durable one: every accepted write persists FIRST and only then
-* moves the effective value and wakes the scheduler.
+* The contract block the engine appends AFTER any user system text. It restates the rules the user
+* may extend but never remove; the default (no override) section stays byte-identical to the
+* pre-TASK-131 text and does not need this block.
 */
-var ExplainConfigService = class extends Service {
-	static inject = ["storageDomain"];
-	domain;
-	maxConcurrentValue = EXPLAIN_DEFAULT_CONCURRENCY;
-	listeners = /* @__PURE__ */ new Set();
-	writeTail = Promise.resolve();
-	serviceDisposed = false;
-	constructor(ctx) {
-		super(ctx, "iciExplainConfig");
-		this.setMaxConcurrent = this.setMaxConcurrent.bind(this);
-		this.onChange = this.onChange.bind(this);
-		this.dispose = this.dispose.bind(this);
+const EXPLAIN_SYSTEM_CONTRACT = [
+	"Non-negotiable contract (cannot be overridden):",
+	"- Only ici_explain_list, ici_explain_read and ici_explain_submit exist; never use absolute paths, shell, network or write tools.",
+	"- Cite evidence only as relative path#N or path#N-M; # is mandatory and : or objects are never accepted.",
+	"- ici_explain_submit is the ONLY completion boundary: technical (string), business (string), flow (string[]), evidence (string[]). A schema-invalid submit may be corrected up to three attempts."
+].join("\n");
+/** The submit-boundary sentence appended after any user instruction text. */
+const EXPLAIN_INSTRUCTION_SUBMIT_BOUNDARY = "Finish by calling ici_explain_submit (technical string, business string, flow string[], evidence string[] with relative path#N or path#N-M); it is the only completion boundary and answer text alone is not accepted.";
+/** Replace every known placeholder; an unknown placeholder is left untouched. */
+function renderExplainPromptTemplate(text$1, vars) {
+	return text$1.replace(/\{\{(apiName|apiId|workspaceId|referenceTarget|prepareId)\}\}/g, (_match, name$8) => vars[name$8] ?? "");
+}
+/** Absolute path of one prompt override file (fixed location, never parameterized by the caller). */
+function explainPromptOverridePath(root, file) {
+	return join(explainBaseDir(root), EXPLAIN_PROMPT_DIR, file);
+}
+/**
+* Read one override file. Returns the raw text when it is usable, or null when the caller must fall
+* back to the built-in default. Every failure mode (missing, empty/whitespace, oversize, invalid
+* UTF-8, unreadable) is swallowed on purpose: prompt customization is optional.
+*/
+async function readExplainPromptOverride(root, file, maxBytes) {
+	try {
+		const raw = await readFile(explainPromptOverridePath(root, file));
+		if (raw.byteLength === 0 || raw.byteLength > maxBytes) return null;
+		const text$1 = new TextDecoder("utf-8", { fatal: true }).decode(raw).trim();
+		return text$1 === "" ? null : text$1;
+	} catch {
+		return null;
 	}
-	async [Service.init]() {
-		const storage = this.ctx.get("storageDomain");
-		if (storage === void 0) throw new Error("iciExplainConfig: storageDomain is unavailable");
-		const domain = await storage.open(explainConfigDomain);
-		try {
-			const stored = explainConfigDomain.global.schema.parse(domain.global.get());
-			this.domain = domain;
-			this.maxConcurrentValue = stored.maxConcurrent;
-		} catch (error$2) {
-			await domain.close().catch(() => void 0);
-			throw error$2;
-		}
-		this.ctx.effect(() => () => this.dispose(), "iciExplainConfig.dispose");
-	}
-	/** Effective cap for the current Host instance. */
-	get maxConcurrent() {
-		return this.maxConcurrentValue;
-	}
-	/** Detached view for status payloads. */
-	get view() {
-		return { maxConcurrent: this.maxConcurrentValue };
-	}
-	/**
-	* The one write entry: validate strictly, persist through the domain, then
-	* commit the effective value. Invalid input never touches storage or the
-	* effective value; a persistence failure returns `storage-error` with the
-	* previous value still in force.
-	*/
-	setMaxConcurrent(input) {
-		if (this.serviceDisposed || this.domain === void 0) return Promise.resolve({
-			ok: false,
-			code: "storage-error"
-		});
-		if (typeof input !== "number" || !Number.isInteger(input) || input < EXPLAIN_MIN_CONCURRENCY || input > EXPLAIN_MAX_CONCURRENCY) return Promise.resolve({
-			ok: false,
-			code: "invalid-input"
-		});
-		const domain = this.domain;
-		const write = async () => {
-			try {
-				await domain.global.set({ maxConcurrent: input });
-			} catch {
-				return {
-					ok: false,
-					code: "storage-error"
-				};
-			}
-			this.maxConcurrentValue = input;
-			for (const listener of [...this.listeners]) try {
-				listener(input);
-			} catch {}
-			return {
-				ok: true,
-				value: { maxConcurrent: input }
-			};
-		};
-		const task = this.writeTail.then(write, write);
-		this.writeTail = task.then(() => void 0, () => void 0);
-		return task;
-	}
-	/** Observe committed cap changes (the scheduler uses this to fill capacity). */
-	onChange(listener) {
-		this.listeners.add(listener);
-		return () => {
-			this.listeners.delete(listener);
-		};
-	}
-	/** Drain pending writes, then close the domain exactly once. */
-	async dispose() {
-		if (this.serviceDisposed) return;
-		this.serviceDisposed = true;
-		this.listeners.clear();
-		await this.writeTail.catch(() => void 0);
-		const domain = this.domain;
-		this.domain = void 0;
-		await domain?.close();
-	}
-};
+}
+/** Both overrides for one job, read fresh, with placeholders resolved. Never throws. */
+async function loadExplainPromptOverrides(root, vars) {
+	const [system, instruction] = await Promise.all([readExplainPromptOverride(root, EXPLAIN_SYSTEM_PROMPT_FILE, MAX_EXPLAIN_SYSTEM_PROMPT_BYTES), readExplainPromptOverride(root, EXPLAIN_INSTRUCTION_FILE, MAX_EXPLAIN_INSTRUCTION_BYTES)]);
+	return {
+		system: system === null ? null : `${renderExplainPromptTemplate(system, vars)}\n${EXPLAIN_SYSTEM_CONTRACT}`,
+		instruction: instruction === null ? null : `${renderExplainPromptTemplate(instruction, vars)}\n${EXPLAIN_INSTRUCTION_SUBMIT_BOUNDARY}`
+	};
+}
 
 //#endregion
 //#region ../icomposer-code-intelligence/src/explain-scheduler.ts
-const MAX_EXPLAIN_PROMPT_BYTES = 256 * 1024;
+/** TASK-125: the effective child output budget (Host setting, default 16384). */
+function effectiveMaxOutputTokens(ctx) {
+	const config$1 = ctx?.get("iciExplainConfig");
+	const value = config$1?.maxOutputTokens;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS;
+}
+/** TASK-123: one place computes the effective prompt budget for every enforcement point. */
+function effectivePromptBudget(ctx) {
+	const config$1 = ctx.get("iciExplainConfig");
+	const value = config$1?.maxPromptBytes;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : EXPLAIN_DEFAULT_PROMPT_BYTES;
+}
 const MAX_FLOW_ITEMS = 64;
 const MAX_TIMER_MS = 2147e6;
 const MAX_READ_FILES = 20;
 const MAX_REFERENCE_BYTES = 256 * 1024;
 const MAX_LIST_ENTRIES = 200;
 const MAX_SUBMIT_ATTEMPTS = 3;
+/** TASK-135: how many correctable read-range mistakes one child may make before the job fails. */
+const MAX_READ_RANGE_ATTEMPTS = 3;
 const EVIDENCE_PATTERN = "^(?:[A-Za-z0-9._-]+\\/)*[A-Za-z0-9._-]+#\\d+(?:-\\d+)?$";
 const SUBMIT_REPAIR = "schema-invalid: submit exactly technical/business strings, flow string[], and evidence string[]; evidence must use only relative prepared/read paths as path#N or path#N-M (#, never : or objects).";
-const SECRET_PATTERN$1 = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
-const ABSOLUTE_PATH_PATTERN$1 = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
+const SECRET_PATTERN$1 = EXPLAIN_SECRET_PATTERN;
+const ABSOLUTE_PATH_PATTERN$1 = EXPLAIN_ABSOLUTE_PATH_PATTERN;
 const explainJobTails = /* @__PURE__ */ new Map();
 /** Child Explain agents are created one at a time per composition; concurrent create is not proven safe. */
 const explainChildCreationTails = /* @__PURE__ */ new WeakMap();
@@ -12664,19 +14526,77 @@ function strictAnalysis(value, target, verifiedPaths) {
 		return verifiedPaths.has(path) && (targetPath || path.startsWith("src/") || path.startsWith("docs/"));
 	});
 }
-function sourcePrompt(prepare, sources, target) {
-	const targetText = JSON.stringify(target);
-	const targetInstruction = target.kind === "none" ? "No optional reference selected; use only the prepared source ranges; do not call ici_explain_list or ici_explain_read." : target.kind === "file" ? `Selected file ${target.path}; use ici_explain_read only if needed, then submit (listing is optional).` : `Selected directory ${target.path || "."}; use ici_explain_list/read only if needed, then submit.`;
+function chainTable(prepare) {
+	const files = [];
+	const fileIndex = /* @__PURE__ */ new Map();
+	const fileOf = (path) => {
+		const existing = fileIndex.get(path);
+		if (existing !== void 0) return existing;
+		files.push(path);
+		fileIndex.set(path, files.length);
+		return files.length;
+	};
+	const groups = /* @__PURE__ */ new Map();
+	for (const node of prepare.callChain.nodes) {
+		const path = typeof node.sourceFile === "string" && node.sourceFile !== "" ? node.sourceFile : "(unknown)";
+		const handle = `[${fileOf(path)}]`;
+		const key = `${handle}#${node.startLine ?? ""}-${node.endLine ?? ""}`;
+		const depth = Math.max(0, (node.pathFromApi?.length ?? 1) - 1);
+		const group = groups.get(key);
+		if (group === void 0) groups.set(key, {
+			handle,
+			...node.startLine === void 0 ? {} : { from: node.startLine },
+			...node.endLine === void 0 ? {} : { to: node.endLine },
+			depth,
+			ids: [node.nodeId]
+		});
+		else {
+			group.depth = Math.min(group.depth, depth);
+			group.ids.push(node.nodeId);
+		}
+	}
+	const repeated = new Set(prepare.callChain.repeatedVisits ?? []);
+	const lines = [];
+	for (const group of groups.values()) {
+		const indent = "  ".repeat(Math.min(3, group.depth));
+		const range = group.from === void 0 ? "" : `#${group.from}${group.to === void 0 ? "" : `-${group.to}`}`;
+		lines.push(`${indent}- ${group.ids.join(", ")} → ${group.handle}${range}${group.ids.some((id) => repeated.has(id)) ? " (repeated)" : ""}`);
+	}
+	if (prepare.callChain.truncated) lines.push("(truncated: the traversal hit the node/edge/depth budget, so this map is a partial view of the call chain)");
+	return {
+		files,
+		lines
+	};
+}
+/**
+* TASK-131: the built-in instruction block (the first part of the initial message). Exported so the
+* regression anchor and the override path can both refer to ONE definition; with no
+* `prompt/instruction.md` this text is used byte-for-byte.
+*/
+function defaultExplainInstruction() {
 	return [
-		`You are a dedicated read-only explanation agent for API ${prepare.api.name}. Workspace-relative reference target: ${targetText}. ${targetInstruction} Use only the three tools ici_explain_list, ici_explain_read, ici_explain_submit. Never use absolute paths, shell/network/write tools, or any other tool. Read only useful text files (at most 20 files and 256 KiB total), then call ici_explain_submit with a valid object; schema-invalid may be corrected and retried up to three attempts. Submit exactly technical/business strings, flow string[], and evidence string[]. Evidence must use only prepared/read relative paths as path#N or path#N-M; # is mandatory, never use : or objects. Never emit a final answer instead of submit.`,
-		`Prepare metadata: ${JSON.stringify({
-			api: prepare.api,
-			manifest: prepare.manifest,
-			prepareId: prepare.prepareId,
-			contextHash: prepare.contextHash
-		})}`,
-		`Prepare call chain: ${JSON.stringify(prepare.callChain)}`,
-		...sources.map((source) => `--- prepared source ${source.nodeId ?? "api"} ${source.path}#${source.startLine ?? 1}-${source.endLine ?? 1}\n${source.content}`)
+		"You are a dedicated read-only explanation agent for ONE API. You are given PATHS, not code: read on demand with the tools, then submit.",
+		"How to work:",
+		"1. The call chain below is the map of what matters (paths and line ranges; leading indentation = call depth). Read only the files or ranges you actually need.",
+		"2. Cite evidence only as path#N or path#N-M, and only for paths you actually read (# is mandatory, never : and never objects).",
+		"3. ici_explain_submit is the ONLY completion boundary: exactly technical (string), business (string), flow (string[]), evidence (string[]). Never answer in chat instead of submitting; a schema-invalid submit can be corrected up to three attempts.",
+		"4. Only ici_explain_list, ici_explain_read and ici_explain_submit exist. No absolute paths, no shell, no network, no writes.",
+		"5. Limits: at most 20 reads, one read returns at most 256 KiB; for a file longer than that, pass startLine/endLine to read it in segments (each response reports the range it covered and nextStartLine)."
+	];
+}
+function sourcePrompt(prepare, target, table = chainTable(prepare), instructionOverride = null) {
+	const targetLine = target.kind === "none" ? "Reference target: none (prepared sources only; do not call ici_explain_list)." : `Reference target: ${target.path === "" ? "." : target.path} (${target.kind}); use ici_explain_list/read only if needed, do not require both.`;
+	const references = prepare.references.filter((reference) => reference.readable).map((reference) => `- ${reference.path}`);
+	return [
+		...instructionOverride === null ? defaultExplainInstruction() : [instructionOverride],
+		`API: ${prepare.api.name} (${prepare.api.id}) in workspace ${prepare.workspaceId}.`,
+		targetLine,
+		"Files referenced by the call chain (pass the exact string, e.g. [1]#12-20 or the full path, to ici_explain_read):",
+		...table.files.map((path, index) => `  [${index + 1}] ${path}`),
+		`Call chain (${prepare.callChain.nodes.length} nodes${prepare.callChain.truncated ? ", truncated" : ""}; indentation = call depth):`,
+		...table.lines,
+		"Prepared reference documents (workspace-relative paths):",
+		...references.length > 0 ? references : ["- (none)"]
 	].join("\n");
 }
 function correctiveFollowup(target, aborted$1 = false) {
@@ -12752,14 +14672,35 @@ async function* monitoredChildStream(source, fail$1) {
 	}
 }
 /** Create one fresh restricted background Agent and await its controlled submit boundary. */
-async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, parent) {
+async function runDedicatedAgent(ctx, root, job, prepare, preparedPaths, signal, parent, promptBudget = effectivePromptBudget(ctx)) {
 	const agents = ctx.get("agents");
 	if (!agents?.create) throw new Error("model-failed");
 	const target = referenceTargetOf(job);
 	await assertReferenceTarget(root, target);
-	const initialPrompt = sourcePrompt(prepare, sources, target);
+	const overrides = await loadExplainPromptOverrides(root, {
+		apiName: job.apiName,
+		apiId: job.apiId,
+		workspaceId: job.workspaceId,
+		referenceTarget: JSON.stringify(target),
+		prepareId: job.prepareId
+	});
+	const initialPrompt = sourcePrompt(prepare, target, chainTable(prepare), overrides.instruction);
+	const whitelist = new Set(preparedPaths);
+	const promptTable = chainTable(prepare);
+	/** Resolve `[n]` / `[n]#a-b` from the call-chain map, or pass a plain path through unchanged. */
+	const resolveHandle = (value) => {
+		const match = /^\[(\d+)\](?:#(\d+)(?:-(\d+))?)?$/.exec(value.trim());
+		if (match === null) return { path: value };
+		const entry = promptTable.files[Number(match[1]) - 1];
+		if (entry === void 0) throw new Error("source-forbidden");
+		return {
+			path: entry,
+			...match[2] === void 0 ? {} : { from: Number(match[2]) },
+			...match[3] === void 0 ? {} : { to: Number(match[3]) }
+		};
+	};
 	const basePromptBytes = Buffer.byteLength(initialPrompt, "utf8");
-	if (basePromptBytes > MAX_EXPLAIN_PROMPT_BYTES) throw new Error("input-too-large");
+	if (basePromptBytes > promptBudget) throw new Error("input-too-large");
 	let childRef;
 	let toolFailureReason;
 	let streamAborted = false;
@@ -12774,11 +14715,12 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 	let readCalls = 0;
 	let readBytes = 0;
 	let toolOutputBytes = 0;
-	const verifiedPaths = new Set(sources.map((source) => source.path));
+	let readRangeErrors = 0;
+	const verifiedPaths = new Set(preparedPaths);
 	const folderReads = [];
 	const reserveToolOutput = (value) => {
 		toolOutputBytes += utf8Bytes(value);
-		if (basePromptBytes + toolOutputBytes > MAX_EXPLAIN_PROMPT_BYTES) {
+		if (basePromptBytes + toolOutputBytes > promptBudget) {
 			toolFailure = true;
 			toolFailureReason = "input-too-large";
 			childRef?.cancel("tool-failed");
@@ -12827,17 +14769,32 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 		});
 		tools.register({
 			name: "ici_explain_read",
-			description: target.kind === "none" ? "No optional reference selected; do not call this tool. It returns folder-forbidden without filesystem access." : "Read one file under the selected workspace-relative reference target, subject to strict byte and call limits; use only when needed.",
-			parameters: toolSchema({ path: {
-				type: "string",
-				description: "Workspace-relative file path."
-			} }, ["path"]),
+			description: "Read one workspace-relative file that the call chain or the prepared reference list names (nothing else). Accepts the exact path or the map handle [n] (with an optional #a-b range). Optional startLine/endLine read a large file in segments; each response reports the range it covered and nextStartLine when the file continues.",
+			parameters: toolSchema({
+				path: {
+					type: "string",
+					description: "Workspace-relative path from the call-chain map, either the full path or its [n] handle (optionally [n]#120-240)."
+				},
+				startLine: {
+					type: "integer",
+					description: "First line to read (1-based); optional."
+				},
+				endLine: {
+					type: "integer",
+					description: "Last line to read (inclusive); optional."
+				}
+			}, ["path"]),
 			output: {
 				schema: toolSchema({
 					path: { type: "string" },
 					content: { type: "string" },
 					bytes: { type: "integer" },
-					sha256: { type: "string" }
+					sha256: { type: "string" },
+					startLine: { type: "integer" },
+					endLine: { type: "integer" },
+					totalLines: { type: "integer" },
+					truncated: { type: "boolean" },
+					nextStartLine: { type: "integer" }
 				}, [
 					"path",
 					"content",
@@ -12855,29 +14812,42 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 				}
 				try {
 					if (typeof raw.path !== "string") throw new Error("folder-forbidden");
-					const file = await readReferenceText(root, target, raw.path);
+					const resolved$1 = resolveHandle(raw.path);
+					const declaredFrom = Number.isInteger(raw.startLine) && raw.startLine > 0 ? raw.startLine : resolved$1.from;
+					const declaredTo = Number.isInteger(raw.endLine) && raw.endLine > 0 ? raw.endLine : resolved$1.to;
+					const from = declaredFrom;
+					const to = declaredTo;
+					const fromPrepared = whitelist.has(raw.path);
+					const file = fromPrepared ? await readPreparedText(root, prepare, raw.path, from, to) : await readReferenceText(root, target, raw.path);
 					readBytes += file.bytes;
-					if (readBytes > Math.min(MAX_REFERENCE_BYTES, Math.max(0, MAX_EXPLAIN_PROMPT_BYTES - basePromptBytes))) {
+					if (readBytes > Math.max(0, promptBudget - basePromptBytes)) {
 						toolFailureReason = "input-too-large";
 						throw new Error("input-too-large");
 					}
 					verifiedPaths.add(file.path);
-					folderReads.push({
+					if (!fromPrepared) folderReads.push({
 						path: file.path,
 						sha256: file.sha256
 					});
 					reserveToolOutput(file);
 					return file;
 				} catch (error$2) {
-					const message = error$2 instanceof Error && [
+					const raw$1 = error$2 instanceof Error ? error$2.message : String(error$2);
+					const code = raw$1.split(":", 1)[0].trim();
+					const message = [
 						"tool-limit",
 						"folder-oversize",
 						"input-too-large",
-						"folder-forbidden"
-					].includes(error$2.message) ? error$2.message : "folder-forbidden";
-					if (!(target.kind === "none" && message === "folder-forbidden")) {
+						"folder-forbidden",
+						"source-forbidden",
+						"source-oversize",
+						"source-range"
+					].includes(code) ? raw$1 : `tool-error:${raw$1}`;
+					const correctable = code === "source-range";
+					if (correctable && ++readRangeErrors < MAX_READ_RANGE_ATTEMPTS) throw new Error(message);
+					if (!(target.kind === "none" && code === "folder-forbidden" && !correctable)) {
 						toolFailure = true;
-						toolFailureReason = message;
+						toolFailureReason = code;
 						childRef?.cancel("tool-failed");
 					}
 					throw new Error(message);
@@ -12886,7 +14856,7 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 		});
 		tools.register({
 			name: "ici_explain_submit",
-			description: "Submit exactly one strict aggregate API explanation; this is the only completion boundary. technical/business are strings, flow is string[], and evidence is string[] using relative path#N or path#N-M (use #, never : or objects).",
+			description: "Submit exactly one strict aggregate API explanation; this is the only completion boundary. Cite only path#N or path#N-M entries for paths you actually read. technical/business are strings, flow is string[], and evidence is string[] using relative path#N or path#N-M (use #, never : or objects).",
 			parameters: toolSchema({
 				technical: {
 					type: "string",
@@ -12956,7 +14926,7 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 			}
 		});
 		if (typeof childCtx.on === "function") childCtx.on("llm/stream", (options, next) => {
-			if (explainRequestBytes(options) > MAX_EXPLAIN_PROMPT_BYTES) {
+			if (explainRequestBytes(options) > promptBudget) {
 				toolFailure = true;
 				toolFailureReason = "input-too-large";
 				childRef?.cancel("tool-failed");
@@ -12976,7 +14946,7 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 		childCtx.systemPrompt.section({
 			name: `ici-explain-child:${job.jobId}`,
 			order: 120,
-			text: `This is a dedicated read-only ICI explanation child. Only ici_explain_list, ici_explain_read, ici_explain_submit are available. Workspace-relative reference target is ${JSON.stringify(target)}${target.kind === "none" ? "; no optional reference selected; use prepared source ranges; do not call ici_explain_list or ici_explain_read; submit only" : "; use ici_explain_list/read only if needed; do not require both; then submit"}. Evidence must be string[] with relative path#N or path#N-M (#, never :). Never use absolute paths or shell/network/write tools.`
+			text: `This is a dedicated read-only ICI explanation child. Only ici_explain_list, ici_explain_read, ici_explain_submit are available. You receive paths, not code: read what you need (large files by startLine/endLine segments). Workspace-relative reference target is ${JSON.stringify(target)}${target.kind === "none" ? "; no optional reference selected; read the prepared call-chain paths; do not call ici_explain_list; submit when ready" : "; use ici_explain_list/read only if needed; do not require both; then submit"}. Evidence must be string[] with relative path#N or path#N-M (#, never :) for paths you actually read. Never use absolute paths or shell/network/write tools.${overrides.system === null ? "" : `\n${overrides.system}`}`
 		});
 	};
 	const childSessionId = randomUUID();
@@ -12994,7 +14964,7 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 			agentOptions: {
 				provider: job.provider,
 				model: job.model,
-				maxTokens: 4096
+				maxTokens: effectiveMaxOutputTokens(ctx)
 			},
 			setup,
 			signal
@@ -13075,6 +15045,7 @@ async function runDedicatedAgent(ctx, root, job, prepare, sources, signal, paren
 async function processConfirmedJob(llm, root, jobId, signal, ctx, parent) {
 	const started = await readJobRecord(root, jobId);
 	if (!started || !["scheduled", "confirmed"].includes(started.status)) return;
+	const promptBudget = ctx === void 0 ? EXPLAIN_DEFAULT_PROMPT_BYTES : effectivePromptBudget(ctx);
 	if (!started.provider || !started.model) {
 		await updateJobRecord(root, jobId, started.revision, {
 			status: "failed",
@@ -13118,15 +15089,11 @@ async function processConfirmedJob(llm, root, jobId, signal, ctx, parent) {
 		const prepare = preflightPrepare;
 		if (prepare.workspaceId !== running.workspaceId || prepare.api.id !== running.apiId || prepare.api.name !== running.apiName || prepare.prepareId !== running.prepareId || prepare.contextHash !== running.contextHash || prepare.manifest.sourceFingerprint !== running.sourceFingerprint || prepare.manifest.graphDigest !== running.graphDigest) throw new Error("confirmation-invalid");
 		if (running.docs.some((doc) => !prepare.references.some((ref) => ref.readable && ref.path === doc.path && ref.sha256 === doc.sha256))) throw new Error("confirmation-invalid");
-		const sources = [];
-		for (const ref of prepare.sources) if (ref.readable) sources.push(...await readPreparedSources(root, running.workspaceId, running.prepareArtifactPath, [ref.nodeId], [], signal));
-		if (sources.some((source) => SECRET_PATTERN$1.test(source.content) || ABSOLUTE_PATH_PATTERN$1.test(source.content))) throw new Error("source-forbidden");
-		const prompt = sourcePrompt(prepare, sources, target);
-		if (Buffer.byteLength(prompt, "utf8") > MAX_EXPLAIN_PROMPT_BYTES) throw new Error("input-too-large");
+		const preparedPaths = preparedReadPaths(prepare);
 		signal.throwIfAborted();
 		const latestBeforeChild = await readJobRecord(root, jobId);
 		if (!latestBeforeChild || latestBeforeChild.status !== "running") return;
-		const completed = await runDedicatedAgent(ctx, root, running, prepare, sources, signal, parent);
+		const completed = await runDedicatedAgent(ctx, root, running, prepare, preparedPaths, signal, parent, promptBudget);
 		const published = await publishFinal(root, running, completed.analysis, signal, completed.folderReads, target, completed.childSessionId);
 		if (!published) return;
 	} catch (cause) {
@@ -13151,10 +15118,14 @@ async function processConfirmedJob(llm, root, jobId, signal, ctx, parent) {
 			"schema-invalid",
 			"tool-limit",
 			"source-forbidden",
+			"source-oversize",
+			"source-range",
 			"folder-forbidden",
-			"folder-oversize"
+			"folder-oversize",
+			"analysis-invalid"
 		]);
-		const error$2 = aborted$1 ? "cancelled" : known.has(message) ? message : "model-failed";
+		const code = message.split(":", 1)[0].trim();
+		const error$2 = aborted$1 ? "cancelled" : known.has(message) ? message : known.has(code) ? code : "model-failed";
 		await withExplainJobTransaction(root, jobId, async () => {
 			const latest = await readJobRecord(root, jobId);
 			if (latest && !["final", "cancelled"].includes(latest.status)) await updateJobRecord(root, jobId, latest.revision, {
@@ -13177,6 +15148,8 @@ var ExplainScheduler = class extends Service {
 	fillRequested = false;
 	/** TASK-102: reserved capacity, keyed `${canonicalRoot}\0${jobId}`, reserved BEFORE any async preflight. */
 	inFlight = /* @__PURE__ */ new Map();
+	/** TASK-111: live reservations per task, keyed `${canonicalRoot}\0${batchId}` (or `job:<jobId>` for single-API/legacy jobs). */
+	taskInFlight = /* @__PURE__ */ new Map();
 	/** One-shot idle wakes, deduplicated per user root and never awaited by the fill loop. */
 	idleWakes = /* @__PURE__ */ new WeakSet();
 	/** All live job tasks, awaited before disposal completes. */
@@ -13217,9 +15190,60 @@ var ExplainScheduler = class extends Service {
 			inFlight: this.inFlight.size
 		};
 	}
+	/** TASK-111: how many jobs of one task are running right now (Host-wide reservation table, read-only view). */
+	taskInFlightCount(root, batchId) {
+		return this.taskInFlight.get(`${root}\0${batchId}`) ?? 0;
+	}
+	/** TASK-111: the ceiling that actually gates one task = min(task setting, Host cap). */
+	effectiveTaskMax(maxConcurrent) {
+		return Math.max(1, Math.min(typeof maxConcurrent === "number" ? maxConcurrent : this.maxConcurrent(), this.maxConcurrent()));
+	}
+	reserveTask(key) {
+		this.taskInFlight.set(key, (this.taskInFlight.get(key) ?? 0) + 1);
+	}
+	releaseTask(key) {
+		const next = (this.taskInFlight.get(key) ?? 0) - 1;
+		if (next > 0) this.taskInFlight.set(key, next);
+		else this.taskInFlight.delete(key);
+	}
+	/**
+	* TASK-111: resolve a job to its task identity and effective ceiling. Jobs of
+	* one task share the task's own batch record setting; single-API jobs and
+	* legacy pre-TASK-111 jobs fall back to their batch record (when one exists)
+	* and otherwise to the Host cap.
+	*/
+	async resolveTask(root, job, cache) {
+		const host = this.maxConcurrent();
+		const cacheKey = `${root}\0${job.batchId ?? job.jobId}`;
+		const cached$1 = cache?.get(cacheKey);
+		if (cached$1 !== void 0) return cached$1;
+		let batchId = typeof job.batchId === "string" ? job.batchId : void 0;
+		if (batchId === void 0) batchId = await listBatchJobIds(root).catch(() => /* @__PURE__ */ new Map()).then((map$6) => map$6.get(job.jobId));
+		let resolved$1;
+		if (batchId === void 0) resolved$1 = {
+			key: `${root}\0job:${job.jobId}`,
+			max: host
+		};
+		else {
+			const record = await readBatchRecord(root, batchId);
+			resolved$1 = record?.confirmPending === true ? {
+				key: `${root}\0${batchId}`,
+				max: 0
+			} : {
+				key: `${root}\0${batchId}`,
+				max: this.effectiveTaskMax(record?.maxConcurrent)
+			};
+		}
+		cache?.set(cacheKey, resolved$1);
+		return resolved$1;
+	}
 	maxConcurrent() {
 		const config$1 = this.ctx.get("iciExplainConfig");
 		return config$1?.maxConcurrent ?? EXPLAIN_DEFAULT_CONCURRENCY;
+	}
+	/** TASK-123: the effective prompt budget (Host setting, default 256 KiB). */
+	promptBudget() {
+		return effectivePromptBudget(this.ctx);
 	}
 	/** Real user roots only: Explain children are registered by session id before creation. */
 	userRoots() {
@@ -13238,6 +15262,8 @@ var ExplainScheduler = class extends Service {
 				if (!this.recovered.has(row.canonicalPath)) {
 					this.recovered.add(row.canonicalPath);
 					await markRunningJobsInterrupted(row.canonicalPath);
+					await recoverOrphanJobs(row.canonicalPath).catch(() => void 0);
+					await recoverPendingConfirms(row.canonicalPath).catch(() => void 0);
 				}
 				await this.armScheduled(row.canonicalPath);
 			}
@@ -13286,6 +15312,7 @@ var ExplainScheduler = class extends Service {
 			value: void 0
 		}));
 		if (!listed.ok) return void 0;
+		const tasks = /* @__PURE__ */ new Map();
 		for (const row of listed.value ?? []) {
 			const actives = await listActiveJobs(row.canonicalPath);
 			for (const item of actives) {
@@ -13295,6 +15322,8 @@ var ExplainScheduler = class extends Service {
 					continue;
 				}
 				if (this.inFlight.has(`${row.canonicalPath}\0${item.jobId}`)) continue;
+				const task = await this.resolveTask(row.canonicalPath, item, tasks);
+				if ((this.taskInFlight.get(task.key) ?? 0) >= task.max) continue;
 				return item;
 			}
 		}
@@ -13331,16 +15360,23 @@ var ExplainScheduler = class extends Service {
 			if (this.inFlight.size >= this.maxConcurrent()) return;
 			const key = `${canonicalRoot}\0${claim.jobId}`;
 			if (this.inFlight.has(key)) continue;
+			const task = await this.resolveTask(canonicalRoot, latest);
+			if (this.disposed) return;
+			if (this.inFlight.size >= this.maxConcurrent()) return;
+			if ((this.taskInFlight.get(task.key) ?? 0) >= task.max) return;
 			const controller = new AbortController();
 			this.inFlight.set(key, controller);
+			this.reserveTask(task.key);
 			if (this.tryStartOn(roots, {
 				llm,
 				canonicalRoot,
 				jobId: claim.jobId,
+				taskKey: task.key,
 				controller,
 				key
 			})) continue;
 			this.inFlight.delete(key);
+			this.releaseTask(task.key);
 			this.armIdleWakes(roots);
 			return;
 		}
@@ -13358,6 +15394,7 @@ var ExplainScheduler = class extends Service {
 					const run = processConfirmedJob(pending.llm, pending.canonicalRoot, pending.jobId, pending.controller.signal, this.ctx, agent).catch(() => void 0).finally(() => {
 						signal.removeEventListener("abort", relay);
 						this.inFlight.delete(pending.key);
+						this.releaseTask(pending.taskKey);
 						this.tasks.delete(run);
 						if (!this.disposed) this.requestDrive();
 					});
@@ -13443,6 +15480,7 @@ var ExplainScheduler = class extends Service {
 		this.disposePromise = (async () => {
 			while (this.tasks.size > 0) await Promise.all([...this.tasks]);
 			this.inFlight.clear();
+			this.taskInFlight.clear();
 		})();
 		return this.disposePromise;
 	}
@@ -13530,8 +15568,32 @@ async function pickNativeFile(signal, internals = {}) {
 const EXPLAIN_ROUTES_PREFIX = "/api/icomposer-workbench/ici/explain";
 const JSON_TYPE$4 = "application/json; charset=utf-8";
 const MAX_BODY_BYTES$1 = 64 * 1024;
-const ABSOLUTE_PATH_PATTERN = /(?:^|[\s"'`])\/(?:Users|home|private|tmp|var|opt|etc)\/|[A-Za-z]:[\\/]/i;
-const SECRET_PATTERN = /(authorization\s*:|bearer\s+|access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key)/i;
+const ABSOLUTE_PATH_PATTERN = EXPLAIN_ABSOLUTE_PATH_PATTERN;
+const SECRET_PATTERN = EXPLAIN_SECRET_PATTERN;
+/** TASK-123: the effective prompt budget shown to the card and used by the confirm split. */
+const DEFAULT_PROMPT_BYTES = EXPLAIN_DEFAULT_PROMPT_BYTES;
+/** TASK-125: the effective child output budget shown to the card (same single source as the scheduler). */
+const DEFAULT_MAX_OUTPUT_TOKENS = EXPLAIN_DEFAULT_MAX_OUTPUT_TOKENS;
+function maxOutputTokensOf(ctx) {
+	const config$1 = ctx.get("iciExplainConfig");
+	const value = config$1?.maxOutputTokens;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+function promptBudgetOf(ctx) {
+	const config$1 = ctx.get("iciExplainConfig");
+	const value = config$1?.maxPromptBytes;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_PROMPT_BYTES;
+}
+/** TASK-123: the same byte accounting the status route reports, so card and server agree. */
+async function promptBytesOf(root, prepareArtifactPath) {
+	try {
+		const prepare = await loadPrepare(root, prepareArtifactPath);
+		const sources = prepare.sources.reduce((sum, ref) => sum + (ref.readable ? ref.bytes : 0), 0);
+		return Buffer.byteLength(JSON.stringify(prepare.callChain), "utf8") + sources + 1024;
+	} catch {
+		return 0;
+	}
+}
 function response(res, status, body) {
 	if (res.destroyed || res.writableEnded) return;
 	res.writeHead(status, {
@@ -13613,6 +15675,50 @@ function targetFromBody(body, current) {
 	if (legacy !== void 0 && (typeof legacy !== "string" || legacy !== target.path)) return null;
 	return target;
 }
+/**
+* TASK-111 P4: the status summary is cached per task and invalidated by the task's status
+* version, which every member-status write seam bumps. A cache hit therefore performs no
+* per-member read at all, while the counts stay real (a status change always bumps).
+*/
+const BATCH_STATUS_DEFAULT_SIZE = 5;
+const BATCH_STATUS_MAX_SIZE = 200;
+const batchStatusSummaryCache = /* @__PURE__ */ new Map();
+function pageParams(url, size, total) {
+	const rawSize = Number(url.searchParams.get("size") ?? size);
+	const pageSize = Number.isSafeInteger(rawSize) && rawSize >= 1 ? Math.min(rawSize, BATCH_STATUS_MAX_SIZE) : size;
+	const totalPages = Math.max(1, Math.ceil(total / pageSize));
+	const rawPage = Number(url.searchParams.get("page") ?? 1);
+	const index = Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(rawPage, totalPages) : 1;
+	return {
+		index,
+		size: pageSize,
+		totalPages
+	};
+}
+/** TASK-114: audit vocabulary and digest helper for the explicit blocker cancellation. */
+const CANCEL_OPERATION_KIND = "ici-explain-job-cancel";
+/** TASK-116: one audit record for one batch cancel, plus the bounded execution shape. */
+const CANCEL_BATCH_OPERATION_KIND = "ici-explain-jobs-cancel";
+const CANCEL_BATCH_CHUNK = 20;
+const CANCEL_BATCH_MAX_FAILURES = 20;
+function validSelectorShape(value) {
+	if (typeof value !== "object" || value === null) return false;
+	const row = value;
+	const keys = Object.keys(row).filter((key) => [
+		"kind",
+		"query",
+		"queries",
+		"group"
+	].includes(key));
+	if (row.kind === "api") return typeof row.query === "string" && row.query.trim().length > 0 && row.query.length <= 512 && keys.length === 2;
+	if (row.kind === "group") return typeof row.group === "string" && row.group.trim().length > 0 && row.group.length <= 512 && keys.length === 2;
+	if (row.kind === "all") return keys.length === 1;
+	if (row.kind === "queries") return Array.isArray(row.queries) && row.queries.length >= 1 && row.queries.every((item) => typeof item === "string" && item.trim().length > 0 && item.length <= 512) && keys.length === 2;
+	return false;
+}
+function metadataDigest(value) {
+	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
 const PICKER_CODES = new Set([
 	"picker-cancelled",
 	"picker-aborted",
@@ -13660,7 +15766,7 @@ async function normalizeNativePickedTarget(root, selected, kind) {
 		throw new Error("picker-failed");
 	}
 }
-var ExplainRoutesService = class extends Service {
+var ExplainRoutesService = class ExplainRoutesService extends Service {
 	static inject = [
 		"webServer",
 		"workspaceBinding",
@@ -13759,13 +15865,43 @@ var ExplainRoutesService = class extends Service {
 		}
 		return output;
 	}
+	/**
+	* TASK-130: a published result is "committed for this job" when the publication carries this job's
+	* prepare and the recorded path is either the canonical `<slug>/final.json` (new layout) or this
+	* job's immutable history file (legacy layout).
+	*/
+	static committedFor(final, job) {
+		return final !== null && final !== void 0 && final.final?.prepareId === job.prepareId && (final.artifactPath === canonicalFinalPath(job.apiName) || final.artifactPath.endsWith(`/${job.jobId}.json`));
+	}
 	schedulerInfo() {
 		const scheduler = this.ctx.get("iciExplainScheduler");
 		const config$1 = this.ctx.get("iciExplainConfig");
 		const live = scheduler?.status?.();
 		return {
 			maxConcurrent: live?.maxConcurrent ?? config$1?.maxConcurrent ?? 4,
-			inFlight: live?.inFlight ?? 0
+			inFlight: live?.inFlight ?? 0,
+			maxPromptBytes: promptBudgetOf(this.ctx),
+			maxOutputTokens: maxOutputTokensOf(this.ctx)
+		};
+	}
+	/**
+	* TASK-111: a task's own ceiling (its setting, clamped by the Host ceiling) plus
+	* its live count. The card reads both without any additional write path, and the
+	* Host-wide value stays visible so the clamping is never hidden.
+	*/
+	taskSchedulerInfo(root, batch) {
+		const host = this.schedulerInfo();
+		const scheduler = this.ctx.get("iciExplainScheduler");
+		const declared = typeof batch.maxConcurrent === "number" ? batch.maxConcurrent : host.maxConcurrent;
+		const taskMaxConcurrent = Math.max(EXPLAIN_TASK_CONCURRENCY_MIN, Math.min(declared, host.maxConcurrent));
+		return {
+			maxConcurrent: host.maxConcurrent,
+			inFlight: host.inFlight,
+			taskMaxConcurrent,
+			taskInFlight: scheduler?.taskInFlightCount?.(root, batch.batchId) ?? 0,
+			hostMaxConcurrent: host.maxConcurrent,
+			maxPromptBytes: host.maxPromptBytes,
+			maxOutputTokens: host.maxOutputTokens
 		};
 	}
 	async getJob(located, res) {
@@ -13777,7 +15913,7 @@ var ExplainRoutesService = class extends Service {
 			return;
 		}
 		const final = await readValidatedExplainFinal(located.root, located.job.apiName, located.job.workspaceId);
-		const committed = final?.final?.prepareId === located.job.prepareId && final.artifactPath.endsWith(`${located.job.jobId}.json`) ? final : null;
+		const committed = ExplainRoutesService.committedFor(final, located.job) ? final : null;
 		ok(res, {
 			job: {
 				jobId: located.job.jobId,
@@ -13823,12 +15959,64 @@ var ExplainRoutesService = class extends Service {
 			consent: "The background AI will read only the selected workspace-relative reference target and send selected source excerpts and directory material to the chosen model."
 		});
 	}
-	async batchStatus(located, res) {
+	/**
+	* TASK-111 P4 status: header-only locate plus one bounded page of members, so the
+	* request and the heavy per-member reads (prepare/final) both stay bounded by `size`.
+	*/
+	async locateBatchHeader(batchId) {
+		if (!/^[a-f0-9]{16}$/.test(batchId)) return null;
+		const binding = this.ctx.get("workspaceBinding");
+		if (!binding) return null;
+		const listed = await binding.list().catch(() => ({
+			ok: false,
+			value: void 0
+		}));
+		if (!listed.ok) return null;
+		for (const entry of listed.value ?? []) {
+			const batch = await readBatchRecord(entry.canonicalPath, batchId);
+			if (batch && batch.workspaceId === entry.workspaceId) return {
+				root: entry.canonicalPath,
+				batch
+			};
+		}
+		return null;
+	}
+	/** Real counts, computed once per status version (a hit performs no per-member read). */
+	async batchStatusSummary(root, batch) {
+		const cacheKey = `${root}\0${batch.batchId}`;
+		const version$1 = batchStatusVersion(root, batch.batchId);
+		const cached$1 = batchStatusSummaryCache.get(cacheKey);
+		if (cached$1 !== void 0 && cached$1.version === version$1) return cached$1.summary;
+		const countsByStatus = {};
+		for (const jobId of batch.jobIds) {
+			const job = await readJobRecord(root, jobId);
+			const status = job?.status ?? "missing";
+			countsByStatus[status] = (countsByStatus[status] ?? 0) + 1;
+		}
+		const summary = {
+			jobCount: batch.jobIds.length,
+			countsByStatus
+		};
+		batchStatusSummaryCache.set(cacheKey, {
+			version: version$1,
+			summary
+		});
+		return summary;
+	}
+	async batchStatus(located, url, res) {
+		const ids = located.batch.jobIds;
+		const page = pageParams(url, BATCH_STATUS_DEFAULT_SIZE, ids.length);
+		const slice = ids.slice((page.index - 1) * page.size, page.index * page.size);
 		let promptBaseBytes = 0;
 		let sourceBytes = 0;
 		let maxPromptBaseBytes = 0;
 		const jobs = [];
-		for (const job of located.jobs) {
+		for (const jobId of slice) {
+			const job = await readJobRecord(located.root, jobId);
+			if (!job) {
+				fail(res, 409, "revision-conflict");
+				return;
+			}
 			let promptBytes = 0;
 			let jobSourceBytes = 0;
 			try {
@@ -13840,7 +16028,7 @@ var ExplainRoutesService = class extends Service {
 			promptBaseBytes += promptBytes;
 			maxPromptBaseBytes = Math.max(maxPromptBaseBytes, promptBytes);
 			const final = await readValidatedExplainFinal(located.root, job.apiName, job.workspaceId);
-			const artifactPath = final?.final?.prepareId === job.prepareId && final.artifactPath.endsWith(`${job.jobId}.json`) ? final.artifactPath : void 0;
+			const artifactPath = ExplainRoutesService.committedFor(final, job) ? final.artifactPath : void 0;
 			jobs.push({
 				jobId: job.jobId,
 				apiName: job.apiName,
@@ -13857,17 +16045,24 @@ var ExplainRoutesService = class extends Service {
 				sourceBytes: jobSourceBytes
 			});
 		}
+		const summary = await this.batchStatusSummary(located.root, located.batch);
+		const { jobIds: _ids,...batchView } = located.batch;
 		ok(res, {
-			batch: located.batch,
+			batch: {
+				...batchView,
+				jobCount: ids.length
+			},
 			jobs,
 			providers: await this.providers(),
-			scheduler: this.schedulerInfo(),
+			scheduler: this.taskSchedulerInfo(located.root, located.batch),
 			summary: {
+				...summary,
 				promptBaseBytes,
 				sourceBytes,
 				maxPromptBaseBytes,
-				jobCount: jobs.length
-			}
+				pageJobCount: jobs.length
+			},
+			page
 		});
 	}
 	async batchNativePick(located, body, res, signal) {
@@ -13903,6 +16098,34 @@ var ExplainRoutesService = class extends Service {
 			fail(res, code === "picker-failed" ? 500 : 409, code);
 		}
 	}
+	/**
+	* TASK-111: the per-task `batch` setting (how many targets of THIS task may be
+	* analyzed at once). It rewrites only this task's record: other tasks and the
+	* durable Host-wide ceiling are untouched. Lowering it while jobs are in flight
+	* cannot cancel those jobs; it only gates the next starts.
+	*/
+	async batchSettings(located, body, res) {
+		if (!hasOnly(body, ["maxConcurrent"])) {
+			fail(res, 422, "invalid-input");
+			return;
+		}
+		const value = body.maxConcurrent;
+		if (typeof value !== "number" || !Number.isInteger(value) || value < EXPLAIN_TASK_CONCURRENCY_MIN || value > EXPLAIN_TASK_CONCURRENCY_MAX) {
+			fail(res, 422, "invalid-input");
+			return;
+		}
+		try {
+			const updated = await updateBatchSettings(located.root, located.batch.batchId, value);
+			this.ctx.get("iciExplainScheduler")?.poke();
+			ok(res, {
+				batchId: updated.batchId,
+				...this.taskSchedulerInfo(located.root, updated)
+			});
+		} catch (cause) {
+			const message = cause instanceof Error ? cause.message : "storage-error";
+			fail(res, message === "batch-missing" ? 404 : 500, message === "batch-missing" ? "job-missing" : "storage-error");
+		}
+	}
 	async batchConfirm(located, body, res, signal) {
 		const members = located.batch.jobIds.map((jobId) => located.jobs.find((job) => job.jobId === jobId));
 		if (members.some((job) => !job)) {
@@ -13917,6 +16140,22 @@ var ExplainRoutesService = class extends Service {
 		const awaiting = typedMembers.filter((job) => job.status === "awaiting-input");
 		if (awaiting.length === 0) {
 			fail(res, 409, "revision-conflict");
+			return;
+		}
+		const budget = promptBudgetOf(this.ctx);
+		const overBudget = [];
+		const schedulable = /* @__PURE__ */ new Set();
+		for (const job of awaiting) {
+			const bytes = await promptBytesOf(located.root, job.prepareArtifactPath);
+			if (bytes > budget) overBudget.push({
+				jobId: job.jobId,
+				apiName: job.apiName,
+				promptBaseBytes: bytes
+			});
+			else schedulable.add(job.jobId);
+		}
+		if (schedulable.size === 0) {
+			fail(res, 409, "input-too-large");
 			return;
 		}
 		const notBeforeValue = body.notBefore ?? body.not_before;
@@ -13974,13 +16213,20 @@ var ExplainRoutesService = class extends Service {
 			fail(res, 422, "confirmation-invalid");
 			return;
 		}
+		const previousPlan = located.batch.plan;
+		try {
+			await setBatchConfirmPending(located.root, located.batch.batchId, true);
+		} catch {
+			fail(res, 500, "storage-error");
+			return;
+		}
 		try {
 			const result = await withExplainJobLocks(located.root, typedMembers.map((job) => job.jobId), async () => {
 				const validated = [];
 				for (const job of typedMembers) {
 					const current = await readJobRecord(located.root, job.jobId);
 					if (!current || current.workspaceId !== located.batch.workspaceId || current.revision !== job.revision) throw new Error("revision-conflict");
-					if (current.status === "final") continue;
+					if (current.status === "final" || !schedulable.has(current.jobId)) continue;
 					if (current.status !== "awaiting-input") throw new Error("revision-conflict");
 					let prepare;
 					try {
@@ -14034,14 +16280,34 @@ var ExplainRoutesService = class extends Service {
 					revision: item.updated.revision
 				}));
 			});
+			await updateBatchPlan(located.root, located.batch.batchId, {
+				provider: body.provider,
+				model: body.model,
+				referenceTarget: target,
+				notBefore,
+				confirmedAt: (/* @__PURE__ */ new Date()).toISOString()
+			});
 			this.ctx.get("iciExplainScheduler")?.poke();
 			ok(res, {
 				batchId: located.batch.batchId,
 				applied: result,
 				jobs: result.length,
-				status: "scheduled"
+				status: overBudget.length > 0 ? "partial" : "scheduled",
+				...overBudget.length === 0 ? {} : {
+					skipped: overBudget.slice(0, 5).map((entry) => ({
+						jobId: entry.jobId,
+						apiName: entry.apiName,
+						promptBaseBytes: entry.promptBaseBytes,
+						code: "input-too-large"
+					})),
+					...overBudget.length > 5 ? { skippedMore: overBudget.length - 5 } : {}
+				},
+				maxPromptBytes: budget
 			});
 		} catch (cause) {
+			const restored = await restoreBatchPlan(located.root, located.batch.batchId, previousPlan).then(() => true, () => false);
+			const released = restored && await setBatchConfirmPending(located.root, located.batch.batchId, false).then(() => true, () => false);
+			if (!released) await setBatchConfirmPending(located.root, located.batch.batchId, true).catch(() => void 0);
 			const message = cause instanceof Error ? cause.message : "storage-error";
 			const code = [
 				"revision-conflict",
@@ -14096,6 +16362,7 @@ var ExplainRoutesService = class extends Service {
 		const jobIds = [...located.batch.jobIds];
 		const retried = [];
 		const created = [];
+		const plan = located.batch.plan;
 		const retryable = new Set([
 			"failed",
 			"cancelled",
@@ -14163,6 +16430,7 @@ var ExplainRoutesService = class extends Service {
 						if (jobIds.includes(result.value.jobId)) throw new Error("revision-conflict");
 						const index = jobIds.indexOf(job.jobId);
 						if (index < 0) throw new Error("revision-conflict");
+						await this.inheritRetryPlan(located.root, job, result.value.jobId, plan);
 						jobIds[index] = result.value.jobId;
 						created.push(result.value.jobId);
 						retried.push({
@@ -14191,6 +16459,316 @@ var ExplainRoutesService = class extends Service {
 			const code = message === "job-active" || message === "revision-conflict" ? message : signal.aborted ? "cancelled" : message;
 			fail(res, statusCode(code), code);
 		}
+	}
+	/**
+	* TASK-111: carry the task's once-chosen model, reference target, and not-before
+	* onto a user-initiated retry replacement. A provider that is no longer
+	* registered, or a reference target that no longer exists, degrades to the plain
+	* awaiting-input behaviour instead of starting a job from a stale plan.
+	*/
+	async inheritRetryPlan(root, previous, replacementId, plan) {
+		const provider = plan?.provider ?? previous.provider;
+		const model = plan?.model ?? previous.model;
+		const notBefore = plan?.notBefore ?? previous.notBefore;
+		if (!provider || !model || typeof notBefore !== "string") return;
+		const llm = this.ctx.get("llm");
+		let registered = false;
+		try {
+			registered = llm?.listProviders().some((item) => item.id === provider) === true;
+		} catch {
+			registered = false;
+		}
+		if (!registered) return;
+		const target = plan?.referenceTarget ?? referenceTargetOf(previous);
+		try {
+			await assertReferenceTarget(root, target);
+		} catch {
+			return;
+		}
+		try {
+			await updateJobRecord(root, replacementId, 1, {
+				provider,
+				model,
+				docs: previous.docs,
+				referenceTarget: target,
+				notBefore,
+				status: "scheduled"
+			});
+		} catch {}
+	}
+	/**
+	* TASK-116: cancel every LEGACY blocker of one selector in a single request, in bounded
+	* chunks, with exactly one audit record. The Host re-resolves the selector against the
+	* current catalog/graph and reports that recomputed scope honestly (targets/unresolved),
+	* so a changed workspace never gets a claim that it equals the original task's list.
+	* Members of other tasks are counted, never cancelled. The audit is fail-closed; a
+	* per-job failure during execution is reported and never rolls back the successes.
+	*/
+	async cancelBlockedBatch(req, res) {
+		if (req.method !== "POST" || req.headers["x-workbench-action"] !== "1") {
+			response(res, 405, {
+				ok: false,
+				error: {
+					code: "method-not-allowed",
+					message: "method-not-allowed"
+				}
+			});
+			return;
+		}
+		if (typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) {
+			fail(res, 415, "invalid-input");
+			return;
+		}
+		const body = await readBody$1(req);
+		if (body === null) {
+			fail(res, 413, "input-too-large");
+			return;
+		}
+		if (!hasOnly(body, ["workspace_id", "selector"])) {
+			fail(res, 422, "invalid-input");
+			return;
+		}
+		const workspaceId = typeof body.workspace_id === "string" && body.workspace_id.length > 0 && body.workspace_id.length <= 256 ? body.workspace_id : "";
+		if (workspaceId === "" || !validSelectorShape(body.selector)) {
+			fail(res, 422, "invalid-input");
+			return;
+		}
+		const engine = this.ctx.get("iciEngine");
+		if (engine?.explainBlockedTargets === void 0) {
+			fail(res, 500, "storage-error");
+			return;
+		}
+		const listed = await engine.explainBlockedTargets({
+			workspaceId,
+			selector: body.selector
+		});
+		if (!listed.ok || listed.value === void 0) {
+			const code = typeof listed.error?.code === "string" ? listed.error.code : "storage-error";
+			fail(res, statusCode(code), code);
+			return;
+		}
+		const scope = listed.value;
+		if (scope.blockers.length === 0) {
+			response(res, 422, {
+				ok: false,
+				error: {
+					code: "no-targets",
+					message: "no legacy blocking job matches this selector now"
+				},
+				result: {
+					requested: scope.targets,
+					memberConflicts: scope.memberConflicts,
+					unresolved: scope.unresolved
+				}
+			});
+			return;
+		}
+		const operationLog = this.ctx.get("operationLog");
+		if (operationLog === void 0) {
+			fail(res, 500, "storage-error");
+			return;
+		}
+		const jobIds = scope.blockers.map((entry) => entry.jobId).sort();
+		const requestId = `ici-explain-jobs-cancel:${metadataDigest(jobIds).slice(0, 16)}`;
+		const paramsDigest = metadataDigest({
+			selector: body.selector,
+			jobIdsDigest: metadataDigest(jobIds),
+			count: jobIds.length
+		});
+		let approved = operationLog.list({
+			kind: CANCEL_BATCH_OPERATION_KIND,
+			requestId
+		}).find((entry) => entry.decision === "approved" && entry.resultDigest === void 0);
+		try {
+			if (approved === void 0) {
+				const appended = await operationLog.append({
+					requestId,
+					kind: CANCEL_BATCH_OPERATION_KIND,
+					paramsDigest,
+					artifactRefs: [],
+					createdAt: (/* @__PURE__ */ new Date()).toISOString()
+				});
+				approved = await operationLog.decide(appended.id, true, "workbench-card");
+			}
+		} catch {
+			fail(res, 500, "storage-error");
+			return;
+		}
+		const scheduler = this.ctx.get("iciExplainScheduler");
+		const cancelled$1 = [];
+		const already = [];
+		const failed = [];
+		let chunks = 0;
+		for (let offset = 0; offset < scope.blockers.length; offset += CANCEL_BATCH_CHUNK) {
+			chunks += 1;
+			for (const entry of scope.blockers.slice(offset, offset + CANCEL_BATCH_CHUNK)) {
+				const before = await readJobRecord(scope.root, entry.jobId);
+				const done = scheduler ? await scheduler.cancelJob(entry.jobId).catch(() => false) : await updateJobRecord(scope.root, entry.jobId, before?.revision ?? 1, {
+					status: "cancelled",
+					error: "cancelled"
+				}).then(() => true).catch(() => false);
+				const after = await readJobRecord(scope.root, entry.jobId);
+				if (after?.status === "cancelled") {
+					if (before?.status === "cancelled") already.push(entry.jobId);
+					else cancelled$1.push(entry.jobId);
+					continue;
+				}
+				if (!done && after === null) {
+					failed.push({
+						jobId: entry.jobId,
+						apiName: entry.apiName,
+						code: "job-missing"
+					});
+					continue;
+				}
+				failed.push({
+					jobId: entry.jobId,
+					apiName: entry.apiName,
+					code: "revision-conflict"
+				});
+			}
+			if (offset + CANCEL_BATCH_CHUNK < scope.blockers.length) await new Promise((resolve$1) => setTimeout(resolve$1, 0));
+		}
+		const resultDigest = metadataDigest({
+			cancelled: metadataDigest(cancelled$1),
+			already: metadataDigest(already),
+			failed: metadataDigest(failed.map((entry) => [entry.jobId, entry.code])),
+			counts: [
+				cancelled$1.length,
+				already.length,
+				failed.length
+			]
+		});
+		try {
+			await operationLog.recordResult(approved.id, {
+				resultDigest,
+				artifactRefs: []
+			});
+		} catch {}
+		this.ctx.get("iciExplainScheduler")?.poke();
+		ok(res, {
+			requested: scope.blockers.length,
+			cancelled: cancelled$1.length,
+			alreadyCancelled: already.length,
+			failed: failed.slice(0, CANCEL_BATCH_MAX_FAILURES),
+			...failed.length > CANCEL_BATCH_MAX_FAILURES ? { failedMore: failed.length - CANCEL_BATCH_MAX_FAILURES } : {},
+			chunks,
+			recomputedTargets: scope.targets,
+			unresolved: scope.unresolved,
+			memberConflicts: scope.memberConflicts,
+			audit: {
+				requestId,
+				id: approved.id,
+				decision: approved.decision
+			}
+		});
+	}
+	/**
+	* TASK-114: cancel exactly ONE job (typically a legacy card that is still waiting) and
+	* record the action in the operation log. The audit is fail-closed: if the action cannot
+	* be recorded as approved, no cancellation happens. Only metadata digests are stored and
+	* returned — never an artifact path, source range, or prepare detail.
+	*/
+	async cancelJobWithAudit(located, res) {
+		const job = located.job;
+		if (job.batchId !== void 0) {
+			fail(res, 409, "task-member");
+			return;
+		}
+		const operationLog = this.ctx.get("operationLog");
+		const requestId = `ici-explain-cancel:${job.jobId}`;
+		const auditRef = () => {
+			const existing = operationLog?.list({
+				kind: CANCEL_OPERATION_KIND,
+				requestId
+			}).find((entry) => entry.decision === "approved");
+			return {
+				requestId,
+				...existing === void 0 ? {} : {
+					id: existing.id,
+					decision: existing.decision
+				}
+			};
+		};
+		if (job.status === "cancelled") {
+			ok(res, {
+				jobId: job.jobId,
+				apiName: job.apiName,
+				status: "cancelled",
+				alreadyCancelled: true,
+				audit: auditRef()
+			});
+			return;
+		}
+		if (![
+			"awaiting-input",
+			"scheduled",
+			"confirmed",
+			"running"
+		].includes(job.status)) {
+			fail(res, 409, "revision-conflict");
+			return;
+		}
+		if (operationLog === void 0) {
+			fail(res, 500, "storage-error");
+			return;
+		}
+		const paramsDigest = metadataDigest({
+			jobId: job.jobId,
+			apiName: job.apiName,
+			statusBefore: job.status
+		});
+		let approved = operationLog.list({
+			kind: CANCEL_OPERATION_KIND,
+			requestId
+		}).find((entry) => entry.decision === "approved" && entry.resultDigest === void 0);
+		try {
+			if (approved === void 0) {
+				const appended = await operationLog.append({
+					requestId,
+					kind: CANCEL_OPERATION_KIND,
+					paramsDigest,
+					artifactRefs: [],
+					createdAt: (/* @__PURE__ */ new Date()).toISOString()
+				});
+				approved = await operationLog.decide(appended.id, true, "workbench-card");
+			}
+		} catch {
+			fail(res, 500, "storage-error");
+			return;
+		}
+		const scheduler = this.ctx.get("iciExplainScheduler");
+		const cancelled$1 = scheduler ? await scheduler.cancelJob(job.jobId).catch(() => false) : await updateJobRecord(located.root, job.jobId, job.revision, {
+			status: "cancelled",
+			error: "cancelled"
+		}).then(() => true).catch(() => false);
+		if (!cancelled$1) {
+			fail(res, 409, "revision-conflict");
+			return;
+		}
+		try {
+			await operationLog.recordResult(approved.id, {
+				resultDigest: metadataDigest({
+					jobId: job.jobId,
+					apiName: job.apiName,
+					statusBefore: job.status,
+					statusAfter: "cancelled"
+				}),
+				artifactRefs: []
+			});
+		} catch {}
+		this.ctx.get("iciExplainScheduler")?.poke();
+		ok(res, {
+			jobId: job.jobId,
+			apiName: job.apiName,
+			status: "cancelled",
+			alreadyCancelled: false,
+			audit: {
+				requestId,
+				id: approved.id,
+				decision: approved.decision
+			}
+		});
 	}
 	async folder(located, url, res) {
 		const selected = referenceTargetOf(located.job);
@@ -14261,6 +16839,10 @@ var ExplainRoutesService = class extends Service {
 			return;
 		}
 		try {
+			if (await promptBytesOf(located.root, located.job.prepareArtifactPath) > promptBudgetOf(this.ctx)) {
+				fail(res, 409, "input-too-large");
+				return;
+			}
 			const prepare = await loadPrepare(located.root, located.job.prepareArtifactPath);
 			const manifest = await readManifest(graphBaseDir(located.root, located.job.workspaceId));
 			if (!manifest || located.job.engineVersion !== ICI_ENGINE_VERSION || manifest.engineVersion !== ICI_ENGINE_VERSION || prepare.manifest.engineVersion !== ICI_ENGINE_VERSION || manifest.sourceFingerprint !== located.job.sourceFingerprint || manifest.graphDigest !== located.job.graphDigest || prepare.prepareId !== located.job.prepareId) {
@@ -14406,7 +16988,19 @@ var ExplainRoutesService = class extends Service {
 			fail(res, 413, "input-too-large");
 			return;
 		}
-		if (!hasOnly(body, ["maxConcurrent"])) {
+		if (!hasOnly(body, [
+			"maxConcurrent",
+			"maxPromptBytes",
+			"maxOutputTokens"
+		])) {
+			fail(res, 422, "invalid-input");
+			return;
+		}
+		if (![
+			"maxConcurrent",
+			"maxPromptBytes",
+			"maxOutputTokens"
+		].some((key) => Object.prototype.hasOwnProperty.call(body, key))) {
 			fail(res, 422, "invalid-input");
 			return;
 		}
@@ -14415,7 +17009,28 @@ var ExplainRoutesService = class extends Service {
 			fail(res, 500, "storage-error");
 			return;
 		}
-		const result = await config$1.setMaxConcurrent(body.maxConcurrent);
+		let result = {
+			ok: true,
+			value: {
+				maxConcurrent: config$1.maxConcurrent,
+				maxPromptBytes: promptBudgetOf(this.ctx)
+			}
+		};
+		if (Object.prototype.hasOwnProperty.call(body, "maxConcurrent")) result = await config$1.setMaxConcurrent(body.maxConcurrent);
+		if (result.ok && Object.prototype.hasOwnProperty.call(body, "maxPromptBytes")) {
+			if (config$1.setMaxPromptBytes === void 0) {
+				fail(res, 500, "storage-error");
+				return;
+			}
+			result = await config$1.setMaxPromptBytes(body.maxPromptBytes);
+		}
+		if (result.ok && Object.prototype.hasOwnProperty.call(body, "maxOutputTokens")) {
+			if (config$1.setMaxOutputTokens === void 0) {
+				fail(res, 500, "storage-error");
+				return;
+			}
+			result = await config$1.setMaxOutputTokens(body.maxOutputTokens);
+		}
 		if (!result.ok) {
 			fail(res, result.code === "invalid-input" ? 422 : 500, result.code);
 			return;
@@ -14433,6 +17048,10 @@ var ExplainRoutesService = class extends Service {
 			await this.settings(req, res);
 			return;
 		}
+		if (parts.length === 1 && parts[0] === "blocked-cancel") {
+			await this.cancelBlockedBatch(req, res);
+			return;
+		}
 		const isBatch = parts[0] === "batches";
 		const isJobScope = parts[0] === "jobs";
 		const id = isBatch || isJobScope ? parts[1] : parts[0];
@@ -14442,20 +17061,26 @@ var ExplainRoutesService = class extends Service {
 			return;
 		}
 		if (isBatch) {
+			if (req.method === "GET" && action === "status") {
+				const header = await this.locateBatchHeader(id);
+				if (!header) {
+					fail(res, 404, "job-missing");
+					return;
+				}
+				await this.batchStatus(header, url, res);
+				return;
+			}
 			const located$1 = await this.locateBatch(id);
 			if (!located$1) {
 				fail(res, 404, "job-missing");
-				return;
-			}
-			if (req.method === "GET" && action === "status") {
-				await this.batchStatus(located$1, res);
 				return;
 			}
 			if (req.method !== "POST" || ![
 				"confirm",
 				"cancel",
 				"retry",
-				"native-pick"
+				"native-pick",
+				"settings"
 			].includes(action) || req.headers["x-workbench-action"] !== "1") {
 				response(res, 405, {
 					ok: false,
@@ -14466,8 +17091,8 @@ var ExplainRoutesService = class extends Service {
 				});
 				return;
 			}
-			if ((action === "confirm" || action === "native-pick") && typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) {
-				fail(res, 415, "confirmation-invalid");
+			if ((action === "confirm" || action === "native-pick" || action === "settings") && typeof req.headers["content-type"] === "string" && !req.headers["content-type"].toLowerCase().startsWith("application/json")) {
+				fail(res, 415, action === "settings" ? "invalid-input" : "confirmation-invalid");
 				return;
 			}
 			const controller$1 = new AbortController();
@@ -14475,6 +17100,10 @@ var ExplainRoutesService = class extends Service {
 			const body$1 = await readBody$1(req);
 			if (body$1 === null) {
 				fail(res, 413, "input-too-large");
+				return;
+			}
+			if (action === "settings") {
+				await this.batchSettings(located$1, body$1, res);
 				return;
 			}
 			if (action === "confirm") {
@@ -14540,16 +17169,7 @@ var ExplainRoutesService = class extends Service {
 			return;
 		}
 		if (action === "cancel") {
-			const scheduler = this.ctx.get("iciExplainScheduler");
-			const cancelled$1 = scheduler ? await scheduler.cancelJob(id) : await updateJobRecord(located.root, id, located.job.revision, {
-				status: "cancelled",
-				error: "cancelled"
-			}).then(() => true).catch(() => false);
-			if (!cancelled$1) fail(res, 409, "revision-conflict");
-			else ok(res, {
-				jobId: id,
-				status: "cancelled"
-			});
+			await this.cancelJobWithAudit(located, res);
 			return;
 		}
 		await this.retry(located, res, controller.signal);
@@ -22945,8 +25565,8 @@ var require_resolve_flow_scalar = __commonJS({ "../../node_modules/.pnpm/yaml@2.
 	};
 	function parseCharCode(source, offset, length, onError) {
 		const cc = source.substr(offset, length);
-		const ok$1 = cc.length === length && /^[0-9a-fA-F]+$/.test(cc);
-		const code = ok$1 ? parseInt(cc, 16) : NaN;
+		const ok$2 = cc.length === length && /^[0-9a-fA-F]+$/.test(cc);
+		const code = ok$2 ? parseInt(cc, 16) : NaN;
 		try {
 			return String.fromCodePoint(code);
 		} catch {
