@@ -4,7 +4,7 @@ import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
 import { WorkspaceHealth } from "./WorkspaceHealth.tsx";
 import { WorkspaceAwareProfilePicker } from "./ProfilePicker.tsx";
-import { InsuremoBrandMark, InsuremoBrandName } from "./InsuremoBrand.tsx";
+import { InsuremoBrandMark, InsuremoBrandName, InsuremoHeroBrandMark } from "./InsuremoBrand.tsx";
 import { en, zh, type InsuremoStatusLocaleKey } from "./locales.ts";
 
 export type { StatusBadgeProps } from "./StatusBadge.tsx";
@@ -56,9 +56,12 @@ export function apply(ctx: Context): void {
 				{ name: "sidebar.brand.name", priority: -1 },
 				InsuremoBrandName,
 			);
+			// The hero is a different surface: it never shares a row with the
+			// wordmark, so it keeps its own occupant instead of the sidebar mark's
+			// identity-row detection.
 			yield ctx.slots.register(
 				{ name: "conversation.hero.brand.mark", priority: -1 },
-				InsuremoBrandMark,
+				InsuremoHeroBrandMark,
 			);
 		}),
 	);

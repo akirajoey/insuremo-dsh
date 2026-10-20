@@ -1,18 +1,186 @@
 # iComposer Workbench
 
-`icomposer-workbench` is the independent pnpm workspace that will host the
-Workbench Host/Client plugins. The DeepSeek Harness is a fixed, read-only
-compatibility baseline; it is not copied into this repository and is not
-modified by the Workbench packages.
+`icomposer-workbench` 是承载 Workbench Host/Client 插件的独立 pnpm workspace。
+DeepSeek Harness 是固定、只读的兼容基线：它不会被复制进本仓库，也不会被
+Workbench 的包修改。
 
-## Prerequisites
+---
+
+## 安装到官方 Desktop（默认 profile）
+
+普通使用者只需要官方 **DeepSeek Harness Desktop** App，不需要 Node、npm、pnpm、
+编译器，也不需要构建整个 harness。
+
+### 前置
+
+1. 已安装 **DeepSeek Harness Desktop**（官方 App），本文命令在官方 **0.2.1-rc.2**
+   上验证通过（包内 `engines.dsh` 为 `>=0.2.1-rc.2 <0.3.0-0`）。
+2. 启动一次官方 App，让它初始化默认 profile（`desktop`）。
+3. 之后**用 ⌘Q 完全退出 App**，再做任何 CLI 操作。
+   - profile 尚未被 App 初始化时，CLI 会提示 “Open DeepSeek Harness Desktop once to
+     initialize its profile, then fully quit it before running dsh plugin --profile desktop.”；
+   - App 仍在运行时，命令可能以别的方式失败（profile 被占用/写入冲突），**不保证**
+     是同一条提示。两种情况下都请先 ⌘Q。
+4. 命令必须使用 **App 自带的官方 CLI**（绝对路径，见下）：本机另装的旧版 `dsh` 会
+   直接拒绝 `--profile desktop`（该 profile 由 Electron App 独占管理）。
+
+### 获取插件
+
+插件只来自本仓库中**已跟踪**的预构建目录 `git-dist/icomposer-workbench/`。
+不要使用 `dist-release/`（被 gitignore，仓库里没有），也不要为了安装去构建
+harness 或跑 `pnpm install`。
+
+首次（用 `--branch` 保证本地有 tracking 分支，后续 `git pull` 可用）：
+
+```bash
+git clone --branch "<发布者提供的新版发布分支>" "<仓库地址>" icomposer-workbench
+cd icomposer-workbench
+```
+
+已有 checkout 时更新：
+
+```bash
+git status                  # 先确认工作区干净：有未提交改动时 pull 会拒绝
+git switch "<发布分支>"
+git pull --ff-only          # 只接受快进：拒绝分叉/需要合并提交的情况
+```
+
+> 发布者给出的分支/ref 是唯一可信发布点。**本升级分支 `upgrade/dsh-0.2.1` 目前仍是
+> 本地分支、尚未 push**，在发布者给出可访问的发布分支之前无法远程 clone 到它；不要用
+> `main` 或跟随分支安装，内容会随提交漂移、不可复现。
+>
+> checkout **tag 或具体 SHA** 属于固定版本用法：detached HEAD 上 `git pull` 不适用，
+> 更新时用 `git fetch` + 显式 `git checkout <新 ref>`。
+
+### 安装
+
+```bash
+# 官方 App 自带的 CLI（绝对路径；macOS 默认安装位置）
+DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+
+# 在仓库根执行；若当前已在 payload 包根，改成 PLUGIN_DIR="$PWD"
+PLUGIN_DIR="$PWD/git-dist/icomposer-workbench"
+
+# 子 shell + set -eu：任一步失败立即中止；临时目录只在全部成功后才清理
+( set -eu
+  PACK_DIR="$(mktemp -d)"
+
+  # 先打包成临时 tgz（App 自带 pnpm，不联网、不构建）
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$PLUGIN_DIR" pack --pack-destination "$PACK_DIR"
+
+  # 再安装（pack 只产出一个 tgz，用通配取版本，避免硬编码）
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
+
+  rm -rf "$PACK_DIR"
+)
+```
+
+- `env -u DSH_HOME` = **不继承** shell 里残留的 `DSH_HOME`，让官方 CLI 使用默认
+  `~/.dsh`（默认 profile 在 `~/.dsh/profiles/desktop`）。要装到别的 home 才显式设。
+- 先 `pack` 再 `add` tgz：tgz 是实体拷贝，`@deepseek-ai/*` peer 依赖能沿目录链被
+  宿主解析；直接 `add` 目录是 link 安装，文件留在原地，容易出现
+  `ERR_MODULE_NOT_FOUND`。
+
+### 更新
+
+同一个包里版本号可能不变，**必须 remove 再 add**，不能靠 `add` 覆盖。
+`set -eu` 保证 pack 失败不会继续 remove、remove 失败不会 add：
+
+```bash
+DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+PLUGIN_DIR="$PWD/git-dist/icomposer-workbench"
+
+( set -eu
+  PACK_DIR="$(mktemp -d)"
+
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$PLUGIN_DIR" pack --pack-destination "$PACK_DIR"
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
+
+  rm -rf "$PACK_DIR"
+)
+```
+
+先 `pack` 成功再删旧版：打包失败时不要把一个还能用的安装删掉。
+
+### 验证
+
+不要用 `.command` 之类的启动脚本——像平常一样点击 App 图标打开。然后检查
+**Settings → InsureMO** 分区存在、侧栏品牌正常、底部 Profile 选择器能列出并切换
+profile。
+
+### 回滚 / 卸载
+
+```bash
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+```
+
+回滚到旧版 = 用旧版 tgz 重新 `add`。不要把整个 `~/.dsh/profiles/desktop` 换成别处
+的副本：那会连带覆盖其它插件与宿主写入的状态，把插件回滚变成 profile 事故。
+
+### 已知风险（从 0.1 升级的用户）
+
+- 官方 Desktop 与我们 0.1 的 web profile **共用同一个 `~/.dsh`**：凭据与 session
+  数据存在共享/迁移关系。
+- 新旧版本对凭据、session 格式**不做双向兼容承诺**；升级后不要指望旧宿主还能原样
+  读懂新宿主写下的数据，降级同理。
+- 动手前先备份：`cp -R ~/.dsh ~/.dsh.bak-$(date +%Y%m%d)`。
+
+更细的逐条说明（含命令输出与包内容）见
+[`packages/icomposer-workbench-dist/README.md`](packages/icomposer-workbench-dist/README.md)。
+
+## 分发形态
+
+`packages/icomposer-workbench-dist`（包名 `@icomposer/workbench`）是分发包本体；
+`git-dist/icomposer-workbench/` 是它**已跟踪**的预构建副本，GitHub `#path:` 安装
+与上面的 pack/add 流程都消费它。
+
+```sh
+# 1) 本地/离线分发（推荐，无需 npm registry；上面桌面流程即用这一形态）
+#    先 pack 成 tgz，再 add 该 tgz
+
+# 2) GitHub 预构建路径（零构建安装）
+#    pin 精确 commit——SHA 以发布者给出的 Release receipt 为准
+export DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+
+# 3) npm（未来发布）
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add @icomposer/workbench
+```
+
+不要再使用指向 `packages/icomposer-workbench-dist` 的 `#path:` 地址：那是**开发
+源码目录**（未构建、含 scripts 与 devDependencies），安装会失败；旧版
+`plugin-dist` 分支也只适配旧宿主，不要装进 0.2.1。
+
+`git-dist/` 只有 `package.json` 里**没有 scripts、没有 devDependencies** 的瘦
+清单，因此安装不会触发 prepare/构建，也不受 pnpm `allowBuilds` 影响。
+
+### Release tooling（维护者）
+
+`node scripts/pack-dist.mjs` 构建自包含 tarball
+（`dist-release/icomposer-workbench-<version>.tgz`，预构建 `lib/`，不含同级源码），
+`pnpm pack:git-dist` 原子刷新 `git-dist/icomposer-workbench/`，
+`pnpm check:git-dist` 强制其与源码零漂移。三者是 **single-writer**：
+tsdown 会在每次构建时重写共享的源 `lib/`，Git 目标通过 staging/backup 换入。
+
+`pack:bootstrap` 生成的 npm bootstrap 包
+（`packages/insuremo-dsh-workbench-bootstrap`，自带固定 harness 与 bundled pnpm）
+是**另一条分发通道**：它服务的是自带运行时的 `insuremo-dsh` 启动方式，
+**不是**本次装进官方 Desktop 的升级路径，两者不要混用。其生成模型见该包 README，
+发布闸门见 `scripts/check-bootstrap.mjs`。
+
+## 开发（本仓库）
+
+以下内容只与开发/发布有关；普通安装不需要。
+
+### Prerequisites
 
 - Node.js `^22.19.0 || >=24.0.0`
 - pnpm `11.7.0`
 - the isolated Harness worktree at `../deepseek-harness`, commit
   `687f282e8625c6b8d11ff58211a90524be2e4317` (npm `0.2.1-rc.2`).
 
-## Isolated upgrade setup and validation
+### Isolated upgrade setup and validation
 
 Use **only** the two worktrees under `upgrade-dsh-0.2.1`; do not modify an
 existing installation or `~/.dsh`. See [migration setup and smoke instructions](docs/dsh-0.2.1-migration.md).
@@ -34,6 +202,14 @@ against `compatibility.json`. `pnpm typecheck` checks all TypeScript package
 sources. `pnpm test` runs the operation-log storage tests and generates/checks
 the contract JSON Schema artifacts.
 
+In a clean checkout the Harness preset must be checked out beside Workbench at
+`../deepseek-harness` at the exact `compatibility.json` commit, `687f282e86`.
+The isolated setup recipe above installs the minimal preset/test requirements
+and a separately pinned npm runtime without building the harness. For this
+upgrade, use the exact-runtime isolated CLI and real browser/HTTP smoke in
+[the migration guide](docs/dsh-0.2.1-migration.md), not the legacy source-launch
+`verify-standard-install.mjs` utility.
+
 To generate schemas directly:
 
 ```sh
@@ -45,64 +221,7 @@ The generated files are written to
 are intentionally ignored by Git; rerun the generation command after a clean
 install.
 
-### Zero-configuration npm bootstrap (end-user form)
-
-End users only need Node.js and npm. `insuremo-dsh-workbench` ships the fixed
-Harness runtime, bundled pnpm, and the prebuilt Workbench payload as one
-package with immutable per-release generations (`packages/insuremo-dsh-workbench-bootstrap`,
-generated by `scripts/pack-bootstrap.mjs`):
-
-```sh
-npm install -g insuremo-dsh-workbench       # Stable
-npm install -g insuremo-dsh-workbench@next  # Next preview
-insuremo-dsh                                 # ensure + launch
-insuremo-dsh doctor                          # health check
-```
-
-See `packages/insuremo-dsh-workbench-bootstrap/README.md` for the generation
-model and `scripts/check-bootstrap.mjs` for the release gate (exact per-channel DSH graph:
-186 packages for stable, 189 for next; payload provenance; both channel artifacts).
-
-### Standard dsh plugin installation (distributable form)
-
-The Workbench also ships as a standard dsh plugin bundle
-(`packages/icomposer-workbench-dist`, package `@icomposer/workbench`). Three
-installation routes are documented in that package's README:
-
-```sh
-# 1) local offline distribution via tarball (recommended; no npm registry needed)
-dsh plugin --profile web add icomposer-workbench-0.1.0.tgz
-
-# 2) GitHub prebuilt path (tracked git-dist/icomposer-workbench; no build on install).
-#    Pin an exact commit — the SHA is published in the Release receipt:
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
-
-#    Convenience (follows main; content drifts between releases):
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
-
-# 3) npm (future publication)
-dsh plugin --profile web add @icomposer/workbench
-```
-
-Release tooling: `node scripts/pack-dist.mjs` builds the self-contained
-tarball (`dist-release/icomposer-workbench-<version>.tgz`, prebuilt `lib/`,
-no sibling sources). For this upgrade, use the exact-runtime isolated CLI and
-real browser/HTTP smoke in [the migration guide](docs/dsh-0.2.1-migration.md),
-not the legacy source-launch `verify-standard-install.mjs` utility. The
-`pack:dist`, `pack:git-dist`, and `check:git-dist` commands are **single-writer**:
-tsdown rewrites the shared source `lib/` during each build, while the Git
-destination uses an atomic-ish staging/backup swap. In a clean checkout,
-the Harness preset must be checked out beside Workbench at `../deepseek-harness`
-at the exact `compatibility.json` commit, `687f282e86` (official upstream
-0.2.1-rc.2). The isolated setup recipe above installs the minimal preset/test
-requirements and a separately pinned npm runtime without building the harness.
-
-The tarball is the recommended form: directory `add .` is a link: install whose
-bare-import resolution depends on the surrounding node_modules layout. The
-`pnpm setup-profile` flow below is the **development-mode** profile wiring
-(symlinks the source bundle); end users install the distributable instead.
-
-## Phase 1 profile smoke
+### Development-mode profile smoke
 
 The profile setup stays isolated from the real `~/.dsh`. By default it writes
 to `.dsh-home/`; set `DSH_HOME` to another isolated directory when needed.
@@ -122,7 +241,7 @@ The composed dump should contain `workbench-test`, `workbench-operation-log`,
 `insuremo-service` requires `subprocess` and the Workbench `operationLog`
 service. The setup script refuses to target the real `~/.dsh` path.
 
-## Operation evidence layer
+### Operation evidence layer
 
 `@icomposer/workbench-operation-log` is a Host-only storage provider for
 side-effect evidence. It records pending operations and supports the one-way
@@ -138,7 +257,7 @@ The package's focused tests use a temporary JSON backend:
 pnpm --filter @icomposer/workbench-operation-log run test
 ```
 
-## Client plugin development
+### Client plugin development
 
 `@icomposer/ui-insuremo-settings` is the first client-side placeholder. It
 registers the localized `settings.section` slot and builds with Strategy A:
@@ -155,10 +274,14 @@ The browser test uses the Harness production SlotRegistry and
 `@deepseek-ai/dsh-client-test-runtime`; it verifies localized navigation,
 placeholder rendering, and disposal.
 
-`@icomposer/ui-insuremo-status` contributes the static localized badge in the
-sidebar footer (`sidebar.footer.action`). It shows `InsureMO · 未配置` or
-`InsureMO · Not configured` with a warning dot; live environment health and
-interaction are intentionally deferred.
+`@icomposer/ui-insuremo-status` owns the sidebar brand slots
+(`sidebar.brand.mark` / `sidebar.brand.name`), the hero mark
+(`conversation.hero.brand.mark`), and the footer Active Profile picker
+(`sidebar.footer.action`). The wide identity row renders the wordmark alone —
+the wordmark raster already carries the globe — while the collapsed rail keeps
+the standalone globe; the hero always keeps its own globe. The picker reuses the
+Harness `Button` atom (compact ghost form) and its rows follow the official menu
+row metrics.
 
 ```sh
 pnpm --filter @icomposer/ui-insuremo-status run test
@@ -174,7 +297,7 @@ node props and keeps the row read-only.
 pnpm --filter @icomposer/ui-workbench-jobs run test
 ```
 
-## IMO CLI probe
+### IMO CLI probe
 
 `@icomposer/insuremo-service` is the Host-only, read-only seam for the IMO CLI.
 `ImoCliService` provides `ctx.imoCli` with `probe()`, `version()` (runs
@@ -189,7 +312,7 @@ below; this probe itself never prepares or stores credentials.
 pnpm --filter @icomposer/insuremo-service run test
 ```
 
-## IMO upgrade loop
+### IMO upgrade loop
 
 `ImoUpgradeService` (`ctx.imoUpgrade`) turns the read-only probe into an
 approval-gated, single-instance upgrade closed loop. `requestUpgrade` appends
@@ -207,7 +330,7 @@ runs a real upgrade without explicit operator authorization (tests use fake
 pnpm --filter @icomposer/insuremo-service run test
 ```
 
-## Skills inventory
+### Skills inventory
 
 `ctx.imoSkills` is the read-only bridge for installed InsureMO Skills:
 `list(project|global)` parses `imo skills list --json [-g]`, `configPath()`
@@ -235,7 +358,7 @@ Provider disposal unregisters it and disables later reads.
 pnpm --filter @icomposer/insuremo-service run test
 ```
 
-## Auth profile and prepare lease
+### Auth profile and prepare lease
 
 `ctx.imoAuth` is the single Host-only authentication seam. `listProfiles()`
 allowlists and renames only known profile metadata; `defaultProfile()` returns
@@ -255,7 +378,7 @@ it can intentionally leak the token, so callbacks should perform the remote
 call without returning the secret. Login and remote-profile actions are kept on
 the separate approval-gated `ctx.imoAuthActions` seam below.
 
-## Auth actions approval loop
+### Auth actions approval loop
 
 `ctx.imoAuthActions` exposes `requestPortalLogin()`, `requestRemote()`, and
 `requestDefaultSwitch()`, each followed by an existing operation-log approval
@@ -280,7 +403,7 @@ run by tests or real smoke.
 pnpm --filter @icomposer/insuremo-service run test
 ```
 
-### Service module architecture
+#### Service module architecture
 
 `packages/insuremo-service/src/index.ts` is a small public barrel and Cordis
 composition boundary. Configuration, subprocess execution, CLI probing,
@@ -292,7 +415,7 @@ cache/coalescing in `auth/service.ts`, and approval actions in
 `auth/environment.ts`/`auth/actions.ts`. The operation log is referenced only
 through `operation-log-face.ts`.
 
-## Phase 3 — Workspace binding (core, local-write)
+### Phase 3 — Workspace binding (core, local-write)
 
 `@icomposer/workspace-binding` reuses Harness `ctx.workspaceRegistry` (hard inject `[storageDomain, workspaceRegistry]`) and adds a durable overlay `workbench_workspace_binding` v1 (`bindings` table, strict record, `revision>=1`). It never accepts caller paths and never creates/deletes workspaces or source files; `canonicalPath`/`displayName`/`status` are read only from the registry entity.
 
@@ -308,12 +431,15 @@ packages/
 ├── plugin-workbench-test/       # Host-only Service Definition/provider smoke plugin
 ├── insuremo-service/            # IMO CLI read probes + approved upgrade loop
 ├── workbench-operation-log/     # Digest-only operation evidence provider
-├── ui-insuremo-settings/        # Client Settings > InsureMO placeholder
-├── ui-insuremo-status/          # Client sidebar InsureMO status placeholder
+├── ui-insuremo-settings/        # Client Settings > InsureMO section
+├── ui-insuremo-status/          # Client brand slots + footer Active Profile picker
 ├── ui-workbench-jobs/           # Client keyed job conversation node
+├── icomposer-workbench-dist/    # Distributable plugin bundle (@icomposer/workbench)
 └── bundle-icomposer-workbench/  # Profile patch layer for Workbench plugins
 profiles/
 └── icomposer-web/             # Source profile manifest and empty user patch
+git-dist/
+└── icomposer-workbench/       # Tracked prebuilt payload consumed by installs
 scripts/
 ├── check-compatibility.mjs
 └── setup-profile.mjs

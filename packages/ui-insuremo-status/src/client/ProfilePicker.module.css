@@ -1,28 +1,38 @@
-/* ProfilePicker (TASK-041): plain text rows matching sidebar session rows —
-   no native select chrome, no card border. Design-platform variables only. */
+/* ProfilePicker (TASK-144): the trigger and the panel header are the official
+   compact ghost Button (28px box, 12/18 type, --dsw-radius-sm corner, the
+   official hover/active/disabled states); the rows carry the official menu row
+   metrics so the picker reads as part of the sidebar rather than as a widget.
+   Every color, radius and ring comes from the design platform tokens. */
 
 .trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  box-sizing: border-box;
   width: 100%;
-  min-height: 28px;
-  padding: 4px 9px;
+  min-width: 0;
   overflow: hidden;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  line-height: 18px;
-  text-align: left;
-  cursor: pointer;
 }
 
-.trigger:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
+/* Collapsed rail: the official 36×36 rail control (`--dsw-radius-md`
+   rounding), with the glyph left at its own size. */
+.trigger[data-wide="false"] {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--dsw-radius-md);
+}
+
+/* The Button centres its content; this row keeps the dot and label flush left
+   and lets the label ellipsize inside the fixed-width control. */
+.triggerContent {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.trigger[data-wide="false"] .triggerContent {
+  flex: none;
+  justify-content: center;
 }
 
 .dot {
@@ -42,32 +52,51 @@
 
 .picker {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  min-width: 0;
   padding: 2px 0;
 }
 
-.pickerHeader {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+/* Narrow rail form (TASK-144 FIX). The collapsed column is 56px wide with
+   `overflow: hidden`, so the panel ports to <body>: fixed at a readable width,
+   clamped by useAnchoredPosition, and free of the rail's clip. The menu
+   material itself (fill, blur, radius, macOS backing) comes from MenuSurface. */
+.railPanel {
+  position: fixed;
+  z-index: 100;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 260px;
+  max-width: calc(100vw - 24px);
+  max-height: min(420px, calc(100vh - 96px));
+  overflow: auto;
+  padding: 4px;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+}
+
+/* The panel receives focus on open so the keyboard walks its rows next. */
+.railPanel:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+
+.pickerHeader {
   width: 100%;
-  min-height: 28px;
-  padding: 4px 9px;
+  min-width: 0;
   overflow: hidden;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  line-height: 18px;
-  text-align: left;
-  cursor: pointer;
 }
 
 .closeMark {
+  flex: none;
   margin-left: auto;
+  padding-left: 6px;
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -80,40 +109,56 @@
   gap: 1px;
 }
 
+/* Group caption: the menu's label row (11/15, tertiary, 8px inline inset). */
 .groupLabel {
   display: block;
-  padding: 4px 9px 1px 9px;
+  padding: 6px 8px 3px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
-  line-height: 14px;
-  text-transform: uppercase;
+  font-size: 11px;
+  line-height: 15px;
 }
 
 .row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
   width: 100%;
-  min-height: 26px;
-  padding: 3px 9px 3px 22px;
+  min-height: 30px;
+  padding: 4px 8px;
   overflow: hidden;
-  border: 0;
-  border-radius: 6px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 13px;
+  line-height: 20px;
   text-align: left;
   cursor: pointer;
 }
 
-.row:hover {
+.row:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 
-.row[data-default="1"] {
+.row:active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+/* Keyboard focus keeps the standard platform ring, drawn inside the row so the
+   sidebar's overflow never clips it. */
+.row:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+
+.row:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.row[data-active="1"] {
   color: var(--dsw-alias-label-primary);
 }
 
@@ -126,18 +171,21 @@
 
 .rowMark {
   flex: none;
+  margin-left: auto;
   color: var(--dsw-alias-state-success-primary);
 }
 
 .hint {
   margin: 0;
-  padding: 2px 9px;
+  padding: 4px 8px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .error {
   color: var(--dsw-alias-state-error-primary);
-  font-size: 11px;
-  padding: 2px 9px;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 4px 8px;
 }

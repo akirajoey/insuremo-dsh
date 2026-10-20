@@ -8,6 +8,7 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react_dom_client = require("react-dom/client");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
+		let react_dom = require("react-dom");
 		//#region ../ui-insuremo-settings/src/client/ChevronIcon.tsx
 		/**
 		* Down-chevron disclosure icon mirroring the platform's
@@ -2719,7 +2720,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:asset
-		const css$2 = ".G7db_a_trigger{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.G7db_a_trigger:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.G7db_a_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.G7db_a_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.G7db_a_picker{flex-direction:column;gap:2px;padding:2px 0;display:flex}.G7db_a_pickerHeader{box-sizing:border-box;width:100%;min-height:28px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:7px;padding:4px 9px;font-size:12px;line-height:18px;display:inline-flex;overflow:hidden}.G7db_a_closeMark{color:var(--dsw-alias-label-tertiary);margin-left:auto}.G7db_a_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.G7db_a_groupLabel{color:var(--dsw-alias-label-tertiary);text-transform:uppercase;padding:4px 9px 1px;font-size:10px;line-height:14px;display:block}.G7db_a_row{box-sizing:border-box;width:100%;min-height:26px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:6px;padding:3px 9px 3px 22px;font-size:12px;line-height:17px;display:inline-flex;overflow:hidden}.G7db_a_row:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.G7db_a_row[data-default=\"1\"]{color:var(--dsw-alias-label-primary)}.G7db_a_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.G7db_a_rowMark{color:var(--dsw-alias-state-success-primary);flex:none}.G7db_a_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:2px 9px;font-size:11px}.G7db_a_error{color:var(--dsw-alias-state-error-primary);padding:2px 9px;font-size:11px}";
+		const css$2 = ".G7db_a_trigger{width:100%;min-width:0;overflow:hidden}.G7db_a_trigger[data-wide=false]{border-radius:var(--dsw-radius-md);width:36px;height:36px;padding:0}.G7db_a_triggerContent{flex:auto;align-items:center;gap:7px;min-width:0;display:inline-flex;overflow:hidden}.G7db_a_trigger[data-wide=false] .G7db_a_triggerContent{flex:none;justify-content:center}.G7db_a_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.G7db_a_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.G7db_a_picker{flex-direction:column;flex:auto;gap:1px;min-width:0;padding:2px 0;display:flex}.G7db_a_railPanel{z-index:100;box-sizing:border-box;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:260px;max-width:calc(100vw - 24px);max-height:min(420px,100vh - 96px);box-shadow:var(--dsw-elevation-prominent);flex-direction:column;gap:1px;padding:4px;display:flex;position:fixed;overflow:auto}.G7db_a_railPanel:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.G7db_a_pickerHeader{width:100%;min-width:0;overflow:hidden}.G7db_a_closeMark{color:var(--dsw-alias-label-tertiary);flex:none;margin-left:auto;padding-left:6px}.G7db_a_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.G7db_a_groupLabel{color:var(--dsw-alias-label-tertiary);padding:6px 8px 3px;font-size:11px;line-height:15px;display:block}.G7db_a_row{box-sizing:border-box;border-radius:var(--dsw-radius-md);width:100%;min-height:30px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:none;align-items:center;gap:6px;padding:4px 8px;font-size:13px;line-height:20px;display:flex;overflow:hidden}.G7db_a_row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.G7db_a_row:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}.G7db_a_row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.G7db_a_row:disabled{cursor:not-allowed;opacity:.4}.G7db_a_row[data-active=\"1\"]{color:var(--dsw-alias-label-primary)}.G7db_a_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.G7db_a_rowMark{color:var(--dsw-alias-state-success-primary);flex:none;margin-left:auto}.G7db_a_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:4px 8px;font-size:12px;line-height:18px}.G7db_a_error{color:var(--dsw-alias-state-error-primary);padding:4px 8px;font-size:12px;line-height:18px}";
 		const tagId$2 = "@icomposer/workbench/ProfilePicker.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
 			const tag = document.createElement("style");
@@ -2738,13 +2739,27 @@ window.__ModuleLoader__.load({
 			"list": "G7db_a_list",
 			"picker": "G7db_a_picker",
 			"pickerHeader": "G7db_a_pickerHeader",
+			"railPanel": "G7db_a_railPanel",
 			"row": "G7db_a_row",
 			"rowMark": "G7db_a_rowMark",
 			"rowName": "G7db_a_rowName",
-			"trigger": "G7db_a_trigger"
+			"trigger": "G7db_a_trigger",
+			"triggerContent": "G7db_a_triggerContent"
 		};
 		//#endregion
 		//#region ../ui-insuremo-status/src/client/ProfilePicker.tsx
+		/** Width of the floating rail panel; wide enough for a profile name and its check. */
+		const RAIL_PANEL_WIDTH = 260;
+		/** Gap between the rail trigger and its floating panel. */
+		const RAIL_PANEL_GAP = 8;
+		/** Margin the floating panel keeps from every viewport edge. */
+		const RAIL_VIEWPORT_MARGIN = 12;
+		/** Unplaced panel: hidden but laid out so the first placement measures real dimensions. */
+		const MEASURE_STYLE = {
+			visibility: "hidden",
+			left: 0,
+			top: 0
+		};
 		function tooltipOf(profile, fallback) {
 			const parts = [
 				profile.env,
@@ -2752,6 +2767,18 @@ window.__ModuleLoader__.load({
 				profile.account
 			].filter((part) => typeof part === "string" && part.length > 0);
 			return parts.length > 0 ? parts.join(" · ") : fallback;
+		}
+		/**
+		* Row tooltip: the whole profile name *and* its metadata. A long name is only
+		* ellipsized on screen, so the title is the one place the full value survives.
+		*/
+		function rowTitleOf(profile) {
+			return [
+				profile.name,
+				profile.env,
+				profile.tenantCode,
+				profile.account
+			].filter((part) => typeof part === "string" && part.length > 0).join(" · ");
 		}
 		/**
 		* Derive the current auth target from the renderer's authoritative session and
@@ -2805,6 +2832,65 @@ window.__ModuleLoader__.load({
 				target: resolveProfileTarget(sessions, workspaces)
 			});
 		}
+		/**
+		* Floating form of the picker for the collapsed rail (TASK-144 FIX). The rail
+		* is a 56px column with `overflow: hidden`, so an in-place panel is clipped to
+		* it (measured: 151px panel, 48px of it outside). The same list therefore
+		* renders through a body portal at a fixed width, anchored to the trigger that
+		* stays mounted underneath. Official primitives own the two behaviours:
+		* placement (viewport clamp on scroll, resize, and the panel's own resize) and
+		* outside-pointer dismissal. No popover framework is introduced here.
+		*/
+		function RailPickerPanel({ anchorRef, onClose, label, children }) {
+			const panelRef = (0, react.useRef)(null);
+			const position = (0, _deepseek_ai_dsh_client_ui_primitives.useAnchoredPosition)({
+				open: true,
+				anchorRef,
+				panelRef,
+				side: "top",
+				align: "start",
+				gap: RAIL_PANEL_GAP,
+				margin: RAIL_VIEWPORT_MARGIN
+			});
+			const dismiss = (0, react.useCallback)(() => {
+				onClose();
+			}, [onClose]);
+			(0, _deepseek_ai_dsh_client_ui_primitives.useDismissOnOutsidePointer)(anchorRef, true, dismiss, panelRef);
+			const focusedRef = (0, react.useRef)(false);
+			(0, react.useLayoutEffect)(() => {
+				if (focusedRef.current || position === null) return;
+				const panel = panelRef.current;
+				if (panel === null) return;
+				focusedRef.current = true;
+				panel.focus();
+			}, [position]);
+			(0, react.useEffect)(() => {
+				const onKeyDown = (event) => {
+					if (event.key !== "Escape") return;
+					event.preventDefault();
+					onClose();
+					anchorRef.current?.focus();
+				};
+				document.addEventListener("keydown", onKeyDown);
+				return () => {
+					document.removeEventListener("keydown", onKeyDown);
+				};
+			}, [anchorRef, onClose]);
+			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.MenuSurface, {
+				ref: panelRef,
+				compact: true,
+				tabIndex: -1,
+				role: "group",
+				"aria-label": label,
+				"data-icomposer-picker-panel": "rail",
+				className: ProfilePicker_module_css_default.railPanel,
+				style: position === null ? MEASURE_STYLE : {
+					...position,
+					width: RAIL_PANEL_WIDTH
+				},
+				children
+			}), document.body);
+		}
 		/** Sidebar Active Profile selector with workspace-scoped reads and selection. */
 		var ProfilePicker = class extends react.Component {
 			state = {
@@ -2813,6 +2899,18 @@ window.__ModuleLoader__.load({
 			};
 			#generation = 0;
 			#controller;
+			/** The rail trigger stays mounted while the floating panel is open, as its anchor. */
+			triggerRef = (0, react.createRef)();
+			/** Collapse the panel; also the single close path for the header, Esc, and outside clicks. */
+			close = () => {
+				this.cancelRequest();
+				this.setState({
+					phase: "collapsed",
+					targetKey: targetKey(this.currentTarget()),
+					profiles: this.state.profiles,
+					activeName: this.state.activeName
+				});
+			};
 			currentTarget() {
 				return this.props.target ?? { kind: "global" };
 			}
@@ -3031,50 +3129,58 @@ window.__ModuleLoader__.load({
 			errorText(error) {
 				return error === "workspace" ? this.props.t("picker.workspaceUnavailable") : this.props.t("picker.error");
 			}
-			render() {
-				const { t } = this.props;
-				const state = this.state;
-				if (state.phase === "collapsed") {
-					const current = state.activeName ?? "";
-					const currentRow = state.profiles?.find((profile) => profile.name === current);
-					const title = currentRow !== void 0 ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
-					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-						type: "button",
-						className: ProfilePicker_module_css_default.trigger,
-						"data-wide": "true",
-						"aria-haspopup": "listbox",
-						"aria-expanded": false,
-						title,
-						"aria-label": current.length > 0 ? `${t("label")} · ${current}` : t("label"),
-						onClick: () => void this.open(),
+			renderTrigger(open) {
+				const { t, wide } = this.props;
+				const current = this.state.activeName ?? "";
+				const currentRow = this.state.profiles?.find((profile) => profile.name === current);
+				const title = currentRow !== void 0 ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+					ref: this.triggerRef,
+					variant: "ghost",
+					size: "sm",
+					className: ProfilePicker_module_css_default.trigger,
+					"data-wide": wide ? "true" : "false",
+					"aria-haspopup": "listbox",
+					"aria-expanded": open,
+					title,
+					"aria-label": current.length > 0 ? `${t("label")} · ${current}` : t("label"),
+					onClick: () => {
+						if (open) this.close();
+						else this.open();
+					},
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: ProfilePicker_module_css_default.triggerContent,
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: ProfilePicker_module_css_default.dot,
 							"aria-hidden": "true"
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						}), wide ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: ProfilePicker_module_css_default.label,
 							children: current.length > 0 ? current : t("label")
-						})]
-					});
-				}
+						}) : null]
+					})
+				});
+			}
+			/**
+			* Panel contents shared by both forms. `withHeader` is the wide-only row that
+			* replaces the trigger there; the rail keeps the trigger mounted beside its
+			* floating panel, so repeating that header would duplicate the same label
+			* and the same close affordance (and cost the keyboard one stop before the
+			* first profile). Esc, an outside pointer, and the trigger itself all close.
+			*/
+			renderPanel(withHeader) {
+				const { t } = this.props;
+				const state = this.state;
+				if (state.phase !== "open") return null;
 				let lastScope;
-				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: ProfilePicker_module_css_default.picker,
-					role: "group",
-					"aria-label": t("picker.label"),
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-							type: "button",
-							className: ProfilePicker_module_css_default.pickerHeader,
-							onClick: () => {
-								this.cancelRequest();
-								this.setState({
-									phase: "collapsed",
-									targetKey: targetKey(this.currentTarget()),
-									profiles: state.profiles,
-									activeName: state.activeName
-								});
-							},
-							"aria-label": t("picker.close"),
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					withHeader ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+						variant: "ghost",
+						size: "sm",
+						className: ProfilePicker_module_css_default.pickerHeader,
+						onClick: this.close,
+						"aria-label": t("picker.close"),
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: ProfilePicker_module_css_default.triggerContent,
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: ProfilePicker_module_css_default.dot,
@@ -3090,54 +3196,70 @@ window.__ModuleLoader__.load({
 									children: "×"
 								})
 							]
-						}),
-						state.busy && state.profiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-							className: ProfilePicker_module_css_default.hint,
-							children: t("picker.loading")
-						}) : null,
-						state.profiles.length === 0 && !state.busy && state.error === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-							className: ProfilePicker_module_css_default.hint,
-							children: t("picker.empty")
-						}) : null,
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
-							className: ProfilePicker_module_css_default.list,
-							role: "listbox",
-							"aria-label": t("picker.label"),
-							children: state.profiles.map((profile) => {
-								const heading = profile.sourceScope !== void 0 && profile.sourceScope !== lastScope;
-								lastScope = profile.sourceScope;
-								const selected = profile.name === state.activeName || state.activeName === void 0 && profile.isActive === true;
-								return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [heading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									role: "presentation",
-									className: ProfilePicker_module_css_default.groupLabel,
-									children: profile.sourceScope === "workspace" ? t("picker.project") : t("picker.global")
-								}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-									type: "button",
-									role: "option",
-									"aria-selected": selected,
-									disabled: state.busy,
-									title: tooltipOf(profile, profile.name),
-									"data-active": selected ? "1" : void 0,
-									"data-source-scope": profile.sourceScope,
-									onClick: () => void this.pick(profile.name),
-									className: ProfilePicker_module_css_default.row,
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: ProfilePicker_module_css_default.rowName,
-										children: profile.name
-									}), selected ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: ProfilePicker_module_css_default.rowMark,
-										"aria-hidden": "true",
-										children: "✓"
-									}) : null]
-								})] }, profile.name);
-							})
-						}),
-						state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							role: "alert",
-							className: ProfilePicker_module_css_default.error,
-							children: this.errorText(state.error)
-						}) : null
-					]
+						})
+					}) : null,
+					state.busy && state.profiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: ProfilePicker_module_css_default.hint,
+						children: t("picker.loading")
+					}) : null,
+					state.profiles.length === 0 && !state.busy && state.error === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+						className: ProfilePicker_module_css_default.hint,
+						children: t("picker.empty")
+					}) : null,
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
+						className: ProfilePicker_module_css_default.list,
+						role: "listbox",
+						"aria-label": t("picker.label"),
+						children: state.profiles.map((profile) => {
+							const heading = profile.sourceScope !== void 0 && profile.sourceScope !== lastScope;
+							lastScope = profile.sourceScope;
+							const selected = profile.name === state.activeName || state.activeName === void 0 && profile.isActive === true;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [heading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								role: "presentation",
+								className: ProfilePicker_module_css_default.groupLabel,
+								children: profile.sourceScope === "workspace" ? t("picker.project") : t("picker.global")
+							}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								type: "button",
+								role: "option",
+								"aria-selected": selected,
+								disabled: state.busy,
+								title: rowTitleOf(profile),
+								"data-active": selected ? "1" : void 0,
+								"data-source-scope": profile.sourceScope,
+								onClick: () => void this.pick(profile.name),
+								className: ProfilePicker_module_css_default.row,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: ProfilePicker_module_css_default.rowName,
+									children: profile.name
+								}), selected ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: ProfilePicker_module_css_default.rowMark,
+									"aria-hidden": "true",
+									children: "✓"
+								}) : null]
+							})] }, profile.name);
+						})
+					}),
+					state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						role: "alert",
+						className: ProfilePicker_module_css_default.error,
+						children: this.errorText(state.error)
+					}) : null
+				] });
+			}
+			render() {
+				const open = this.state.phase === "open";
+				if (!this.props.wide) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [this.renderTrigger(open), open ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailPickerPanel, {
+					anchorRef: this.triggerRef,
+					onClose: this.close,
+					label: this.props.t("picker.label"),
+					children: this.renderPanel(false)
+				}) : null] });
+				if (!open) return this.renderTrigger(false);
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: ProfilePicker_module_css_default.picker,
+					role: "group",
+					"aria-label": this.props.t("picker.label"),
+					children: this.renderPanel(true)
 				});
 			}
 		};
@@ -3145,31 +3267,60 @@ window.__ModuleLoader__.load({
 		//#region ../ui-insuremo-status/src/client/InsuremoBrand.tsx
 		/** Same-origin brand assets served by the host-side brand-assets-server. */
 		const BRAND_ASSET_URL = "/api/icomposer-workbench/ui/assets";
+		/** The globe raster, scaled to the caller's square edge (65:62 source). */
+		function Globe({ size }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
+				src: `${BRAND_ASSET_URL}/insuremo-globe.png`,
+				alt: "",
+				width: size,
+				height: Math.round(size * 62 / 65),
+				decoding: "async",
+				"data-emitted-brand-asset": insuremo_globe_default
+			});
+		}
 		/**
-		* The mark slot feeds two hosts with identical props: the wide identity row
-		* (mark + name lockup — the wordmark already carries the brand, so the mark
-		* must stay empty there, matching the pre-slot overlay look) and the
-		* collapsed rail toggle (mark only). The rail host is the button that also
-		* holds the panel icon; detect it after mount and render only there.
+		* Whether the host row already renders our wordmark. The wordmark PNG carries
+		* the globe itself, so a mark beside it draws a second globe. The official
+		* shell nests the mark and the name three levels deep in one identity row
+		* (`brandIdentity > brandMark | brandName`), and renders that row as a plain
+		* window-drag span on macOS but a button elsewhere; keying off the wordmark
+		* covers both and never has to read a generated class name.
+		*/
+		function sharesRowWithWordmark(host) {
+			let node = host.parentElement;
+			for (let depth = 0; node !== null && depth < 4; depth += 1) {
+				if (node.querySelector("[data-icomposer-brand-asset=\"wordmark\"]") !== null) return true;
+				node = node.parentElement;
+			}
+			return false;
+		}
+		/**
+		* `sidebar.brand.mark` occupant. The slot feeds two surfaces: the wide
+		* identity row (where the wordmark already carries the globe, so the mark must
+		* stay empty) and the collapsed rail toggle (mark only, so the standalone
+		* globe belongs there). The hero has its own surface — see
+		* {@link InsuremoHeroBrandMark} — because it is never part of an identity row.
 		*/
 		function InsuremoBrandMark({ size = 24 }) {
 			const hostRef = (0, react.useRef)(null);
-			const [inRail, setInRail] = (0, react.useState)(false);
+			const [standalone, setStandalone] = (0, react.useState)(false);
 			(0, react.useLayoutEffect)(() => {
-				const button = hostRef.current?.closest("button");
-				setInRail(button?.querySelector("svg") !== null);
+				const host = hostRef.current;
+				if (host === null) return;
+				setStandalone(!sharesRowWithWordmark(host));
 			}, []);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 				ref: hostRef,
-				children: inRail ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-					src: `${BRAND_ASSET_URL}/insuremo-globe.png`,
-					alt: "",
-					width: size,
-					height: Math.round(size * 62 / 65),
-					decoding: "async",
-					"data-emitted-brand-asset": insuremo_globe_default
-				}) : null
+				children: standalone ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Globe, { size }) : null
 			});
+		}
+		/**
+		* `conversation.hero.brand.mark` occupant: the blank-session hero fish slot is
+		* a non-interactive span that never holds the wordmark, so it always keeps the
+		* standalone globe.
+		*/
+		function InsuremoHeroBrandMark({ size = 34 }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Globe, { size }) });
 		}
 		/** The wordmark rendered into `sidebar.brand.name` (99×24, theme-switched
 		* through the same CSS the overlay used). */
@@ -3262,7 +3413,7 @@ window.__ModuleLoader__.load({
 				yield ctx.slots.register({
 					name: "conversation.hero.brand.mark",
 					priority: -1
-				}, InsuremoBrandMark);
+				}, InsuremoHeroBrandMark);
 			}));
 			const t = ctx.locale.bind(NS$1);
 			ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({

@@ -36,7 +36,7 @@ declare module "@deepseek-ai/cordis" {
 declare module "@deepseek-ai/dsh-client-locale/client" {}
 declare module "@deepseek-ai/dsh-client-ui-sidebar/client" {}
 declare module "@deepseek-ai/dsh-client-ui-primitives" {
-  import type { ReactElement } from "react";
+  import type { ButtonHTMLAttributes, ReactElement, ReactNode, Ref } from "react";
   export function Tooltip(props: {
     label: string | (() => string);
     side?: "right" | "bottom" | "top";
@@ -45,6 +45,40 @@ declare module "@deepseek-ai/dsh-client-ui-primitives" {
     maxWidth?: number;
     children: ReactElement;
   }): ReactElement;
+  export type ButtonVariant = "primary" | "ghost" | "outline" | "toolbar";
+  export function Button(props: {
+    variant?: ButtonVariant;
+    size?: "md" | "sm";
+    icon?: ReactNode;
+    className?: string;
+    children?: ReactNode;
+    ref?: Ref<HTMLButtonElement>;
+  } & ButtonHTMLAttributes<HTMLButtonElement>): ReactElement;
+  export function MenuSurface(props: {
+    compact?: boolean;
+    className?: string;
+    style?: Record<string, unknown>;
+    role?: string;
+    tabIndex?: number;
+    "aria-label"?: string;
+    ref?: Ref<HTMLDivElement>;
+    children?: ReactNode;
+  } & Record<string, unknown>): ReactElement;
+  export function useAnchoredPosition(options: {
+    open: boolean;
+    anchorRef: { readonly current: HTMLElement | null };
+    panelRef: { readonly current: HTMLElement | null };
+    side?: "top" | "bottom";
+    align?: "start" | "end";
+    gap: number;
+    margin: number;
+  }): Record<string, unknown> | null;
+  export function useDismissOnOutsidePointer(
+    root: { readonly current: HTMLElement | null },
+    open: boolean,
+    setOpen: (open: boolean) => void,
+    portal?: { readonly current: HTMLElement | null },
+  ): void;
 }
 declare module "*.png" {
   const url: string;

@@ -143,7 +143,7 @@ describe("ProfilePicker (TASK-036)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("expands into text rows (no select chrome), tooltip carries env/account/tenant, fast channel URL", async () => {
+  it("expands into text rows (no select chrome), tooltip leads with the name then env/account/tenant, fast channel URL", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(overviewPayload));
     vi.stubGlobal("fetch", fetchMock);
     const view = runtime.renderSlot("sidebar.footer.action", { wide: true });
@@ -160,7 +160,8 @@ describe("ProfilePicker (TASK-036)", () => {
     expect(rows[0].textContent).toContain("✓");
     expect(rows[0].getAttribute("aria-selected")).toBe("true");
     // tooltip = env · tenant · account
-    expect(rows[1].title).toBe("aws_sg_insuremo_portal · mo-re · user@example.com");
+    // TASK-144 O1: rows ellipsize, so the title carries the full name as well.
+    expect(rows[1].title).toBe("portal:mo-re · aws_sg_insuremo_portal · mo-re · user@example.com");
     // fast channel
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/overview?fast=1"), expect.anything());
   });

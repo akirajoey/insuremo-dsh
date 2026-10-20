@@ -1,9 +1,25 @@
-import { Component, type ReactNode } from "react";
+import { Component, createRef, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import {
+  Button,
+  MenuSurface,
+  useAnchoredPosition,
+  useDismissOnOutsidePointer,
+} from "@deepseek-ai/dsh-client-ui-primitives";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import type { InsuremoStatusLocaleKey } from "./locales.ts";
 import { postAction, OVERVIEW_URL } from "./actions.ts";
 import css from "./ProfilePicker.module.css";
+
+/** Width of the floating rail panel; wide enough for a profile name and its check. */
+const RAIL_PANEL_WIDTH = 260;
+/** Gap between the rail trigger and its floating panel. */
+const RAIL_PANEL_GAP = 8;
+/** Margin the floating panel keeps from every viewport edge. */
+const RAIL_VIEWPORT_MARGIN = 12;
+/** Unplaced panel: hidden but laid out so the first placement measures real dimensions. */
+const MEASURE_STYLE = { visibility: "hidden", left: 0, top: 0 } as const;
 
 /** Props supplied by the sidebar footer-action slot owner. */
 export type ProfilePickerProps = PropsRuntime<"sidebar.footer.action">
@@ -34,6 +50,16 @@ type PickerState =
 function tooltipOf(profile: ProfileRow, fallback: string): string {
   const parts = [profile.env, profile.tenantCode, profile.account].filter((part): part is string => typeof part === "string" && part.length > 0);
   return parts.length > 0 ? parts.join(" · ") : fallback;
+}
+
+/**
+ * Row tooltip: the whole profile name *and* its metadata. A long name is only
+ * ellipsized on screen, so the title is the one place the full value survives.
+ */
+function rowTitleOf(profile: ProfileRow): string {
+  return [profile.name, profile.env, profile.tenantCode, profile.account]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join(" · ");
 }
 
 /**
@@ -100,11 +126,96 @@ interface ProfilePickerPanelProps extends ProfilePickerProps {
   readonly target?: ProfilePickerTarget;
 }
 
+interface RailPickerPanelProps {
+  readonly anchorRef: React.RefObject<HTMLElement | null>;
+  readonly onClose: () => void;
+  readonly label: string;
+  readonly children: ReactNode;
+}
+
+/**
+ * Floating form of the picker for the collapsed rail (TASK-144 FIX). The rail
+ * is a 56px column with `overflow: hidden`, so an in-place panel is clipped to
+ * it (measured: 151px panel, 48px of it outside). The same list therefore
+ * renders through a body portal at a fixed width, anchored to the trigger that
+ * stays mounted underneath. Official primitives own the two behaviours:
+ * placement (viewport clamp on scroll, resize, and the panel's own resize) and
+ * outside-pointer dismissal. No popover framework is introduced here.
+ */
+function RailPickerPanel({ anchorRef, onClose, label, children }: RailPickerPanelProps): ReactNode {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const position = useAnchoredPosition({
+    open: true,
+    anchorRef,
+    panelRef,
+    side: "top",
+    align: "start",
+    gap: RAIL_PANEL_GAP,
+    margin: RAIL_VIEWPORT_MARGIN,
+  });
+  const dismiss = useCallback(() => { onClose(); }, [onClose]);
+  useDismissOnOutsidePointer(anchorRef, true, dismiss, panelRef);
+  // Focus exactly once per open, and only after placement: until
+  // `useAnchoredPosition` returns coordinates the panel still carries the
+  // hidden measuring style, and Chromium discards `focus()` on a
+  // `visibility: hidden` element — the trigger kept focus and Tab then walked
+  // the whole page before reaching the portal. The dependency re-runs on every
+  // reposition (scroll, resize, the panel's own resize), so the guard — not the
+  // dependency — is what keeps those from stealing focus back out of a row.
+  // Each open remounts the panel, which resets the guard naturally.
+  const focusedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (focusedRef.current || position === null) return;
+    const panel = panelRef.current;
+    if (panel === null) return;
+    focusedRef.current = true;
+    panel.focus();
+  }, [position]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+      anchorRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => { document.removeEventListener("keydown", onKeyDown); };
+  }, [anchorRef, onClose]);
+  return createPortal(
+    <MenuSurface
+      ref={panelRef}
+      compact
+      tabIndex={-1}
+      role="group"
+      aria-label={label}
+      data-icomposer-picker-panel="rail"
+      className={css.railPanel}
+      style={position === null ? MEASURE_STYLE : { ...position, width: RAIL_PANEL_WIDTH }}
+    >
+      {children}
+    </MenuSurface>,
+    document.body,
+  );
+}
+
 /** Sidebar Active Profile selector with workspace-scoped reads and selection. */
 export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerState> {
   override state: PickerState = { phase: "collapsed", targetKey: targetKey(this.props.target ?? { kind: "global" }) };
   #generation = 0;
   #controller: AbortController | undefined;
+  /** The rail trigger stays mounted while the floating panel is open, as its anchor. */
+  private readonly triggerRef = createRef<HTMLButtonElement>();
+
+  /** Collapse the panel; also the single close path for the header, Esc, and outside clicks. */
+  private readonly close = (): void => {
+    this.cancelRequest();
+    this.setState({
+      phase: "collapsed",
+      targetKey: targetKey(this.currentTarget()),
+      profiles: this.state.profiles,
+      activeName: this.state.activeName,
+    });
+  };
 
   private currentTarget(): ProfilePickerTarget {
     return this.props.target ?? { kind: "global" };
@@ -292,28 +403,57 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
     return error === "workspace" ? this.props.t("picker.workspaceUnavailable") : this.props.t("picker.error");
   }
 
-  override render(): ReactNode {
+  private renderTrigger(open: boolean): ReactNode {
+    const { t, wide } = this.props;
+    const current = this.state.activeName ?? "";
+    const currentRow = this.state.profiles?.find(profile => profile.name === current);
+    const title = currentRow !== undefined ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
+    // The collapsed rail hides the footer label, as official footer actions
+    // do; the dot and the accessible name carry the same information.
+    return (
+      <Button
+        ref={this.triggerRef}
+        variant="ghost"
+        size="sm"
+        className={css.trigger}
+        data-wide={wide ? "true" : "false"}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={title}
+        aria-label={current.length > 0 ? `${t("label")} · ${current}` : t("label")}
+        onClick={() => { if (open) this.close(); else void this.open(); }}
+      >
+        <span className={css.triggerContent}>
+          <span className={css.dot} aria-hidden="true" />
+          {wide ? <span className={css.label}>{current.length > 0 ? current : t("label")}</span> : null}
+        </span>
+      </Button>
+    );
+  }
+
+  /**
+   * Panel contents shared by both forms. `withHeader` is the wide-only row that
+   * replaces the trigger there; the rail keeps the trigger mounted beside its
+   * floating panel, so repeating that header would duplicate the same label
+   * and the same close affordance (and cost the keyboard one stop before the
+   * first profile). Esc, an outside pointer, and the trigger itself all close.
+   */
+  private renderPanel(withHeader: boolean): ReactNode {
     const { t } = this.props;
     const state = this.state;
-    if (state.phase === "collapsed") {
-      const current = state.activeName ?? "";
-      const currentRow = state.profiles?.find(profile => profile.name === current);
-      const title = currentRow !== undefined ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
-      return (
-        <button type="button" className={css.trigger} data-wide="true" aria-haspopup="listbox" aria-expanded={false} title={title} aria-label={current.length > 0 ? `${t("label")} · ${current}` : t("label")} onClick={() => void this.open()}>
-          <span className={css.dot} aria-hidden="true" />
-          <span className={css.label}>{current.length > 0 ? current : t("label")}</span>
-        </button>
-      );
-    }
+    if (state.phase !== "open") return null;
     let lastScope: ProfileRow["sourceScope"] | undefined;
     return (
-      <div className={css.picker} role="group" aria-label={t("picker.label")}>
-        <button type="button" className={css.pickerHeader} onClick={() => { this.cancelRequest(); this.setState({ phase: "collapsed", targetKey: targetKey(this.currentTarget()), profiles: state.profiles, activeName: state.activeName }); }} aria-label={t("picker.close")}>
-          <span className={css.dot} aria-hidden="true" />
-          <span className={css.label}>{t("picker.label")}</span>
-          <span className={css.closeMark} aria-hidden="true">×</span>
-        </button>
+      <>
+        {withHeader ? (
+          <Button variant="ghost" size="sm" className={css.pickerHeader} onClick={this.close} aria-label={t("picker.close")}>
+            <span className={css.triggerContent}>
+              <span className={css.dot} aria-hidden="true" />
+              <span className={css.label}>{t("picker.label")}</span>
+              <span className={css.closeMark} aria-hidden="true">×</span>
+            </span>
+          </Button>
+        ) : null}
         {state.busy && state.profiles.length === 0 ? <p className={css.hint}>{t("picker.loading")}</p> : null}
         {state.profiles.length === 0 && !state.busy && state.error === undefined ? <p className={css.hint}>{t("picker.empty")}</p> : null}
         <ul className={css.list} role="listbox" aria-label={t("picker.label")}>
@@ -329,7 +469,7 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
                   role="option"
                   aria-selected={selected}
                   disabled={state.busy}
-                  title={tooltipOf(profile, profile.name)}
+                  title={rowTitleOf(profile)}
                   data-active={selected ? "1" : undefined}
                   data-source-scope={profile.sourceScope}
                   onClick={() => void this.pick(profile.name)}
@@ -343,6 +483,30 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
           })}
         </ul>
         {state.error !== undefined ? <span role="alert" className={css.error}>{this.errorText(state.error)}</span> : null}
+      </>
+    );
+  }
+
+  override render(): ReactNode {
+    const open = this.state.phase === "open";
+    // Narrow: the panel leaves the clipped column through a portal, so the
+    // trigger stays mounted as its anchor and as the close affordance.
+    if (!this.props.wide) {
+      return (
+        <>
+          {this.renderTrigger(open)}
+          {open ? (
+            <RailPickerPanel anchorRef={this.triggerRef} onClose={this.close} label={this.props.t("picker.label")}>
+              {this.renderPanel(false)}
+            </RailPickerPanel>
+          ) : null}
+        </>
+      );
+    }
+    if (!open) return this.renderTrigger(false);
+    return (
+      <div className={css.picker} role="group" aria-label={this.props.t("picker.label")}>
+        {this.renderPanel(true)}
       </div>
     );
   }
