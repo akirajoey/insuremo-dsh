@@ -6,7 +6,7 @@
     "noEmit": true,
     "paths": {
       "@deepseek-ai/dsh-client-ui-slots": ["src/harness-shims.d.ts"],
-      "@deepseek-ai/dsh-client-runtime/client": ["src/harness-shims.d.ts"],
+      "@deepseek-ai/cordis": ["src/harness-shims.d.ts"],
       "@deepseek-ai/dsh-client-locale/client": ["src/harness-shims.d.ts"],
       "@deepseek-ai/dsh-client-ui-settings/client": ["src/harness-shims.d.ts"]
     }

@@ -33,7 +33,7 @@ function cancellation(error: unknown, platform: NodeJS.Platform): boolean {
 }
 async function defaultRunner(command: string, args: readonly string[], signal: AbortSignal): Promise<{ stdout: string; stderr: string }> {
   const module = await import("@deepseek-ai/dsh-native-command");
-  return module.runNativeCommand(command, args, signal);
+  return module.runNativeCommand(command, args, signal, "visible");
 }
 
 /**

@@ -10,8 +10,8 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
   };
 }
 
-declare module "@deepseek-ai/dsh-client-runtime/client" {
-  interface ClientContext {
+declare module "@deepseek-ai/cordis" {
+  interface Context {
     locale: {
       register(
         namespace: string,

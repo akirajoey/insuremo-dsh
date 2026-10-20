@@ -356,7 +356,7 @@ test("gates: unbound local auth / not-found / invalid workspace id / dispose / c
   }
 });
 
-test("real project smoke (read-only + transient-cache restore): list/search against ssapocpa, tree byte-identical after restore", async () => {
+test("real project smoke (read-only + transient-cache restore): list/search against ssapocpa, tree byte-identical after restore", { skip: process.env.WORKBENCH_REAL_PROJECT_SMOKE !== "1" }, async () => {
   const projectRoot = "/Users/junjie.zhang/skills/ssapocpa";
   const PROFILE = "portal:microsite";
   const ENV = "aws_sg_insuremo_portal";
@@ -670,7 +670,7 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
   const root = await mkdtemp(join(tmpdir(), "ici-bg-"));
   const dshHome = await mkdtemp(join(tmpdir(), "ici-bg-dsh-"));
   const prev = process.env.DSH_HOME; process.env.DSH_HOME = dshHome;
-  const started: Array<{ kind: string; hooks: { cancel(reason?: string): void; done: Promise<{ status: string; detail?: string }>; readOutput?(): string } }> = [];
+  const started: Array<{ kind: string; owner?: string; hooks: { cancel(reason?: string): void; done: Promise<{ status: string; detail?: string }> } }> = [];
   const reg: Array<{ name: string; execute: (a: Record<string, unknown>, e: { signal: AbortSignal }) => Promise<unknown> }> = [];
 
   // Controllable engine: hangs until the job signal aborts (→ cancelled), or
@@ -678,7 +678,8 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
   let engineFailNext = false;
   let lastSignal: AbortSignal | undefined;
   const iciEngineStub = {
-    build: (_input: unknown, options?: { signal?: AbortSignal }) => new Promise(resolve => {
+    build: (_input: unknown, options?: { signal?: AbortSignal; onProgress?: (current: number, total: number, step: string) => void }) => new Promise(resolve => {
+      options?.onProgress?.(1, 2, "building");
       lastSignal = options?.signal;
       const finish = () => resolve(
         engineFailNext ? { ok: false, error: { code: "storage-error" } }
@@ -710,6 +711,7 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
     queryImpact: async () => ({ ok: true, value: { matched: [], paths: [], confidenceCounts: { static: 0, platform: 0, inferred: 0 }, truncated: false } }),
   };
 
+  const output: string[] = [];
   const ctx = new Context();
   ctx.provide("iciEngine", iciEngineStub as never);
   // >50 assets forces the background path through ctx.jobs.start.
@@ -722,9 +724,9 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
   ctx.provide("imoAuth" as never, { prepare: async () => ({ ok: true, value: { use: async (cb: any) => cb({ accessToken: "t" }) } }) } as never);
   ctx.provide("subprocess", fakeSubprocess() as never);
   ctx.provide("jobs", {
-    start(spec: { kind: string; label: string; run(): { cancel(reason?: string): void; done: Promise<{ status: string; detail?: string }>; readOutput?(): string } }) {
-      const hooks = spec.run();
-      started.push({ kind: spec.kind, hooks });
+    start(spec: { kind: string; label: string; owner?: string; run(job: { append(text: string, options?: { channel?: string }): void }): { cancel(reason?: string): void; done: Promise<{ status: string; detail?: string }> } }) {
+      const hooks = spec.run({ append: (text) => { output.push(text); } });
+      started.push({ kind: spec.kind, owner: spec.owner, hooks });
       return `${spec.kind}-1`;
     },
   } as never);
@@ -748,11 +750,13 @@ test("ici_build background: production mapper maps engine cancelled to JobOutcom
   registerIciJobTools(ctx, (o: unknown) => o as never);
   try {
     assert.deepEqual(reg.map(d => d.name).sort(), ["ici_build", "ici_status"]);
-    const exec = { signal: new AbortController().signal };
+    const exec = { signal: new AbortController().signal, agent: { id: "different-agent", session: { id: "owning-session" } } };
     const startRes: any = await reg.find(d => d.name === "ici_build")!.execute({ workspace_id: "ws1" }, exec);
     assert.equal(startRes.kind, "background");
     assert.match(startRes.jobId, /^ici-build-/);
     assert.equal(started.length, 1);
+    assert.equal(started[0].owner, "owning-session");
+    assert.equal(output.join(""), "[1/2] building\n");
 
     // kill the job → engine sees abort → cancelled → production mapper → killed
     started[0].hooks.cancel("user requested");

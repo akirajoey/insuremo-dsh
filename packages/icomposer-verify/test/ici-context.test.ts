@@ -4,7 +4,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { IciContextService, ICI_CONTEXT_PLUGIN, ICI_CONTEXT_POLICY_VERSION } from "../src/ici-context-service.ts";
 
 function agent(cwd: string, events: unknown[] = []) {
-  return { session: { header: { cwd }, events } };
+  return { session: { header: { cwd }, events, snapshotEvents: () => events } };
 }
 function binding(entries: readonly unknown[]) {
   return { list: async () => ({ ok: true, value: entries }) };
@@ -29,8 +29,8 @@ test("ICI context injects only for exact detected/bound workspace and deduplicat
     const current = agent("/repo/a");
     const first = await step(fx.service, current);
     assert.equal(first.messages?.length, 1);
-    const source = (first.messages?.[0] as { source?: { plugin?: string; workspaceId?: string } }).source;
-    assert.equal(source?.plugin, ICI_CONTEXT_PLUGIN);
+    const source = (first.messages?.[0] as { source?: { kind?: string; workspaceId?: string } }).source;
+    assert.equal(source?.kind, ICI_CONTEXT_PLUGIN);
     assert.equal(source?.workspaceId, "ws-a");
     const text = String((first.messages?.[0] as { content?: readonly { text?: string }[] }).content?.[0]?.text);
     assert.match(text, /\[iComposer workspace\]/);
@@ -88,7 +88,7 @@ test("ICI context reasserts after workspace switch and compaction, but not for u
     assert.equal((await step(fx.service, current)).messages?.length, 1);
     current.session.header.cwd = "/repo/b";
     assert.equal((await step(fx.service, current)).messages?.length, 1);
-    current.session.events.push({ type: "user/message", data: { source: { kind: "plugin", plugin: "compact" } } });
+    current.session.events.push({ type: "user/message", data: { source: { kind: "compact-checkpoint", compactionId: "test-compact" } } });
     assert.equal((await step(fx.service, current)).messages?.length, 1);
     current.session.header.cwd = "/other";
     assert.equal((await step(fx.service, current)).messages?.length, 0);
@@ -136,4 +136,17 @@ test("ICI context listener is disposed", async () => {
   await fx.fiber.dispose();
   const decision = await fx.service.decide({ agent: current, step: 1 }, async () => ({ kind: "enter", messages: [] }));
   assert.equal(decision.messages?.length, 0);
+});
+
+
+test("ICI deduplicates migrated plugin:<producer> source rows", async () => {
+  const fx = await fixture([{ workspaceId: "ws-a", canonicalPath: "/repo/a", detectedIcomposer: true }]);
+  try {
+    const current = agent("/repo/a");
+    await step(fx.service, current);
+    const event = current.session.events[0] as { data: { source: { kind: string } } };
+    assert.equal(event.data.source.kind, ICI_CONTEXT_PLUGIN);
+    current.session.events[0] = { ...event, data: { ...event.data, source: { ...event.data.source, kind: `plugin:${ICI_CONTEXT_PLUGIN}` } } };
+    assert.equal((await step(fx.service, current)).messages?.length, 0);
+  } finally { await fx.fiber.dispose(); }
 });

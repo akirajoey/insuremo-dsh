@@ -163,5 +163,6 @@ declare module "@deepseek-ai/dsh-llm" {
     source: any;
     data?: Record<string, unknown>;
   }
+  export type ContextFormed = { readonly form?: never } | { readonly form: "snapshot"; readonly sections: readonly { name: string; text: string }[] } | { readonly form: "notice"; readonly summary: string };
   export function createUserMessage(input: CreateUserMessageInput): UserMessage;
 }

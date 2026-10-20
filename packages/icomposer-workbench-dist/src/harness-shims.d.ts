@@ -31,14 +31,6 @@ declare module "@deepseek-ai/cordis" {
   }
 }
 
-declare module "@deepseek-ai/dsh-client-runtime/client" {
-  export interface ClientContext {
-    effect(setup: () => unknown, label?: string): unknown;
-    locale: { register(ns: string, dict: unknown): unknown; bind(ns: string): (key: string) => string };
-    slots: { inject(slot: string, register: () => unknown): void; register(descriptor: unknown, component: unknown): unknown };
-    sessions?: unknown;
-  }
-}
 
 declare module "@deepseek-ai/dsh-workspace" {
   export interface Workspace { readonly id: string; readonly path: string; readonly title: string; status(): Promise<"ok" | "missing-dir">; }
@@ -49,8 +41,8 @@ declare module "@deepseek-ai/dsh-jobs" {
   export interface JobKindMap { bash: "bash"; subagent: "subagent"; "ici-build": "ici-build"; "ici-index": "ici-index" }
   export type JobKind = JobKindMap[keyof JobKindMap];
   export interface JobOutcome { status: "completed" | "killed" | "failed"; detail?: string; output?: string }
-  export interface JobHooks { cancel(reason?: string): void; done: Promise<JobOutcome>; readOutput?(): string }
-  export interface JobStart { kind: JobKind; label: string; outputLimitBytes?: number; owner?: unknown; run(): JobHooks }
+  export interface JobHooks { cancel(reason?: string): void; done: Promise<JobOutcome>;  }
+  export interface JobSpec { kind: JobKind; label: string; outputLimitBytes?: number; owner?: string; run(job: JobHandle): JobHooks }
 }
 
 declare module "@deepseek-ai/dsh-skill" {
@@ -89,3 +81,5 @@ declare module "@deepseek-ai/dsh-client-ui-primitives" {
   export const StateDot: unknown;
   export const Spinner: unknown;
 }
+
+declare module "@deepseek-ai/dsh-jobs" { export interface JobHandle { append(text: string, options?: { channel?: "log" | "stdout" | "stderr" }): void; updateProgress(line: string): void } }

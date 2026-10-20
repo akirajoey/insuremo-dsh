@@ -19,7 +19,7 @@ interface WorkspaceBindingLike {
   list(signal?: AbortSignal): Promise<{ ok: boolean; value?: readonly BindingEntry[] }>;
 }
 interface AgentLike {
-  readonly session?: { readonly header?: { readonly cwd?: string }; readonly events?: readonly unknown[] };
+  readonly session?: { readonly header?: { readonly cwd?: string }; snapshotEvents(): readonly unknown[] };
 }
 interface PreStepPayload { readonly agent?: AgentLike; readonly step?: number; readonly signal?: AbortSignal }
 interface Decision { readonly kind: string; readonly messages?: readonly unknown[] }
@@ -61,14 +61,13 @@ export class IciContextService extends Service {
     if (this.#disposed || input.signal?.aborted || workspace === undefined || !isSafeWorkspaceId(workspace.workspaceId)) return decision;
     const state: ContextState = workspace.binding !== null && workspace.binding !== undefined ? "bound" : "detected-pending";
     const digest = contextDigest(workspace.workspaceId, state, workspace.detectedIcomposer === true, ICI_CONTEXT_POLICY_VERSION);
-    const events = input.agent?.session?.events ?? [];
+    const events = input.agent?.session?.snapshotEvents() ?? [];
     if (!shouldInject(events, digest)) return decision;
     const text = renderContext(workspace.workspaceId, state);
     const message = createUserMessage({
       content: [{ type: "text", text }],
       source: {
-        kind: "plugin",
-        plugin: ICI_CONTEXT_PLUGIN,
+        kind: ICI_CONTEXT_PLUGIN,
         form: "snapshot",
         policyVersion: ICI_CONTEXT_POLICY_VERSION,
         workspaceId: workspace.workspaceId,
@@ -107,17 +106,17 @@ function shouldInject(events: readonly unknown[], digest: string, policyVersion 
   let previousVersion: string | undefined;
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const source = ((events[i] as { type?: unknown; data?: { source?: unknown } }).data?.source) as { kind?: unknown; plugin?: unknown; policyVersion?: unknown; sections?: readonly { name?: unknown; text?: unknown }[] } | undefined;
-    if ((events[i] as { type?: unknown }).type !== "user/message" || source?.kind !== "plugin" || source.plugin !== ICI_CONTEXT_PLUGIN) continue;
+    if ((events[i] as { type?: unknown }).type !== "user/message" || !sourceIs(source, ICI_CONTEXT_PLUGIN)) continue;
     last = i;
-    previousVersion = typeof source.policyVersion === "string" ? source.policyVersion : undefined;
-    const digestText = source.sections?.find(section => section.name === ICI_CONTEXT_DIGEST_SECTION)?.text;
+    previousVersion = typeof source?.policyVersion === "string" ? source?.policyVersion : undefined;
+    const digestText = source?.sections?.find(section => section.name === ICI_CONTEXT_DIGEST_SECTION)?.text;
     previous = typeof digestText === "string" ? digestText.match(/d=([0-9a-f]{16})/)?.[1] : undefined;
     break;
   }
   if (last < 0 || previousVersion !== policyVersion || previous !== digest) return true;
   for (let i = last + 1; i < events.length; i += 1) {
     const source = ((events[i] as { data?: { source?: unknown } }).data?.source) as { kind?: unknown; plugin?: unknown } | undefined;
-    if ((events[i] as { type?: unknown }).type === "user/message" && source?.kind === "plugin" && source.plugin === COMPACT_PLUGIN) return true;
+    if ((events[i] as { type?: unknown }).type === "user/message" && (source?.kind === "compact-checkpoint" || sourceIs(source, COMPACT_PLUGIN))) return true;
   }
   return false;
 }
@@ -129,4 +128,16 @@ tools:{graph:[ici_build,ici_status],inspect:[ici_query],explain:[ici_explain],as
 auth:{active_profile:verify}
 explain_results:{files:.metadata/icomposer/ici/explain/*/finals/*.json,fields:[apiAnalysis.technical,apiAnalysis.business,apiAnalysis.flow,apiAnalysis.evidence]}
 rules:schema authority;API discovery/business/technical: search/read newest matching schemaVersion 3 kind final(s) before source; source only if no accessible matching Final or the user asks for source verification.;never use prepare.json;no accessible Final:say so;do not invent one;Final verified=false/needsBusinessReview=true: disclose status;evidence workspace-relative;stale: ici_build->ici_explain;ici_explain prepares;card needs model;reference/earliest?;artifact paths:tools;Active Profile: Workbench;no CLI defaults`;
+}
+
+/** Recognize current producers and migrated legacy session rows. */
+function sourceIs(source: { kind?: unknown; plugin?: unknown } | undefined, producer: string): boolean {
+  return source?.kind === producer || source?.kind === `plugin:${producer}`
+    || (source?.kind === "plugin" && source.plugin === producer);
+}
+
+declare module "@deepseek-ai/dsh-llm" {
+  interface MessageSourceMap {
+    "icomposer-code-intelligence-context": { kind: "icomposer-code-intelligence-context"; policyVersion: string; workspaceId: string; state: string; digest: string; } & import("@deepseek-ai/dsh-llm").ContextFormed;
+  }
 }

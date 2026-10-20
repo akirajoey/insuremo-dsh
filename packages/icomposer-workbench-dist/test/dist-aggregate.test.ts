@@ -146,7 +146,7 @@ test("TASK-105 FIX: the aggregate registers the explain route prefix and serves 
 
     const applied = await dispatch(fx.routes, "POST", "/api/icomposer-workbench/ici/explain/settings", { "x-workbench-action": "1" }, { maxConcurrent: 8 });
     assert.equal(applied.status, 200);
-    assert.deepEqual(JSON.parse(applied.body), { ok: true, result: { maxConcurrent: 8, inFlight: 0 } });
+    assert.deepEqual(JSON.parse(applied.body), { ok: true, result: { maxConcurrent: 8, maxPromptBytes: 1048576, maxOutputTokens: 16384, inFlight: 0 } });
 
     const invalid = await dispatch(fx.routes, "POST", "/api/icomposer-workbench/ici/explain/settings", { "x-workbench-action": "1" }, { maxConcurrent: 0 });
     assert.equal(invalid.status, 422);

@@ -63,7 +63,8 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       get length() { return values.size; },
     });
     runtime = await SlotTestRuntime.create();
-    await runtime.declare({ "settings.plugin.item": { kind: "list", scope: "root" } });
+    runtime.ctx.provide("uiWorkspace", { connectWorkspace: vi.fn(async (id: string) => `session-of-${id}`), openSession: vi.fn() });
+    await runtime.declare({ "settings.section": { kind: "list", scope: "root" } });
     locale = new LocaleRuntime(runtime.ctx);
     runtime.ctx.provide("locale", locale);
     runtime.slots.installLocale(locale);
@@ -77,10 +78,10 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
 
 
 
-  it("registers the card under settings.plugin.item keyed by the insuremo namespace", () => {
-    const entries = runtime.slots.entries("settings.plugin.item");
+  it("registers the card under settings.section keyed by the insuremo namespace", () => {
+    const entries = runtime.slots.entries("settings.section");
     expect(entries).toHaveLength(1);
-    expect((entries[0]?.options as { key?: string } | undefined)?.key).toBe("insuremo");
+    expect(entries[0]?.options.id).toBe("insuremo");
     expect(entries[0]?.locale).toBe(NS);
     void resolveSlotLabel;
   });
@@ -88,7 +89,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
   it("collapsed PluginCard-style header (summary description, chevron, aria); expanding reveals regions (no Auth)", async () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     // collapsed header button: aria-expanded=false, name + summary description
     const header = await view.view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
     expect(header.getAttribute("aria-expanded")).toBe("false");
@@ -134,7 +135,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const unavailableView = { ...fixtureView, imo: { status: "error", code: "not-found", available: false, updateAvailable: false } };
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(unavailableView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     expect(await view.view.findByRole("button", { name: zh.cliInstall })).toBeTruthy();
     expect((await view.view.findAllByText(new RegExp(zh.imoUnavailable))).length).toBeGreaterThan(0);
@@ -146,7 +147,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
   it("TASK-076: install button is absent once the IMO CLI is available", async () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     await view.view.findByRole("button", { name: zh.cliUpdate });
     expect(view.view.queryAllByRole("button", { name: zh.cliInstall })).toHaveLength(0);
@@ -166,7 +167,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(unavailableView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     (await view.view.findByRole("button", { name: zh.cliInstall })).click();
     await vi.waitFor(() => {
@@ -189,7 +190,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
   it("TASK-079c: cold fast projection renders skeletons without install/upgrade buttons or a false 'not detected' summary, and auto-upgrades exactly once", async () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(coldFastView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await vi.waitFor(() => {
       const summary = view.container.querySelector('[data-summary="1"]');
       if (summary === null || !summary.textContent?.includes(zh.imoLoading)) throw new Error("cold summary not ready");
@@ -214,7 +215,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(String(input).includes("fast=0") ? fixtureView : coldFastView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     await vi.waitFor(() => {
       expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("fast=0"))).toHaveLength(1);
@@ -231,7 +232,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     let current = codes[0];
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse({ ...fixtureView, imo: { status: "error", code: current, available: false, updateAvailable: false } }));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     for (const code of codes) {
       // eslint-disable-next-line no-await-in-loop
@@ -257,7 +258,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(String(input).includes("fast=0") ? unavailableFullView : coldFastView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     await vi.waitFor(() => {
       expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("fast=0"))).toHaveLength(1);
@@ -274,7 +275,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(unavailableView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     (await view.view.findByRole("button", { name: zh.cliInstall })).click();
     expect(await view.view.findByText(/no-package-manager: neither npm nor pnpm/)).toBeTruthy();
@@ -285,7 +286,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const updateView = { ...fixtureView, imo: { ...fixtureView.imo, updateAvailable: true, target: "0.2.18" } };
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(updateView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     expect(await view.view.findByText(zh.imoUpdateAvailable)).toBeTruthy();
   });
 
@@ -300,7 +301,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const button = await view.view.findByRole("button", { name: zh.cliUpdate });
     button.click();
@@ -320,7 +321,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     (await view.view.findByRole("button", { name: zh.cliUpdate })).click();
     expect(await view.view.findByText(/pre-check-failed: could not read version/)).toBeTruthy();
@@ -330,7 +331,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const busyView = { ...fixtureView, imo: { ...fixtureView.imo, busy: true } };
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(busyView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const button = await view.view.findByRole("button", { name: new RegExp(zh.cliUpdating) });
     expect((button as HTMLButtonElement).disabled).toBe(true);
@@ -353,7 +354,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(latest);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     await view.view.findByText(zh.skillsUpdateAll);
     const toggle = view.view.getAllByRole("switch").find(el => el.getAttribute("aria-label")?.includes("imo-audit-helper"))!;
@@ -376,7 +377,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const toggle = await view.view.findByRole("switch", { name: `${zh.skillsToggle}: imo-audit-helper` });
     expect(view.container.querySelector('input[type="checkbox"]')).toBeNull();
@@ -401,7 +402,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const toggle = await view.view.findByRole("switch", { name: `${zh.skillsToggle}: imo-audit-helper` });
     toggle.click();
@@ -418,7 +419,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
   it("skill rows expose only name + native toggle, never description or remove action", async () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     await view.view.findByText(zh.skillsUpdateAll);
     expect(view.view.getByText("imo-audit-helper")).toBeTruthy();
@@ -465,7 +466,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(refreshed ? cleanView : issueView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     expect(await view.view.findByText(/Skills 异常/)).toBeTruthy();
     expect(view.container.querySelector('[data-skills-diagnostics="summary"]')?.textContent).toContain("格式异常 1");
@@ -489,7 +490,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const scanFailed = { ...fixtureView, skills: { ...fixtureView.skills, code: "scan-failed", diagnosticCount: 0, diagnostics: [] } };
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(scanFailed));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     expect(await view.view.findByText(zh.skillsScanFailed)).toBeTruthy();
     expect(view.container.querySelector('[data-skills-scan="failed"]')?.getAttribute("role")).toBe("alert");
@@ -516,7 +517,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
   it("TASK-079: fixed scenario selector exposes exactly the five allowlisted scenarios", async () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const select = await view.view.findByRole("combobox", { name: zh.skillsScenarioLabel });
     const options = [...select.querySelectorAll("option")].map(option => option.getAttribute("value"));
@@ -529,7 +530,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const emptyView = { ...fixtureView, skills: { ...fixtureView.skills, installed: 0, valid: 0, enabled: 0, disabled: 0, names: [], entries: [] } };
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(emptyView));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const select = await view.view.findByRole("combobox", { name: zh.skillsScenarioLabel });
     expect(select.querySelectorAll("option")).toHaveLength(5);
@@ -546,7 +547,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     (await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) })).click();
     const done = await view.view.findByText(new RegExp(zh.skillsScenarioDone));
@@ -566,7 +567,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const install = await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) });
     for (const status of ["failed", "partial-failure"]) {
@@ -594,7 +595,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     (await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsUpdateAll}\\b`) })).click();
     const alert = await vi.waitFor(() => {
@@ -626,7 +627,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
       return jsonResponse(fixtureView);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await expand(view);
     const install = await view.view.findByRole("button", { name: new RegExp(`^${zh.skillsScenarioInstall}`) });
     install.click();
@@ -649,7 +650,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
     locale.setLocale("en");
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     const header = await view.view.findByRole("button", { name: new RegExp(`${en.expand}: ${en.title}`) });
     header.click();
     expect(await view.view.findByRole("button", { name: new RegExp(`^${en.skillsScenarioInstall}`) })).toBeTruthy();
@@ -662,7 +663,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(fixtureView));
     vi.stubGlobal("fetch", fetchMock);
     locale.setLocale("en");
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     const header = await view.view.findByRole("button", { name: new RegExp(en.expand) });
     expect(header.getAttribute("aria-expanded")).toBe("false");
     expect(view.container.textContent).not.toContain(fixtureView.ici.embeddingUrl);
@@ -685,7 +686,7 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
     };
     const fetchMock: StubFetch = vi.fn(async () => jsonResponse(hostile));
     vi.stubGlobal("fetch", fetchMock);
-    const view = runtime.renderSlot("settings.plugin.item", {});
+    const view = runtime.renderSlot("settings.section", {});
     await view.view.findByRole("button", { name: new RegExp(zh.title) });
     await vi.waitFor(() => {
       const text = view.container.textContent ?? "";
@@ -695,9 +696,9 @@ describe("InsureMO Plugins card (TASK-039/041)", () => {
   });
 
   it("disposes the card registration", async () => {
-    expect(runtime.slots.entries("settings.plugin.item")).toHaveLength(1);
+    expect(runtime.slots.entries("settings.section")).toHaveLength(1);
     await feature.dispose();
-    expect(runtime.slots.entries("settings.plugin.item")).toHaveLength(0);
+    expect(runtime.slots.entries("settings.section")).toHaveLength(0);
   });
 });
 
@@ -790,8 +791,8 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     const sessions = {
       open: vi.fn((id: string) => { calls.push(`open:${id}`); }),
     };
-    const faces: DiagnosisFaces = { workspaces: workspaces as unknown as DiagnosisWorkspaces, sessions };
-    return { faces, workspaces, sessions, calls, items };
+    const faces: DiagnosisFaces = { workspaces: workspaces as unknown as DiagnosisWorkspaces, uiWorkspace: { connectWorkspace: workspaces.connectWorkspace, openSession: sessions.open } };
+    return { faces, workspaces, sessions, uiWorkspace: faces.uiWorkspace, calls, items };
   }
 
   it("the diagnosis button appears only in the failed state", async () => {
@@ -875,8 +876,8 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     await failed.view.findByText(zh.diagClipboardOnly);
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText.mock.calls[0]?.[0] as string).toContain("请分析失败原因并给出修复步骤。");
-    expect(faces.workspaces.connectWorkspace).not.toHaveBeenCalled();
-    expect(faces.sessions.open).not.toHaveBeenCalled();
+    expect(faces.uiWorkspace.connectWorkspace).not.toHaveBeenCalled();
+    expect(faces.uiWorkspace.openSession).not.toHaveBeenCalled();
     expect(failed.view.getByRole("button", { name: zh.diagCopy })).toBeTruthy();
   });
 
@@ -888,7 +889,7 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     await failed.view.findByText(zh.diagClipboardOnly);
     expect(faces.workspaces.create).toHaveBeenCalledTimes(1);
-    expect(faces.sessions.open).not.toHaveBeenCalled();
+    expect(faces.uiWorkspace.openSession).not.toHaveBeenCalled();
     expect(writeText).toHaveBeenCalledTimes(1);
   });
 
@@ -912,12 +913,12 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     // Second click: the Workspace is found by path (restart reuse) — no
     // second create, no rename; the same blank session reconnects.
     failed.view.getByRole("button", { name: zh.diagButton }).click();
-    await vi.waitFor(() => { expect(faces.workspaces.connectWorkspace).toHaveBeenCalledTimes(2); });
+    await vi.waitFor(() => { expect(faces.uiWorkspace.connectWorkspace).toHaveBeenCalledTimes(2); });
     settleDiagnosisPrefill("session-of-ws-1", "written");
     await failed.view.findByText(zh.diagPrefilled);
     expect(faces.workspaces.create).toHaveBeenCalledTimes(1);
     expect(faces.workspaces.rename).toHaveBeenCalledTimes(1);
-    expect(faces.sessions.open).toHaveBeenCalledTimes(2);
+    expect(faces.uiWorkspace.openSession).toHaveBeenCalledTimes(2);
     // Concurrent ensures share one in-flight attempt: a single create.
     const slowItems: Array<{ workspaceId: string; path?: string }> = [];
     const slow = {
@@ -1124,7 +1125,7 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
       get length() { return storageValues.size; },
     });
     const switchRuntime = await SlotTestRuntime.create();
-    await switchRuntime.declare({ "settings.plugin.item": { kind: "list", scope: "root" } });
+    await switchRuntime.declare({ "settings.section": { kind: "list", scope: "root" } });
     const switchLocale = new LocaleRuntime(switchRuntime.ctx);
     switchRuntime.ctx.provide("locale", switchLocale);
     switchRuntime.slots.installLocale(switchLocale);
@@ -1138,10 +1139,11 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     // a recording spy — the hand-off contract under test is the CALL, and the
     // workspaces double proves reuse independently.
     const openSpy = vi.fn((id: string) => { void id; });
-    (switchRuntime.sessions as unknown as Record<string, unknown>).open = openSpy;
+    const connectSpy = vi.fn(async (id: string) => `session-of-${id}`);
+    switchRuntime.ctx.provide("uiWorkspace", { connectWorkspace: connectSpy, openSession: openSpy });
     const switchFeature = await switchRuntime.mount({ inject, apply });
     try {
-      const view = switchRuntime.renderSlot("settings.plugin.item", {});
+      const view = switchRuntime.renderSlot("settings.section", {});
       // zh (pinned zh-CN): enter the failed state and diagnose in Chinese.
       const toggle = await view.view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
       toggle.click();
@@ -1196,9 +1198,9 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
       // always the connectWorkspace-resolved session id.
       const workspaceCalls = switchRuntime.workspaces.calls.filter(call => call.method === "create");
       expect(workspaceCalls).toHaveLength(0);
-      const connectCalls = switchRuntime.workspaces.calls.filter(call => call.method === "connectWorkspace");
+      const connectCalls = connectSpy.mock.calls;
       expect(connectCalls).toHaveLength(3);
-      for (const call of connectCalls) expect(call.args[0]).toBe("ws-diagnosis");
+      for (const call of connectCalls) expect(call[0]).toBe("ws-diagnosis");
     } finally {
       await switchFeature.dispose();
       await switchRuntime.dispose();
@@ -1212,8 +1214,8 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     await failed.view.findByText(zh.diagNoData);
     expect(faces.workspaces.create).not.toHaveBeenCalled();
-    expect(faces.workspaces.connectWorkspace).not.toHaveBeenCalled();
-    expect(faces.sessions.open).not.toHaveBeenCalled();
+    expect(faces.uiWorkspace.connectWorkspace).not.toHaveBeenCalled();
+    expect(faces.uiWorkspace.openSession).not.toHaveBeenCalled();
   });
 });
 
@@ -1234,7 +1236,7 @@ describe("diagnosis hand-off + prefill entry units (TASK-088)", () => {
       rename: vi.fn(async () => undefined),
     };
     const open = vi.fn();
-    const handoff = await handOffDiagnosis("TEXT", "/d", { workspaces: workspaces as unknown as DiagnosisWorkspaces, sessions: { open } }, "安装诊断");
+    const handoff = await handOffDiagnosis("TEXT", "/d", { workspaces: workspaces as unknown as DiagnosisWorkspaces, uiWorkspace: { connectWorkspace: workspaces.connectWorkspace, openSession: open } }, "安装诊断");
     expect(handoff).toEqual({ kind: "opened", sessionId: "session-42" });
     expect(open).toHaveBeenCalledWith("session-42");
     expect(peekDiagnosisPrefill("session-42")).toBe("TEXT");

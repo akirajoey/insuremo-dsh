@@ -1,4 +1,4 @@
-import type { JobView } from "@deepseek-ai/dsh-client-runtime/client";
+import type { JobView } from "@deepseek-ai/dsh-jobs/view";
 
 /** Four-state presentation projection owned by the Workbench node. */
 export type WorkbenchJobStatus = "queued" | "running" | "done" | "failed";

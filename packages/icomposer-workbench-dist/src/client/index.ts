@@ -6,7 +6,7 @@
  * three applies over one ClientContext is exactly what three separate
  * bundles would do, minus two extra loader entries.
  */
-import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
+import type { Context } from "@deepseek-ai/cordis";
 import { apply as settingsApply, inject as settingsInject } from "../../../ui-insuremo-settings/src/client/index.ts";
 import { apply as statusApply, inject as statusInject } from "../../../ui-insuremo-status/src/client/index.ts";
 import { apply as jobsApply, inject as jobsInject } from "../../../ui-workbench-jobs/src/client/index.ts";
@@ -20,7 +20,7 @@ import { apply as jobsApply, inject as jobsInject } from "../../../ui-workbench-
 export const inject = [...new Set([...settingsInject, ...statusInject, ...jobsInject])];
 
 /** Register dictionaries + slot contributions for all three UI blocks. */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
   settingsApply(ctx);
   statusApply(ctx);
   jobsApply(ctx);

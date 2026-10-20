@@ -16,8 +16,8 @@ import { buildDiagnosisText, handOffDiagnosis, waitForDiagnosisPrefill, type Dia
 import type { InsuremoLocaleKey } from "./locales.ts";
 import css from "./InsuremoCard.module.css";
 
-/** Props supplied by the Plugins tab card slot owner (settings.plugin.item). */
-export type InsuremoCardProps = PropsRuntime<"settings.plugin.item">
+/** Props supplied by the Plugins tab card slot owner (settings.section). */
+export type InsuremoCardProps = PropsRuntime<"settings.section">
   & PropsLocale<"settings.insuremo">
   & { /** Narrow sessions face for the diagnosis hand-off (wired by apply; tests inject a double). */
       diagnosisFaces?: DiagnosisFaces };

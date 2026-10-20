@@ -72,8 +72,10 @@ overview 200 断言持续守护。开发调试请使用分发包安装路径。
 
 ## 运行要求
 
-- Harness 基线:85d8062c8a(本地 master,含未上游提交 TASK-080 8e53387839/TASK-081 c6f268060c/TASK-082 85d8062c8a,需先在本地克隆同步这三个提交);peer 版本声明为
-  `*`,在基线内解析,超出基线未经测试。
+- Harness 基线：上游 `687f282e86`，npm `@deepseek-ai/dsh@0.2.1-rc.2`。
+  `engines.dsh` 限定为 `>=0.2.1-rc.2 <0.3.0-0`；peer 由宿主提供。
+- InsureMO 卡片位于 Settings 独立分区；诊断使用 `uiWorkspace` 导航和原生输入草稿能力。
+- 隔离升级开发与测试见仓库 `docs/dsh-0.2.1-migration.md`。不要覆盖现有 `~/.dsh`。
 - react ^18.2.0(客户端 UI)。
 - Host Web 组合提供 `directoryPicker`；解释卡片的原生文件选择使用 Harness 的 `@deepseek-ai/dsh-native-command`（argv-only、无 shell、支持 abort）。
 - `zod` 已内联进产物,无需单独安装。

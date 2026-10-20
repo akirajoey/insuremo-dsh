@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import {
-  IconApiOutline14,
+  IconApiOutlineRegular,
   StateDot,
   type StateDotState,
 } from "@deepseek-ai/dsh-client-ui-primitives";
@@ -28,7 +28,7 @@ export function JobNode({ node, t }: JobNodeProps): ReactNode {
   const status = t(`status.${data.status}` as WorkbenchJobLocaleKey);
   return (
     <div className={css.row} data-job-id={data.jobId} data-job-status={data.status}>
-      <IconApiOutline14 className={css.icon} size={14} aria-hidden="true" />
+      <IconApiOutlineRegular className={css.icon} size={14} aria-hidden="true" />
       <span className={css.kind}>{data.kindLabel}</span>
       <span className={css.status} role="status" aria-label={status}>
         <StateDot state={dotState(data.status)} />

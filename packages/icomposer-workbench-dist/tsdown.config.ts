@@ -1,3 +1,4 @@
+import { brandAssetsPlugin } from "../../scripts/brand-assets-plugin.mjs";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { canonicalizeCssSourceRegions } from "../../scripts/dist-payload.mjs";
@@ -8,7 +9,7 @@ import { clientBundle } from "../../../deepseek-harness/packages/client/tsdown.c
  * react external as peers; @icomposer/* + zod inlined) and lib/client.js
  * (closure-factory client aggregate for the three UI blocks).
  */
-const base = clientBundle("@icomposer/workbench", ["src/index.ts"], {
+const base = clientBundle(import.meta.dirname, ["src/index.ts"], {
   hostPhase: true,
 });
 const sanitizeCssRegion = {
@@ -26,8 +27,7 @@ const sanitizeCssRegion = {
 /** Keep normal PNG imports as archive-served files in the aggregate too. */
 export default (inlineConfig: Parameters<typeof base>[0]) => base(inlineConfig).map(config => ({
   ...config,
-  loader: { ...config.loader, ".png": "asset" },
-  plugins: [...(config.plugins ?? []), sanitizeCssRegion],
+  plugins: [brandAssetsPlugin(), ...(config.plugins ?? []), sanitizeCssRegion],
   outputOptions: {
     ...config.outputOptions,
     assetFileNames: "assets/[name][extname]",

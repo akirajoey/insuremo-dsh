@@ -26,9 +26,6 @@
       "@deepseek-ai/dsh-storage": [
         "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
       ],
-      "@deepseek-ai/dsh-client-runtime/client": [
-        "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
-      ],
       "@deepseek-ai/dsh-client-locale/client": [
         "packages/ui-insuremo-status/src/harness-shims.d.ts"
       ],
@@ -38,9 +35,6 @@
       "@deepseek-ai/dsh-client-ui-settings/client": [
         "packages/ui-insuremo-settings/src/harness-shims.d.ts"
       ],
-      "@deepseek-ai/dsh-client-ui-conversation/client": [
-        "packages/ui-workbench-jobs/src/harness-shims.d.ts"
-      ],
       "@deepseek-ai/schemastery": [
         "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
       ],
@@ -49,6 +43,9 @@
       ],
       "@deepseek-ai/dsh-client-ui-primitives": [
         "packages/icomposer-workbench-dist/src/harness-shims.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-chat/client": [
+        "packages/ui-workbench-jobs/src/harness-shims.d.ts"
       ]
     }
   },

@@ -2,7 +2,7 @@ declare module "@deepseek-ai/cordis" {
   export class Service { static readonly init: unique symbol; protected readonly ctx: Context; constructor(ctx: Context, name: string); }
   export class Context {
     subprocess: import("@deepseek-ai/dsh-subprocess").SubprocessRuntime;
-    readonly jobs: { start(spec: import("@deepseek-ai/dsh-jobs").JobStart): string };
+    readonly jobs: { start(spec: import("@deepseek-ai/dsh-jobs").JobSpec): string };
     readonly tools: { register(definition: unknown): () => void };
     readonly systemPrompt: { section(section: { readonly name: string; readonly order: number; readonly text: string }): () => void };
     get<T = unknown>(name: string): T | undefined;
@@ -33,17 +33,17 @@ declare module "@deepseek-ai/dsh-jobs" {
   export interface JobHooks {
     cancel(reason?: string): void;
     done: Promise<JobOutcome>;
-    readOutput?(): string;
   }
-  export interface JobStart {
+  export interface JobSpec {
     kind: JobKind;
     label: string;
     outputLimitBytes?: number;
-    owner?: unknown;
-    run(): JobHooks;
+    owner?: string;
+    run(job: JobHandle): JobHooks;
   }
 }
 declare module "@deepseek-ai/dsh-llm" {
+  export type ContextFormed = { readonly form?: never } | { readonly form: "snapshot"; readonly sections: readonly { name: string; text: string }[] } | { readonly form: "notice"; readonly summary: string };
   export function createUserMessage(input: unknown): any;
 }
 declare module "@deepseek-ai/dsh-tools" {
@@ -100,3 +100,5 @@ declare module "@deepseek-ai/dsh-subprocess" {
     }): SubprocessHandle;
   }
 }
+
+declare module "@deepseek-ai/dsh-jobs" { export interface JobHandle { append(text: string, options?: { channel?: "log" | "stdout" | "stderr" }): void; updateProgress(line: string): void } }

@@ -1,13 +1,13 @@
 /**
  * TASK-088 client inject-contract regression.
  *
- * The production crash class: `InsuremoCardWithRuntime` reads `ctx.sessions`
+ * The production crash class: `InsuremoCardWithRuntime` reads `ctx.uiWorkspace`
  * and `ctx.workspaces` off the client context at RENDER time (slot owner props
  * supply no runtime). cordis guards every ctx property read against the
  * plugin's declared `inject` list — an undeclared service access throws
  * `cannot get property "workspaces" without inject`, which crashes the
  * settings card entry after dispatch (`slot entry crashed in
- * 'settings.plugin.item'`). SlotTestRuntime's ctx does not enforce that guard
+ * 'settings.section'`). SlotTestRuntime's ctx does not enforce that guard
  * (a live harness does), so these tests pin the CONTRACT statically: the
  * declared inject must cover every ctx service the wiring dereferences, and
  * the aggregate bundle's derived union must swallow each sub-plugin's own
@@ -47,7 +47,7 @@ describe("client inject contract (TASK-088)", () => {
       expect(declared.has(service), `ctx.${service} is dereferenced but not declared in settings inject`).toBe(true);
     }
     // Spot-pin the two render-time faces that previously crashed prod.
-    expect(declared.has("sessions")).toBe(true);
+    expect(declared.has("uiWorkspace")).toBe(true);
     expect(declared.has("workspaces")).toBe(true);
     expect(declared.has("slots")).toBe(true);
     expect(declared.has("locale")).toBe(true);
@@ -64,7 +64,7 @@ describe("client inject contract (TASK-088)", () => {
       ...(jobs.inject as readonly string[]),
     ])].sort();
     expect([...(aggregate.inject as readonly string[])].sort()).toEqual(expected);
-    for (const required of ["sessions", "workspaces", "slots", "locale"]) {
+    for (const required of ["sessions", "workspaces", "uiWorkspace", "slots", "locale"]) {
       expect(aggregate.inject).toContain(required);
     }
   });
@@ -81,11 +81,11 @@ describe("client inject contract (TASK-088)", () => {
     try {
       execFileSync("tar", ["-xzf", tgz, "-C", stage, "--strip-components=1"]);
       const client = readFileSync(join(stage, "lib/client.js"), "utf8");
-      // The settings sub-union precedes the settings.plugin.item registration
+      // The settings sub-union precedes the settings.section registration
       // and the InsuremoCardWithRuntime wrapper in the bundle.
-      const beforeCard = client.slice(0, client.indexOf("settings.plugin.item"));
+      const beforeCard = client.slice(0, client.indexOf("settings.section"));
       expect(beforeCard.includes('"workspaces"')).toBe(true);
-      expect(beforeCard.includes('"sessions"')).toBe(true);
+      expect(beforeCard.includes('"uiWorkspace"')).toBe(true);
       expect(beforeCard.includes('"slots"')).toBe(true);
       expect(beforeCard.includes('"locale"')).toBe(true);
     } finally {

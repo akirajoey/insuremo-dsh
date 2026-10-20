@@ -10,8 +10,8 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
   };
 }
 
-declare module "@deepseek-ai/dsh-client-runtime/client" {
-  interface ClientContext {
+declare module "@deepseek-ai/cordis" {
+  interface Context {
     sessions: object;
     locale: {
       register(
@@ -26,17 +26,10 @@ declare module "@deepseek-ai/dsh-client-runtime/client" {
     };
     effect(setup: () => void | (() => void), label?: string): unknown;
   }
-
-  interface JobView {
-    id: string;
-    kind: string;
-    label: string;
-    status: "running" | "stopping" | "completed" | "killed" | "failed";
-  }
 }
 
 declare module "@deepseek-ai/dsh-client-locale/client" {}
-declare module "@deepseek-ai/dsh-client-ui-conversation/client" {
+declare module "@deepseek-ai/dsh-client-ui-chat/client" {
   interface ChatNodeDataMap {}
 }
 declare module "@deepseek-ai/dsh-client-ui-primitives" {
@@ -47,9 +40,18 @@ declare module "@deepseek-ai/dsh-client-ui-primitives" {
     size?: number;
     className?: string;
   }): ReactNode;
-  export function IconApiOutline14(props: {
+  export function IconApiOutlineRegular(props: {
     size?: number;
     className?: string;
     "aria-hidden"?: string;
   }): ReactNode;
+}
+
+declare module "@deepseek-ai/dsh-jobs/view" {
+  interface JobView {
+    id: string;
+    kind: string;
+    label: string;
+    status: "running" | "stopping" | "completed" | "killed" | "failed";
+  }
 }

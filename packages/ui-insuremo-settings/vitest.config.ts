@@ -1,3 +1,4 @@
+import { harnessSourceAliases } from "../../scripts/harness-test-aliases.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -10,13 +11,14 @@ export default defineConfig({
   plugins: [tsconfigPaths({ projects: [resolve(harnessRoot, "tsconfig.base.json")] })],
   resolve: {
     alias: [
+      ...harnessSourceAliases(harnessRoot),
       {
         find: "@deepseek-ai/dsh-client-locale/client",
         replacement: resolve(harnessRoot, "packages/client/locale/src/client/index.ts"),
       },
       {
-        find: "@deepseek-ai/dsh-client-runtime/client",
-        replacement: resolve(harnessRoot, "packages/client/runtime/src/client/index.ts"),
+        find: "@deepseek-ai/dsh-client-ui-renderer/client",
+        replacement: resolve(harnessRoot, "packages/client/ui-renderer/src/client/index.ts"),
       },
       {
         find: "@deepseek-ai/dsh-client-ui-settings/client",
@@ -34,6 +36,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    setupFiles: [resolve(packageRoot, "../../test/setup-browser.ts")],
     environmentOptions: { jsdom: { url: "http://localhost/" } },
     include: ["test/**/*.test.tsx"],
   },

@@ -56,7 +56,7 @@ export interface PreStepListeners {
   on(event: "agent/pre-step", listener: (payload: unknown, next: unknown) => Promise<unknown>, options?: { prepend?: boolean }): () => boolean;
 }
 export interface ProfilePreStepPayload {
-  agent: { id?: string; session: { events: readonly unknown[] } };
+  agent: { id?: string; session: { id: string; snapshotEvents(): readonly unknown[] } };
   turn: number;
   step: number;
   signal?: { aborted: boolean };
@@ -119,17 +119,17 @@ export function eventPolicyVersion(event: unknown): string | undefined {
   const data = (event as { data?: unknown }).data;
   if (typeof data !== "object" || data === null) return undefined;
   const source = (data as { source?: { kind?: unknown; plugin?: unknown; policyVersion?: unknown } }).source;
-  return source?.kind === "plugin" && source.plugin === PROFILE_CONTEXT_PLUGIN && typeof source.policyVersion === "string"
-    ? source.policyVersion : undefined;
+  return sourceIs(source, PROFILE_CONTEXT_PLUGIN) && typeof source?.policyVersion === "string"
+    ? source?.policyVersion : undefined;
 }
 
 export function eventDigest(event: unknown): string | undefined {
   const data = (event as { data?: unknown }).data;
   if (typeof data !== "object" || data === null) return undefined;
   const source = (data as { source?: { kind?: unknown; plugin?: unknown; sections?: readonly { name?: unknown; text?: unknown }[] } }).source;
-  if (source?.kind !== "plugin" || source.plugin !== PROFILE_CONTEXT_PLUGIN) return undefined;
-  if (!Array.isArray(source.sections)) return undefined;
-  for (const section of source.sections) {
+  if (!sourceIs(source, PROFILE_CONTEXT_PLUGIN)) return undefined;
+  if (!Array.isArray(source?.sections)) return undefined;
+  for (const section of source?.sections) {
     if (section?.name === PROFILE_DIGEST_SECTION && typeof section.text === "string") {
       const match = section.text.match(/d=([0-9a-f]{8})/);
       if (match !== null) return match[1];
@@ -144,19 +144,19 @@ function compactAfter(events: readonly unknown[], fromIndex: number): boolean {
     const event = events[i] as { type?: unknown; data?: unknown };
     if (event?.type !== "user/message") continue;
     const src = (event.data as { source?: unknown } | undefined)?.source as { kind?: unknown; plugin?: unknown } | undefined;
-    if (src?.kind === "plugin" && src.plugin === COMPACT_PLUGIN) return true;
+    if (src?.kind === "compact-checkpoint" || sourceIs(src, COMPACT_PLUGIN)) return true;
   }
   return false;
 }
 
 /** The compact-checkpoint source shape used by the real compaction system. */
 export interface CompactCheckpointSource {
-  readonly kind: "plugin";
-  readonly plugin: typeof COMPACT_PLUGIN;
+  readonly kind: "compact-checkpoint";
+  readonly compactionId: string;
 }
 /** Build the exact real compaction checkpoint source (parity with command-compact). */
-export function compactCheckpointSource(): CompactCheckpointSource {
-  return { kind: "plugin", plugin: COMPACT_PLUGIN };
+export function compactCheckpointSource(compactionId: string): CompactCheckpointSource {
+  return { kind: "compact-checkpoint", compactionId };
 }
 
 /**
@@ -178,8 +178,7 @@ export function decideProfileContext(events: readonly unknown[], profile: Insure
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i] as { type?: unknown; data?: { source?: { kind?: unknown; plugin?: unknown } } } | undefined;
     if (ev?.type === "user/message"
-      && ev.data?.source?.kind === "plugin"
-      && ev.data.source.plugin === PROFILE_CONTEXT_PLUGIN) {
+      && sourceIs(ev.data?.source, PROFILE_CONTEXT_PLUGIN)) {
       lastIndex = i;
       lastDigest = eventDigest(events[i]);
       lastPolicyVersion = eventPolicyVersion(events[i]);
@@ -247,8 +246,8 @@ export class ImoProfileContextService extends Service {
       if (decision.kind === "reject" || p.signal?.aborted === true) return decision;
       // only inject on the first step of a turn
       if (p.step !== 1) return decision;
-      const events = p.agent.session.events ?? [];
-      const profile = await this.resolver(p.agent?.id).catch(() => undefined);
+      const events = p.agent.session.snapshotEvents();
+      const profile = await this.resolver(p.agent.session.id).catch(() => undefined);
       if (profile === undefined) return decision;
       const plan = decideProfileContext(events, profile);
       if (!plan.inject) return decision;
@@ -259,8 +258,7 @@ export class ImoProfileContextService extends Service {
       const message = createUserMessage({
         content: [{ type: "text", text }],
         source: {
-          kind: "plugin",
-          plugin: PROFILE_CONTEXT_PLUGIN,
+          kind: PROFILE_CONTEXT_PLUGIN,
           form: "snapshot",
           policyVersion: PROFILE_POLICY_VERSION,
           sections: [
@@ -281,5 +279,17 @@ export class ImoProfileContextService extends Service {
     for (const disposer of this.#disposers) { try { disposer(); } catch { /* already detached */ } }
     this.#disposers = [];
     this.#attached = false;
+  }
+}
+
+/** Recognize current producers and migrated legacy session rows. */
+function sourceIs(source: { kind?: unknown; plugin?: unknown } | undefined, producer: string): boolean {
+  return source?.kind === producer || source?.kind === `plugin:${producer}`
+    || (source?.kind === "plugin" && source.plugin === producer);
+}
+
+declare module "@deepseek-ai/dsh-llm" {
+  interface MessageSourceMap {
+    "icomposer-current-profile": { kind: "icomposer-current-profile"; policyVersion: string; } & import("@deepseek-ai/dsh-llm").ContextFormed;
   }
 }

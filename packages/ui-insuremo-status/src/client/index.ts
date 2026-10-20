@@ -1,5 +1,5 @@
 import type {} from "@deepseek-ai/dsh-client-locale/client";
-import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
+import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
 import { WorkspaceHealth } from "./WorkspaceHealth.tsx";
@@ -34,7 +34,7 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
 export const inject = ["slots", "locale"];
 
 /** Register the static localized status badge in the sidebar footer. */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
 	ctx.effect(
 		() => ctx.locale.register(NS, { zh, en }),
 		"ui-insuremo-status: dictionaries",

@@ -1,6 +1,6 @@
 import type {} from "@deepseek-ai/dsh-client-locale/client";
-import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
-import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type { Context } from "@deepseek-ai/cordis";
+import type {} from "@deepseek-ai/dsh-client-ui-chat/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
 import { JobNode, type JobNodeProps } from "./JobNode.tsx";
 import { IciExplainToolview } from "./IciExplainToolview.tsx";
@@ -15,7 +15,7 @@ export type { WorkbenchJobLocaleKey } from "./locales.ts";
 /** Locale namespace contributed by the Workbench job conversation node. */
 export const NS = "conversation.workbenchJob";
 
-declare module "@deepseek-ai/dsh-client-ui-conversation/client" {
+declare module "@deepseek-ai/dsh-client-ui-chat/client" {
   interface ChatNodeDataMap {
     "workbench-job": WorkbenchJobData;
   }
@@ -35,7 +35,7 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
 export const inject = ["slots", "locale", "sessions"];
 
 /** Register dictionaries plus the generic Job node and interactive ICI toolview. */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), "ui-workbench-jobs: dictionaries");
   ctx.slots.inject("conversation.chat.node", () => ctx.slots.register({
     name: "conversation.chat.node",

@@ -361,7 +361,8 @@ describe("ProfilePicker workspace target (TASK-094)", () => {
   });
 
   it("captures the current workspace on expansion and preserves it in selection", async () => {
-    await runtime.sessions.add({ id: "session-a", summary: { cwd: "/project-a" } });
+    const sessionA = await runtime.sessions.add({ id: "session-a", summary: { cwd: "/project-a" } });
+    const mainView = runtime.sessions.retain(sessionA, { source: "mainView" });
     await runtime.workspaces.update(draft => {
       draft.items = [{ workspaceId: "workspace-a", title: "Project A", path: "/project-a", sessionIds: ["session-a"] }];
     });
@@ -397,7 +398,8 @@ describe("ProfilePicker workspace target (TASK-094)", () => {
   });
 
   it("falls back to the global key for an ungrouped current session", async () => {
-    await runtime.sessions.add({ id: "session-u", summary: { cwd: "/ungrouped" } });
+    const sessionU = await runtime.sessions.add({ id: "session-u", summary: { cwd: "/ungrouped" } });
+    runtime.sessions.retain(sessionU, { source: "mainView" });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toContain("/overview?fast=1");
       expect(String(input)).not.toContain("workspaceId=");
@@ -440,8 +442,9 @@ describe("ProfilePicker stale workspace responses (TASK-094)", () => {
   });
 
   it("drops a late response captured for the previous workspace", async () => {
-    await runtime.sessions.add({ id: "session-a", summary: { cwd: "/project-a" } });
-    await runtime.sessions.add({ id: "session-b", summary: { cwd: "/project-b" } }, { current: false });
+    const sessionA = await runtime.sessions.add({ id: "session-a", summary: { cwd: "/project-a" } });
+    const mainView = runtime.sessions.retain(sessionA, { source: "mainView" });
+    const sessionB = await runtime.sessions.add({ id: "session-b", summary: { cwd: "/project-b" } });
     await runtime.workspaces.update(draft => {
       draft.items = [
         { workspaceId: "workspace-a", title: "Project A", path: "/project-a", sessionIds: ["session-a"] },
@@ -464,7 +467,9 @@ describe("ProfilePicker stale workspace responses (TASK-094)", () => {
     (await view.view.findByRole("button", { name: new RegExp(zh.label) })).click();
     await vi.waitFor(() => expect(pendingA.length).toBeGreaterThan(0));
 
-    await runtime.sessions.setCurrent("session-b");
+    mainView.release();
+    runtime.sessions.retain(sessionB, { source: "mainView" });
+    await runtime.flush();
     await vi.waitFor(() => expect(view.view.getByRole("button", { name: /profile-b/ })).toBeTruthy());
     for (const resolve of pendingA) {
       resolve(jsonResponse({ auth: { profiles: [{ name: "stale-profile", sourceScope: "workspace", isActive: true }], activeProfileName: "stale-profile" } }));

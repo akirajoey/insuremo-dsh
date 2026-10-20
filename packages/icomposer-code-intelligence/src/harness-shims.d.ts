@@ -15,7 +15,7 @@ declare module "@deepseek-ai/dsh-workspace" {
 }
 declare module "@deepseek-ai/dsh-native-command" {
   export type NativeCommandRunner = (command: string, args: readonly string[], signal: AbortSignal) => Promise<{ stdout: string; stderr: string }>;
-  export const runNativeCommand: NativeCommandRunner;
+  export function runNativeCommand(command: string, args: readonly string[], signal: AbortSignal, visibility: "visible" | "hidden"): Promise<{ stdout: string; stderr: string }>;
 }
 declare module "@deepseek-ai/dsh-subprocess" {
   export interface SubprocessOutputRead { text: string; nextOffset: number; lossy: boolean; spillPath?: string; }
@@ -52,16 +52,15 @@ declare module "@deepseek-ai/dsh-jobs" {
   export interface JobHooks {
     cancel(reason?: string): void;
     done: Promise<JobOutcome>;
-    readOutput?(): string;
   }
-  export interface JobStart {
+  export interface JobSpec {
     kind: JobKind;
     label: string;
     outputLimitBytes?: number;
-    owner?: unknown;
-    run(): JobHooks;
+    owner?: string;
+    run(job: JobHandle): JobHooks;
   }
-  export interface JobRegistry { start(spec: JobStart): string; }
+  export interface JobRegistry { start(spec: JobSpec): string; }
 }
 
 declare module "@deepseek-ai/dsh-storage-domain" {
@@ -79,3 +78,5 @@ declare module "@deepseek-ai/dsh-storage-domain" {
   export function defineDomain<S extends DomainSpec>(spec: S): S;
   export function domainTable<K extends string, V>(schema: unknown): DomainTableSpec<K, V>;
 }
+
+declare module "@deepseek-ai/dsh-jobs" { export interface JobHandle { append(text: string, options?: { channel?: "log" | "stdout" | "stderr" }): void; updateProgress(line: string): void } }

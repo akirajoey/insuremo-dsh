@@ -14,9 +14,11 @@ test("dist package metadata declares the full dsh contract", async () => {
   assert.equal(manifest.dsh.bundle.patch, "./cordis.patch.yml");
   assert.equal(manifest.dsh.client.platform, "web");
   const clientInject = manifest.dsh.client.inject;
-  for (const service of ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-tool", "@deepseek-ai/dsh-client-ui-primitives"]) {
+  for (const service of ["@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-session", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-ui-chat", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-tool", "@deepseek-ai/dsh-client-ui-primitives"]) {
     assert.ok(clientInject.includes(service), `client inject missing ${service}`);
   }
+  assert.equal(clientInject.includes("@deepseek-ai/dsh-client-runtime"), false);
+  assert.equal(manifest.engines.dsh, ">=0.2.1-rc.2 <0.3.0-0");
   // exports cover the loader contract
   for (const key of [".", "./client", "./cordis.patch.yml", "./package.json"]) {
     assert.ok(manifest.exports[key] !== undefined, `exports missing ${key}`);

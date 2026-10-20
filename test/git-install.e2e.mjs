@@ -11,7 +11,7 @@
  *     repo only — the real repository is never touched by git).
  *  2. Create an isolated DSH home whose absolute path contains spaces and
  *     CJK characters (Windows-safe by construction), then run the stock
- *     `dsh` CLI to install the rc.7 web runtime deps and the plugin via the
+ *     `dsh` CLI to install the 0.2.1-rc.2 web runtime deps and the plugin via the
  *     pinned selector `git+file://…#<commit-sha>&path:git-dist/icomposer-workbench`
  *     (identical selector parsing to the documented `github:…#<sha>&path:…`).
  *  3. Assert: the install resolves to a real physical copy INSIDE the
@@ -22,14 +22,13 @@
  *     reconciliation, and payload parity with the tracked directory.
  *
  * Stock dsh resolution: DSH_STOCK_DSH_BIN overrides; otherwise the sibling
- * checkout's node_modules (dev) or `pnpm add @deepseek-ai/dsh@0.1.0-rc.7`
+ * checkout's node_modules (dev) or `pnpm add @deepseek-ai/dsh@0.1.0-0.2.1-rc.2`
  * into a temp prefix (CI).
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const gitDist = join(repoRoot, "git-dist", "icomposer-workbench");
@@ -46,18 +45,17 @@ if (!existsSync(gitDist)) {
   process.exit(1);
 }
 
-const work = mkdtempSync(join(tmpdir(), "git-install-e2e-"));
+const isolatedRoot = join(repoRoot, ".dsh-home");
+if (!repoRoot.includes("/upgrade-dsh-0.2.1/")) throw new Error("Use the isolated upgrade worktree");
+mkdirSync(isolatedRoot, { recursive: true });
+const work = mkdtempSync(join(isolatedRoot, "git-install-e2e-"));
 const home = join(work, "dsh e2e 中文 目录", "home"); // spaces + CJK, Windows-safe charset
 
 function stockDshBin() {
-  if (process.env.DSH_STOCK_DSH_BIN !== undefined && process.env.DSH_STOCK_DSH_BIN !== "") return process.env.DSH_STOCK_DSH_BIN;
-  const sibling = resolve(repoRoot, "..", "insuremo-dsh-desktop", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-  if (existsSync(sibling)) return sibling;
-  const prefix = join(work, "stock-dsh");
-  mkdirSync(prefix, { recursive: true });
-  writeFileSync(join(prefix, "package.json"), JSON.stringify({ name: "stock-dsh-holder", private: true }));
-  run("pnpm", ["add", "--ignore-scripts", "@deepseek-ai/dsh@0.1.0-rc.7"], { cwd: prefix });
-  return join(prefix, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+  const prefix = resolve(repoRoot, "../deepseek-harness/.migration-tools/node_modules/@deepseek-ai/dsh");
+  const manifest = JSON.parse(readFileSync(join(prefix, "package.json"), "utf8"));
+  if (manifest.version !== "0.2.1-rc.2") throw new Error("Run scripts/setup-isolated.mjs for npm dsh 0.2.1-rc.2");
+  return join(prefix, "lib/bin.js");
 }
 
 const dsh = stockDshBin();
@@ -74,7 +72,6 @@ try {
   const remoteWork = join(work, "repo-work");
   const remote = join(work, "remote.git");
   const git = (...args) => run("git", args, { cwd: remoteWork });
-  run("git", ["init", "-q", "--bare", remote]);
   run("git", ["init", "-q", "-b", "main", remoteWork]);
   git("config", "user.email", "e2e@example.invalid");
   git("config", "user.name", "git-dist e2e");
@@ -83,14 +80,15 @@ try {
   writeFileSync(join(remoteWork, ".gitignore"), "node_modules/\nlib/\n!git-dist/icomposer-workbench/lib/\n");
   git("add", "-A", "-f", "git-dist");
   git("commit", "-qm", "git-dist e2e payload");
-  git("remote", "add", "origin", remote);
-  git("push", "-q", "origin", "HEAD");
+  run("git", ["clone", "-q", "--bare", remoteWork, remote]);
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: remoteWork, encoding: "utf8" }).trim();
 
-  // 2) Real stock chain, Plugin Only: the first add initializes the rc.7
+  // 2) Real stock chain, Plugin Only: the first add initializes the 0.2.1-rc.2
   // web profile; runtime deps are intentionally NOT installed here (their
   // native builds are the desktop runtime's concern, not the plugin's).
-  const env = { ...process.env, DSH_HOME: home };
+  const osHome = join(work, "os-home");
+  mkdirSync(osHome, { recursive: true });
+  const env = { PATH: process.env.PATH, HOME: osHome, USERPROFILE: osHome, DSH_HOME: home };
   const dshRun = (...args) => run("node", [dsh, ...args], { env, cwd: work });
   const spec = `git+file://${remote}#${commit}&path:git-dist/icomposer-workbench`;
   dshRun("plugin", "--profile", "web", "add", spec);

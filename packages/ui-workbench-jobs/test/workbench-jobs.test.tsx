@@ -5,7 +5,7 @@ import {
   SlotTestRuntime,
   usePinnedBrowserLanguages,
 } from "@deepseek-ai/dsh-client-test-runtime";
-import type { JobView } from "@deepseek-ai/dsh-client-runtime/client";
+import type { JobView } from "@deepseek-ai/dsh-jobs/view";
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
 import { apply, inject, NS } from "../src/client/index.ts";
 import { en, zh } from "../src/client/locales.ts";

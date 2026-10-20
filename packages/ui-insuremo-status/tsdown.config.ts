@@ -1,8 +1,9 @@
+import { brandAssetsPlugin } from "../../scripts/brand-assets-plugin.mjs";
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { clientBundle } from "../../../deepseek-harness/packages/client/tsdown.client.ts";
 
-const base = clientBundle("@icomposer/ui-insuremo-status", ["src/index.ts"]);
+const base = clientBundle(import.meta.dirname, ["src/index.ts"]);
 const cleanBrandAssets = {
   name: "ui-insuremo-status: clean emitted brand assets",
   async buildStart(): Promise<void> {
@@ -33,8 +34,7 @@ const sanitizeCssRegion = {
  */
 export default (inlineConfig: Parameters<typeof base>[0]) => base(inlineConfig).map(config => ({
   ...config,
-  loader: { ...config.loader, ".png": "asset" },
-  plugins: [...(config.plugins ?? []), cleanBrandAssets, sanitizeCssRegion],
+  plugins: [brandAssetsPlugin(), ...(config.plugins ?? []), cleanBrandAssets, sanitizeCssRegion],
   outputOptions: {
     ...config.outputOptions,
     assetFileNames: "assets/[name][extname]",

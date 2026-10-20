@@ -3,7 +3,7 @@ import type { DefineToolFn } from "./tool-types.ts";
 
 interface ToolExecContext {
   readonly signal: AbortSignal;
-  readonly agent?: unknown;
+  readonly agent?: { readonly session: { readonly id: string } };
 }
 
 interface ToolTextBlock {
@@ -62,14 +62,6 @@ interface IciEngineJobsFace {
     stale: boolean;
     requiredFiles: { nodes: boolean; edges: boolean; manifest: boolean };
   }>>;
-}
-
-interface JobsRegistryShim {
-  start(spec: { kind: string; label: string; owner?: unknown; run(): {
-    cancel(reason?: string): void;
-    done: Promise<{ status: "completed" | "killed" | "failed"; detail?: string }>;
-    readOutput?(): string;
-  } }): string;
 }
 
 /** Asset count at or below which ici_build runs synchronously. */
@@ -280,14 +272,14 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
     const jobId = jobs.start({
       kind,
       label,
-      ...(exec.agent !== undefined ? { owner: exec.agent } : {}),
-      run: () => {
+      ...(exec.agent !== undefined ? { owner: exec.agent.session.id } : {}),
+      run: (job) => {
         const controller = new AbortController();
         const onCallerAbort = (): void => controller.abort();
         exec.signal.addEventListener("abort", onCallerAbort, { once: true });
-        const lines: string[] = [];
+        if (exec.signal.aborted) controller.abort();
         const onProgress = (current: number, total: number, step: string): void => {
-          lines.push(`[${current}/${total}] ${step}`);
+          job.append(`[${current}/${total}] ${step}\n`, { channel: "log" });
         };
         const work: Promise<ResultLike<IciBuildResultLike | IciIndexResultLike>> = args.mode === "search-index"
           ? ici.index({ workspaceId: args.workspace_id, ...(args.rebuild === undefined ? {} : { rebuild: args.rebuild }) }, { signal: controller.signal, onProgress })
@@ -303,14 +295,13 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
             return { status: "completed", detail: `nodes=${res.value.manifest.nodeCount} edges=${res.value.manifest.edgeCount}` };
           }
           return { status: "completed", detail: `total=${res.value.total} embedded=${res.value.embedded} reused=${res.value.reused}` };
-        }).catch((cause: unknown): { status: "failed"; detail: string } => ({ status: "failed", detail: String(cause) }));
+        }).catch((cause: unknown): { status: "failed"; detail: string } => ({ status: "failed", detail: String(cause) })).finally(() => exec.signal.removeEventListener("abort", onCallerAbort));
         return {
           cancel: (reason?: string) => {
             controller.abort();
-            lines.push(`cancel requested${reason === undefined ? "" : `: ${reason}`}`);
+            job.append(`cancel requested${reason === undefined ? "" : `: ${reason}`}\n`, { channel: "log" });
           },
           done,
-          readOutput: () => lines.splice(0).join("\n"),
         };
       },
     });

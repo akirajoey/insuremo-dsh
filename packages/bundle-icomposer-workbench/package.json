@@ -30,5 +30,8 @@
     "@icomposer/icomposer-verify": "file:../icomposer-verify",
     "@icomposer/icomposer-code-intelligence": "file:../icomposer-code-intelligence",
     "@icomposer/icomposer-write": "file:../icomposer-write"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0-0"
   }
 }

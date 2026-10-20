@@ -1,18 +1,18 @@
 {
-  "auditedAt": "2026-09-07T07:22:39.267Z",
-  "harnessCommit": "85d8062c8aecaf3c24bc84d45ba20c9223d40789",
-  "pinnedCommit": "85d8062c8aecaf3c24bc84d45ba20c9223d40789",
+  "auditedAt": "2026-10-20T08:56:18.478Z",
+  "harnessCommit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "pinnedCommit": "687f282e8625c6b8d11ff58211a90524be2e4317",
   "harnessClean": true,
   "pluginCount": 13,
   "lockfilePresent": true,
   "checks": [
     {
       "ok": true,
-      "check": "harness HEAD pinned at 85d8062c8a"
+      "check": "harness HEAD pinned at 687f282e86"
     },
     {
       "ok": true,
-      "check": "harness working tree clean"
+      "check": "harness tracked source clean (untracked local dependency/tool files excluded)"
     },
     {
       "ok": true,
@@ -28,11 +28,15 @@
     },
     {
       "ok": true,
+      "check": "@deepseek-ai/dsh-storage-domain -> ../deepseek-harness/packages/storage/storage-domain/src/index.ts (5 referrers)"
+    },
+    {
+      "ok": true,
       "check": "@deepseek-ai/dsh-client-ui-primitives -> ../deepseek-harness/packages/client/ui-primitives/src/index.ts (5 referrers)"
     },
     {
       "ok": true,
-      "check": "@deepseek-ai/dsh-jobs resolved via harness-shims.d.ts in 1 referring package(s)"
+      "check": "@deepseek-ai/dsh-jobs -> ../deepseek-harness/packages/jobs/jobs/src/index.ts (1 referrer)"
     },
     {
       "ok": true,
@@ -41,10 +45,6 @@
     {
       "ok": true,
       "check": "@deepseek-ai/dsh-storage -> ../deepseek-harness/packages/storage/storage/src/index.ts (2 referrers)"
-    },
-    {
-      "ok": true,
-      "check": "@deepseek-ai/dsh-storage-domain -> ../deepseek-harness/packages/storage/storage-domain/src/index.ts (4 referrers)"
     },
     {
       "ok": true,
@@ -60,11 +60,11 @@
     },
     {
       "ok": true,
-      "check": "@deepseek-ai/dsh-client-locale -> ../deepseek-harness/packages/client/locale/src/index.ts (3 referrers)"
+      "check": "@deepseek-ai/dsh-llm -> ../deepseek-harness/packages/llm/llm/src/index.ts (1 referrer)"
     },
     {
       "ok": true,
-      "check": "@deepseek-ai/dsh-client-runtime -> ../deepseek-harness/packages/client/runtime/src/index.ts (3 referrers)"
+      "check": "@deepseek-ai/dsh-client-locale -> ../deepseek-harness/packages/client/locale/src/index.ts (3 referrers)"
     },
     {
       "ok": true,
@@ -76,10 +76,6 @@
     },
     {
       "ok": true,
-      "check": "@deepseek-ai/dsh-invariants -> ../deepseek-harness/packages/runtime-diagnostics/invariants/src/index.ts (3 referrers)"
-    },
-    {
-      "ok": true,
       "check": "@deepseek-ai/dsh-client-test-runtime -> ../deepseek-harness/packages/test-support/client-runtime/src/index.ts (3 referrers)"
     },
     {
@@ -88,7 +84,7 @@
     },
     {
       "ok": true,
-      "check": "@deepseek-ai/dsh-client-ui-conversation resolved via harness-shims.d.ts in 1 referring package(s)"
+      "check": "@deepseek-ai/dsh-client-ui-chat -> ../deepseek-harness/packages/client/ui-chat/src/index.ts (2 referrers)"
     },
     {
       "ok": true,
@@ -96,7 +92,7 @@
     },
     {
       "ok": true,
-      "check": "pnpm-lock.yaml present (sha256:4abeb070d13b37d3)"
+      "check": "pnpm-lock.yaml present (sha256:a0f98f44b69a0b3a)"
     }
   ]
 }

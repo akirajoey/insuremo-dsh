@@ -9,43 +9,24 @@ modified by the Workbench packages.
 
 - Node.js `^22.19.0 || >=24.0.0`
 - pnpm `11.7.0`
-- the Harness checkout at `../deepseek-harness`, fixed to commit
-  `85d8062c8aecaf3c24bc84d45ba20c9223d40789`. This pin is the
-  typecheck/development baseline only (out-of-tree types resolve against the
-  local checkout). The shipped plugin targets the UNMODIFIED official
-  rc.7 runtime: the install/update diagnosis hand-off (TASK-088) rides
-  official rc.7 seams only — the dedicated persistent "install diagnostics"
-  Workspace (`workspaces.create`/`connectWorkspace`), `sessions.open`, and
-  the session-scope `inputActions.setDraft` standard kit — with a visible
-  clipboard fallback. No 080–082 local patches are required at runtime.
+- the isolated Harness worktree at `../deepseek-harness`, commit
+  `687f282e8625c6b8d11ff58211a90524be2e4317` (npm `0.2.1-rc.2`).
 
-### Prepare the Harness baseline on a new machine
+## Isolated upgrade setup and validation
 
-Clone the Harness repository beside this checkout, then pin the exact commit
-before installing Workbench dependencies. Replace the repository URL with the
-URL provided by the project:
+Use **only** the two worktrees under `upgrade-dsh-0.2.1`; do not modify an
+existing installation or `~/.dsh`. See [migration setup and smoke instructions](docs/dsh-0.2.1-migration.md).
+No global install/link or desktop build is needed. Setup does not start a service.
 
 ```sh
-git clone <harness-repository-url> ../deepseek-harness
-git -C ../deepseek-harness checkout 85d8062c8aecaf3c24bc84d45ba20c9223d40789
-```
-
-If the checkout cannot resolve the commit, fetch the three local-patch commits
-listed above into that clone (from the project's Harness clone) and recreate
-the pin — a plain upstream tag checkout lacks them. If the checkout already
-exists, verify that it is at the same commit before continuing. The
-compatibility check performs this read-only verification.
-
-## Install and verify
-
-From this repository root:
-
-```sh
-npm install -g pnpm@11.7.0
-pnpm install
+node scripts/setup-isolated.mjs
 pnpm check
 pnpm typecheck
-pnpm test
+pnpm bundle
+pnpm pack:dist
+pnpm pack:git-dist
+pnpm check:git-dist
+node scripts/test-migration.mjs
 ```
 
 `pnpm check` validates the local Harness commit and the Node/pnpm versions
@@ -105,27 +86,16 @@ dsh plugin --profile web add @icomposer/workbench
 
 Release tooling: `node scripts/pack-dist.mjs` builds the self-contained
 tarball (`dist-release/icomposer-workbench-<version>.tgz`, prebuilt `lib/`,
-no sibling sources) and `node scripts/verify-standard-install.mjs` proves
-the installs end to end in isolated DSH_HOME profiles — including a real
-boot smoke (port line + no loader/module errors), not just a dump. The
+no sibling sources). For this upgrade, use the exact-runtime isolated CLI and
+real browser/HTTP smoke in [the migration guide](docs/dsh-0.2.1-migration.md),
+not the legacy source-launch `verify-standard-install.mjs` utility. The
 `pack:dist`, `pack:git-dist`, and `check:git-dist` commands are **single-writer**:
 tsdown rewrites the shared source `lib/` during each build, while the Git
 destination uses an atomic-ish staging/backup swap. In a clean checkout,
 the Harness preset must be checked out beside Workbench at `../deepseek-harness`
-at the exact `compatibility.json` commit — now the local master pin
-`85d8062c8aecaf3c24bc84d45ba20c9223d40789` (no npm tag carries it yet; it
-includes the not-yet-upstream TASK-080/081/082 commits listed at the top of
-this file) — and installed separately before
-running these commands; CI performs this pinned sibling checkout and hard
-commit check. For example:
-
-```sh
-git clone https://github.com/deepseek-ai/deepseek-harness ../deepseek-harness
-git -C ../deepseek-harness checkout 85d8062c8aecaf3c24bc84d45ba20c9223d40789
-(cd ../deepseek-harness && pnpm install --frozen-lockfile --ignore-scripts)
-pnpm install --frozen-lockfile --ignore-scripts
-pnpm check:git-dist
-```
+at the exact `compatibility.json` commit, `687f282e86` (official upstream
+0.2.1-rc.2). The isolated setup recipe above installs the minimal preset/test
+requirements and a separately pinned npm runtime without building the harness.
 
 The tarball is the recommended form: directory `add .` is a link: install whose
 bare-import resolution depends on the surrounding node_modules layout. The

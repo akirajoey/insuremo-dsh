@@ -23,14 +23,17 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-tool",
-        "@deepseek-ai/dsh-client-ui-primitives"
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-chat"
       ]
     }
   },
@@ -38,7 +41,7 @@
     "build": "node ../../scripts/clean-dist-lib.mjs && tsdown",
     "prepare": "pnpm run build",
     "typecheck": "pnpm run build && node --check lib/index.js && node --check lib/client.js",
-    "test": "node --test test/*.test.mjs && node --import tsx --test test/*.test.ts"
+    "test": "node --test test/*.test.mjs && TSX_TSCONFIG_PATH=../../tsconfig.base.json node --import tsx --test test/*.test.ts"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
@@ -52,7 +55,8 @@
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/dsh-workspace": "*",
     "@deepseek-ai/schemastery": "*",
-    "react": "^18.2.0"
+    "react": "^18.2.0",
+    "@deepseek-ai/dsh-llm": "*"
   },
   "devDependencies": {
     "@icomposer/workbench-contracts": "file:../workbench-contracts",
@@ -70,9 +74,12 @@
     "@icomposer/ui-workbench-jobs": "file:../ui-workbench-jobs",
     "@types/node": "^22.20.0",
     "react": "^18.2.0",
-    "tsdown": "^0.12.5",
+    "tsdown": "^0.22.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "zod": "^4.4.3"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0-0"
   }
 }

@@ -30,9 +30,9 @@ if (head.toLowerCase() === compatibility.harnessCommit.toLowerCase()) {
 } else {
   bad(`harness HEAD ${head} != pinned ${compatibility.harnessCommit}`);
 }
-const harnessDirty = execFileSync("git", ["-C", harnessRoot, "status", "--porcelain"], { encoding: "utf8" }).trim();
+const harnessDirty = execFileSync("git", ["-C", harnessRoot, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim();
 if (harnessDirty === "") {
-  ok("harness working tree clean");
+  ok("harness tracked source clean (untracked local dependency/tool files excluded)");
 } else {
   bad(`harness working tree dirty:\n${harnessDirty}`);
 }

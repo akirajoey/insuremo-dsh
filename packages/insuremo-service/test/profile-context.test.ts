@@ -3,6 +3,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { Context } from "@deepseek-ai/cordis";
+import SessionStore, { SessionId } from "@deepseek-ai/dsh-session";
 import {
   ImoProfileContextService, decideProfileContext, shortDigest,
   PROFILE_DIGEST_SECTION, eventDigest, compactCheckpointSource, shellQuote,
@@ -21,8 +22,9 @@ interface HistoryAgent { session: { events: unknown[] } }
 async function roundtrip(service: ImoProfileContextService, agent: HistoryAgent, step = 1) {
   const proposed: unknown = { type: "user/message", data: { content: [{ type: "text", text: "hello" }], source: { kind: "user" } } };
   const next = async (): Promise<{ kind: "enter"; messages: unknown[] }> => ({ kind: "enter", messages: [proposed] });
+  const current = { ...agent, session: { id: "test-session", snapshotEvents: () => agent.session.events } };
   const decision = await service.decide(
-    { agent, turn: 1, step, signal: { aborted: false } },
+    { agent: current, turn: 1, step, signal: { aborted: false } },
     next,
   );
   let injected: unknown[] = [];
@@ -44,6 +46,7 @@ async function mountFixture(current: InsuremoProfile) {
   } as never);
   // the static inject requires `agents` and the Workbench Active Profile face.
   ctx.provide("agents" as never, {} as never);
+  ctx.provide("workspaceRegistry" as never, { list: () => [] } as never);
   ctx.provide("imoActiveProfile" as never, { get: async () => ({ ok: true, value: { activeProfileName: cur.name, profile: cur.name === null ? undefined : { env: cur.env } } }) } as never);
   const fiber = ctx.plugin(ImoProfileContextService as never);
   await fiber.await();
@@ -125,7 +128,7 @@ test("TASK-044 B switch/compact lifecycle with real events", async () => {
     // manual compact via the REAL compaction checkpoint source shape
     agent.session.events.push({
       type: "user/message",
-      data: { content: [{ type: "text", text: "(compacted)" }], source: compactCheckpointSource() },
+      data: { content: [{ type: "text", text: "(compacted)" }], source: compactCheckpointSource("test-checkpoint") },
     });
     const afterCompact = await roundtrip(fx.service, agent, 1);
     assert.equal(afterCompact.injected.length, 1, "compaction re-asserts");
@@ -145,6 +148,7 @@ test("TASK-044 B service registers from [Service.init], not constructor; survive
   ctx.provide("imoAuth", { profilesFast: async () => ({ ok: false, error: {} }) } as never);
   ctx.provide("imoActiveProfile" as never, { get: async () => ({ ok: true, value: { activeProfileName: null } }) } as never);
   ctx.provide("agents" as never, {} as never);
+  ctx.provide("workspaceRegistry" as never, { list: () => [] } as never);
   const fiber = ctx.plugin(ImoProfileContextService as never);
   await fiber.await();
   await new Promise(resolve => setTimeout(resolve, 150));
@@ -205,7 +209,7 @@ test("TASK-044 B: decideProfileContext matrix (pure)", () => {
   const sw = decideProfileContext([ev("a")], makeProfile("b"));
   assert.equal(sw.inject, true); assert.equal(sw.changed, true);
   // compact after last → re-assert
-  const cps = compactCheckpointSource();
+  const cps = compactCheckpointSource("test-checkpoint");
   assert.equal(decideProfileContext([ev("b"), { type: "user/message", data: { content: [], source: cps } }], makeProfile("b")).inject, true);
   void PROFILE_DIGEST_SECTION;
 });
@@ -242,6 +246,7 @@ test("TASK-044 FIX: disposeProfileContext via ctx.get() proxy removes the real l
     }),
   } as never);
   ctx.provide("agents" as never, {} as never);
+  ctx.provide("workspaceRegistry" as never, { list: () => [] } as never);
   ctx.provide("imoActiveProfile" as never, { get: async () => ({ ok: true, value: { activeProfileName: "portal:microsite", profile: {} } }) } as never);
   const fiber = ctx.plugin(ImoProfileContextService as never);
   await fiber.await();
@@ -251,7 +256,7 @@ test("TASK-044 FIX: disposeProfileContext via ctx.get() proxy removes the real l
   assert.equal(typeof proxy.disposeProfileContext, "function");
 
   const fire = async () => {
-    const payload = { agent: { session: { events: [] } }, turn: 1, step: 1, signal: { aborted: false } };
+    const payload = { agent: { session: { id: "test-session", snapshotEvents: () => [] } }, turn: 1, step: 1, signal: { aborted: false } };
     const decision = await (ctx as unknown as { waterfall(name: string, ...args: unknown[]): unknown }).waterfall(
       "agent/pre-step",
       payload,
@@ -279,7 +284,7 @@ test("workspace-scoped profile context resolves the agent session's trusted work
   ctx.provide("imoAuth" as never, { profilesFast: async () => ({ ok: false, error: {} }) } as never);
   ctx.provide("agents" as never, {} as never);
   ctx.provide("workspaceRegistry" as never, {
-    list: () => [{ id: "workspace-a", sessionIds: ["agent-a"] }],
+    list: () => [{ id: "workspace-a", sessionIds: ["session-a"] }],
   } as never);
   ctx.provide("imoActiveProfile" as never, {
     get: async (_signal?: AbortSignal, workspaceId?: string | null) => {
@@ -292,7 +297,7 @@ test("workspace-scoped profile context resolves the agent session's trusted work
   const service = ctx.get("imoProfileContext" as never) as unknown as ImoProfileContextService;
   try {
     const decision = await service.decide(
-      { agent: { id: "agent-a", session: { events: [] } }, turn: 1, step: 1, signal: { aborted: false } },
+      { agent: { id: "agent-a", session: { id: "session-a", snapshotEvents: () => [] } }, turn: 1, step: 1, signal: { aborted: false } },
       async () => ({ kind: "enter", messages: [] }),
     );
     assert.equal(decision.kind, "enter");
@@ -300,4 +305,35 @@ test("workspace-scoped profile context resolves the agent session's trusted work
   } finally {
     await fiber.dispose();
   }
+});
+
+
+test("v4 profile producer persists its kind and deduplicates migrated legacy rows", async () => {
+  const fx = await mountFixture(makeProfile("test-profile"));
+  try {
+    const agent: HistoryAgent = { session: { events: [] } };
+    const first = await roundtrip(fx.service, agent);
+    const source = (first.injected[0] as { source: { kind: string; plugin?: string } }).source;
+    assert.equal(source.kind, "icomposer-current-profile");
+    assert.equal(source.plugin, undefined);
+    const event = agent.session.events[0] as { data: object };
+    agent.session.events[0] = { ...event, data: { ...event.data, source: { ...source, kind: "plugin:icomposer-current-profile" } } };
+    assert.equal((await roundtrip(fx.service, agent)).injected.length, 0);
+  } finally { await fx.fiber.dispose(); }
+});
+
+
+test("profile context roundtrips through the actual v4 Session snapshot API", async () => {
+  const fx = await mountFixture(makeProfile("test-profile"));
+  const sessions = await fx.ctx.plugin(SessionStore);
+  try {
+    const session = fx.ctx.sessions.create(SessionId("profile-v4-session"));
+    const payload = { agent: { id: "different-agent-id", session }, turn: 1, step: 1 };
+    const first = await fx.service.decide(payload, async () => ({ kind: "enter", messages: [] }));
+    assert.equal(first.messages?.length, 1);
+    session.append("user/message", first.messages![0] as never, { surfaceOp: "append" });
+    assert.equal(session.snapshotEvents().filter(event => event.type === "user/message").length, 1);
+    const second = await fx.service.decide(payload, async () => ({ kind: "enter", messages: [] }));
+    assert.equal(second.messages?.length, 0);
+  } finally { await sessions.dispose(); await fx.fiber.dispose(); }
 });

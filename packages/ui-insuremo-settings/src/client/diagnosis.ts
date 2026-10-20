@@ -1,9 +1,9 @@
 /** Diagnosis hand-off choreography (TASK-088): assemble the localized
  * diagnosis text from the host `imo-diagnosis` payload, then deliver it into
  * the dedicated persistent "install diagnostics" Workspace using ONLY
- * unmodified official rc.7 plugin seams — `workspaces.create` (idempotent by
- * path), `workspaces.connectWorkspace` (blank-session reuse), and
- * `sessions.open` — plus the session-scope `inputActions.setDraft` standard
+ * unmodified official 0.2.1 plugin seams — `workspaces.create` (idempotent by
+ * path), `uiWorkspace.connectWorkspace` (blank-session reuse), and
+ * `uiWorkspace.openSession` — plus the session-scope `inputActions.setDraft` standard
  * kit for prefill. No DSH patch is involved: no scratch marker, no staged
  * session drafts, and no Workspace-less session is ever created, so a
  * failure can never land the user in an inert Ungrouped composer.
@@ -41,12 +41,13 @@ export interface DiagnosisActionPayload {
   readonly diagnosisCwd?: string;
 }
 
-/** The narrow sessions face the hand-off needs (official rc.7 ISessions). */
-export interface DiagnosisSessions {
-  open(id: string): void;
+/** The narrow UI navigation face the hand-off needs (official 0.2.1 UiWorkspace). */
+export interface DiagnosisNavigation {
+  connectWorkspace(workspaceId: string): Promise<string>;
+  openSession(id: string): void;
 }
 
-/** One workspace row as the hand-off reads it (official rc.7 WorkspaceView). */
+/** One workspace row as the hand-off reads it (official 0.2.1 WorkspaceView). */
 export interface DiagnosisWorkspaceRow {
   readonly workspaceId: string;
   readonly path?: string;
@@ -54,23 +55,20 @@ export interface DiagnosisWorkspaceRow {
 
 /**
  * The narrow workspaces face the hand-off needs — every member is an
- * unmodified official rc.7 `IWorkspaces` contract method. `list` reads the
+ * unmodified official 0.2.1 `IWorkspaces` contract method. `list` reads the
  * standard feed snapshot; `create` is documented idempotent by path;
- * `connectWorkspace` reuses the workspace's blank session when one exists
- * (restart reuse) and mints a fresh one otherwise; `rename` personalizes the
- * persistent Workspace title once.
+ * `rename` personalizes the persistent Workspace title once.
  */
 export interface DiagnosisWorkspaces {
   readonly list: { getSnapshot(): { items: ReadonlyArray<DiagnosisWorkspaceRow> } };
   create(input: { path: string }): Promise<{ workspaceId: string }>;
-  connectWorkspace(workspaceId: string): Promise<string>;
   rename?(workspaceId: string, title: string): Promise<unknown>;
 }
 
 /** Runtime faces the card hands to the hand-off (wired by apply; tests inject doubles). */
 export interface DiagnosisFaces {
   readonly workspaces?: DiagnosisWorkspaces;
-  readonly sessions?: DiagnosisSessions;
+  readonly uiWorkspace?: DiagnosisNavigation;
 }
 
 /** Assemble the localized diagnosis text the user reviews and sends. */
@@ -283,7 +281,7 @@ export type DiagnosisHandoff =
 
 /**
  * Open the dedicated diagnosis Workspace's session and queue the prefill.
- * Every step rides an unmodified official rc.7 seam; any failure falls back
+ * Every step rides an unmodified official 0.2.1 seam; any failure falls back
  * to the clipboard WITHOUT creating or opening any session, so the user can
  * never be left in an inert Workspace-less composer. The target session id
  * is the value `connectWorkspace` RESOLVES (reuse or fresh — never guessed
@@ -297,8 +295,8 @@ export async function handOffDiagnosis(
   workspaceTitle: string,
 ): Promise<DiagnosisHandoff> {
   const workspaces = faces?.workspaces;
-  const sessions = faces?.sessions;
-  if (workspaces === undefined || sessions === undefined) {
+  const navigation = faces?.uiWorkspace;
+  if (workspaces === undefined || navigation === undefined) {
     return { kind: "clipboard-only", copied: await copyToClipboard(text), reason: "faces-unavailable" };
   }
   let workspaceId: string;
@@ -309,11 +307,11 @@ export async function handOffDiagnosis(
   }
   let sessionId: string;
   try {
-    sessionId = await workspaces.connectWorkspace(workspaceId);
+    sessionId = await navigation.connectWorkspace(workspaceId);
   } catch {
     return { kind: "clipboard-only", copied: await copyToClipboard(text), reason: "connect-failed" };
   }
   queueDiagnosisPrefill(sessionId, text);
-  sessions.open(sessionId);
+  navigation.openSession(sessionId);
   return { kind: "opened", sessionId };
 }
