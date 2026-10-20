@@ -8,39 +8,19 @@ Workbench 的包修改。
 
 ## 安装
 
-插件是**预构建产物**（`lib/` 已是纯 JS），两种安装方式产出的 **payload 完全相同**，
-都基于远端仓库 `https://github.com/akirajoey/insuremo-dsh` 里**已跟踪**的目录
-`git-dist/icomposer-workbench/`：
+插件发布为仓库中的 **payload 根分支**：`plugin-dist-0.2` 分支**根目录本身就是插件包**
+（`lib/`、`cordis.patch.yml`、`package.json`），所以一条命令就能装，不需要子目录参数。
 
-- **方式 A：GitHub spec 直接安装** —— 不用下载整仓，但 pnpm 对 GitHub 托管的依赖要求
-  **一次授权**（见下）。
-- **方式 B：clone 仓库 → 用宿主 CLI 把该目录 pack 成 tgz → add tgz** —— 本地实体安装，
-  不触发授权。
+主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-0.2`
+可复现 pin：`github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7`
 
-> spec 里含 `&`（shell 运算符），**整条 spec 必须用引号包住**，否则会被拆成后台执行。
-
-### 首次安装的一次性授权（仅方式 A）
-
-pnpm 对 GitHub 托管的依赖要求显式授权。首次 `add` 会 **exit 1**，报类似
-`[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @icomposer/workbench@https://codeload.github.com/...#path:...`，
-同时 dsh 已把占位写进该 profile 的 `pnpm-workspace.yaml`：
-
-```yaml
-allowBuilds:
-  '@icomposer/workbench@https://codeload.github.com/akirajoey/insuremo-dsh/tar.gz/<sha>#path:git-dist/icomposer-workbench': set this to true or false
-```
-
-把该值改成 `true`，再**重跑同一条 `add`**。这是 pnpm 对该 GitHub 依赖的一次性授权
-（不是本包在构建：它的 package.json 没有任何 scripts），**每个 profile 各一次**：
-Desktop 在 `~/.dsh/profiles/desktop/pnpm-workspace.yaml`，Web 在
-`~/.dsh/profiles/web/pnpm-workspace.yaml`（自定义 `DSH_HOME` 时在对应目录）。
-解析到新 commit 时占位键里的 tar.gz `<sha>` 会变，需要再确认一次；频繁更新建议用方式 B。
+> spec 建议整体加引号（`#`/`&` 在 shell 里都有特殊含义；含 `&path:` 的旧形式尤其必须加）。
 
 ### 官方 Desktop（默认 profile）
 
 前置：
 
-1. 已安装官方 **DeepSeek Harness Desktop**；下面命令在官方 **0.2.1-rc.2** 上验证
+1. 已安装官方 **DeepSeek Harness Desktop**；`plugin-dist-0.2` 面向 **dsh >= 0.2.1-rc.2**
    （包内 `engines.dsh` 为 `>=0.2.1-rc.2 <0.3.0-0`）。
 2. **先启动一次 App**，让它初始化默认 profile（`desktop`）。
 3. 之后**用 ⌘Q 完全退出 App**再执行 CLI 命令：
@@ -51,99 +31,55 @@ Desktop 在 `~/.dsh/profiles/desktop/pnpm-workspace.yaml`，Web 在
 4. 必须使用 **App 自带的官方 CLI**（绝对路径）：本机另装的旧版 `dsh` 会直接拒绝
    `--profile desktop`（该 profile 由 Electron App 独占管理）。
 
-**方式 A：GitHub spec**
-
 ```bash
 # 官方 App 自带的 CLI（绝对路径；macOS 默认安装位置）
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
-# 推荐：pin 到某个 commit，安装内容可复现
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+# 跟随发布分支
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
-# 或者跟随 main（内容随提交漂移）
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
+# 可复现：pin 到这个 commit
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7"
 ```
 
-首次若报 `ERR_PNPM_IGNORED_BUILDS`，按上一节把
-`~/.dsh/profiles/desktop/pnpm-workspace.yaml` 的占位值改为 `true`，再重跑同一条命令。
-`env -u DSH_HOME` = 不继承 shell 里残留的 `DSH_HOME`，用默认 `~/.dsh`。
-
-**方式 B：clone + pack 成 tgz（无需授权）**
-
-```bash
-( set -eu
-  DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-  WORKDIR="$(mktemp -d)"
-
-  # 取仓库；要 pin 精确版本时去掉 --depth 1，再 git checkout <commit-sha>
-  git clone --depth 1 --branch main https://github.com/akirajoey/insuremo-dsh "$WORKDIR/repo"
-
-  # 用宿主 CLI 把已跟踪的预构建目录打成 tgz
-  PACK_DIR="$WORKDIR/pack"
-  mkdir -p "$PACK_DIR"
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$WORKDIR/repo/git-dist/icomposer-workbench" pack --pack-destination "$PACK_DIR"
-
-  # 安装本地 tgz（实体安装，不触发授权）
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
-
-  rm -rf "$WORKDIR"
-)
-```
-
-已有 checkout 就 `git pull --ff-only`（先确认 `git status` 干净）后重复 pack→add。
+`env -u DSH_HOME` = 不继承 shell 里残留的 `DSH_HOME`，让官方 CLI 使用默认 `~/.dsh`
+（默认 profile 在 `~/.dsh/profiles/desktop`）。要装到别的 home 才显式设。
 装完**像平常一样点击 App 图标重新打开**，不要用 `.command` 之类的启动脚本。
 
 ### Web UI（profile `web`）
 
 Web 宿主由本机安装的 `dsh` 启动，要求 **dsh >= 0.2.1-rc.2**；**0.1 的旧宿主不兼容**。
 
-**方式 A：GitHub spec**
-
 ```bash
-# 安装到 web profile（整条 spec 同样要加引号）
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
+# 安装到 web profile
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
-# 或固定 commit
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+# 或 pin
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7"
+
+# 启动
+dsh --profile web
 ```
 
-首次若报 `ERR_PNPM_IGNORED_BUILDS`，把 `~/.dsh/profiles/web/pnpm-workspace.yaml` 的
-占位值改为 `true`，再重跑同一条 `add`。
-
-**方式 B：clone + pack 成 tgz（无需授权）**
-
-```bash
-( set -eu
-  WORKDIR="$(mktemp -d)"
-  git clone --depth 1 --branch main https://github.com/akirajoey/insuremo-dsh "$WORKDIR/repo"
-
-  PACK_DIR="$WORKDIR/pack"
-  mkdir -p "$PACK_DIR"
-  dsh plugin --profile web --dir "$WORKDIR/repo/git-dist/icomposer-workbench" pack --pack-destination "$PACK_DIR"
-  dsh plugin --profile web add "$PACK_DIR"/*.tgz
-
-  rm -rf "$WORKDIR"
-)
-```
-
-安装/更新完成后启动：`dsh --profile web`。
+两种宿主都是**一条命令**：不需要额外授权、不会出现 `ERR_PNPM_IGNORED_BUILDS`、不需要改
+`allowBuilds`；安装后 profile 的 bundles 自动包含 `@icomposer/workbench`。
 
 ### 更新
 
-同一个包里版本号可能不变，**必须 remove 再 add**，不要指望 `add` 覆盖已有安装。
+同一个包里版本号可能不变，**必须 remove 再 add**（同一条 spec）：
 
 ```bash
-# Desktop（先 ⌘Q）；方式 B 把最后一行换成 add "$PACK_DIR"/*.tgz
+# Desktop（先 ⌘Q）
 ( set -eu
   DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
   env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 )
 
 # Web
 ( set -eu
   dsh plugin --profile web remove @icomposer/workbench
-  dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+  dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 )
 ```
 
@@ -161,13 +97,13 @@ dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:gi
 
 ### 回滚 / 卸载
 
-回滚 = 先 remove，再装旧版本：方式 A 用**旧 commit 的 spec**，方式 B 用旧版本打出的 tgz。
+回滚 = 先 remove，再 `add` **旧版本的 spec**（上一版的 commit 或旧分支）：
 
 ```bash
 ( set -eu
   DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
   env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<old-commit-sha>&path:git-dist/icomposer-workbench"
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<old-commit-sha>"
 )
 ```
 
@@ -191,37 +127,72 @@ profile 里其它插件与宿主写入的状态，把一次插件回滚变成 pr
 - 动手前先备份：`cp -R ~/.dsh ~/.dsh.bak-$(date +%Y%m%d)`。
 - 只装插件、只删插件；不要手工改 profile 的依赖或整目录替换。
 
-更细的逐条说明（授权占位原文、包内容、宿主差异）见
+### 备注：`&path:` 子目录形式才需要授权
+
+如果不用分支根 spec，而是改用 `github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench`
+这种**子目录**形式，pnpm 会对 git 子目录做隐式打包，首次 `add` 会 exit 1 并报
+`ERR_PNPM_IGNORED_BUILDS`，需要在 profile 的 `pnpm-workspace.yaml` 里把 dsh 写入的
+`allowBuilds` 占位值改成 `true` 再重跑（Desktop：
+`~/.dsh/profiles/desktop/pnpm-workspace.yaml`；Web：`~/.dsh/profiles/web/pnpm-workspace.yaml`）。
+**主路径（分支根 spec）不需要这一步。**
+
+### 备选：离线 / 无网（clone + pack）
+
+没有外网、或要验证工作副本时，取仓库后把 payload 打成 tgz 再安装：
+
+```bash
+( set -eu
+  DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+  WORKDIR="$(mktemp -d)"
+  git clone --depth 1 --branch plugin-dist-0.2 https://github.com/akirajoey/insuremo-dsh "$WORKDIR/repo"
+
+  PACK_DIR="$WORKDIR/pack"
+  mkdir -p "$PACK_DIR"
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$WORKDIR/repo" pack --pack-destination "$PACK_DIR"
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
+
+  rm -rf "$WORKDIR"
+)
+```
+
+**不要用 `add .` 直接加目录**：那是 link 安装，文件留在原地，容易出现
+`ERR_MODULE_NOT_FOUND`。
+
+更细的逐条说明（包内容、宿主差异）见
 [`packages/icomposer-workbench-dist/README.md`](packages/icomposer-workbench-dist/README.md)。
 
 ## 分发形态
 
 `packages/icomposer-workbench-dist`（包名 `@icomposer/workbench`）是分发包本体；
-`git-dist/icomposer-workbench/` 是它**已跟踪**的预构建副本——上面所有安装/更新/回滚
-都通过 GitHub `#path:` 指向它。
+本仓库把它的预构建产物发布成**独立的 payload 根分支**：
+
+| 分支 | 面向 | 说明 |
+|---|---|---|
+| `plugin-dist-0.2` | **dsh >= 0.2.1-rc.2** | 新版通道，根目录即插件包 |
+| `plugin-dist` | 0.1 宿主 | 旧通道，新宿主不要用 |
+
+两个分支都是 **payload 根分支**（根目录就是 `@icomposer/workbench` 包），命令形态
+完全相同，**区别只在版本**。
 
 ```sh
-# 方式 A：GitHub spec（首次需按「首次安装的一次性授权」改 allowBuilds= true）
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
+# 主路径：分支根 spec（一条命令）
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
-# 方式 A + 可复现：pin 精确 commit（SHA 以发布记录为准）
+# 可复现：pin 精确 commit
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7"
 
-# 方式 B：clone 后把该目录 pack 成 tgz 再 add（无授权，见「安装」各宿主小节）
+# 备选：离线/无网时 clone 后 pack 成 tgz 再 add（见「备选：离线 / 无网」）
 
 # npm（未来发布，尚未发布）
 dsh plugin --profile web add @icomposer/workbench
 ```
 
-不要再使用指向 `packages/icomposer-workbench-dist` 的 `#path:` 地址：那是**开发
-源码目录**（未构建、含 scripts 与 devDependencies），安装会失败；旧版
-`plugin-dist` 分支也只适配旧宿主，不要装进 0.2.1。
+仓库内仍然保留 `git-dist/icomposer-workbench/` 作为**已跟踪的预构建副本**，供
+`#path:` 子目录形式（需一次性授权）和离线打包使用；但它**不是**主路径。
 
-`git-dist/` 只有 `package.json` 里**没有 scripts、没有 devDependencies** 的瘦
-清单：安装不跑本包的构建。但 pnpm 仍会对 **GitHub 托管**的依赖要求一次性授权
-（`allowBuilds` 占位改 `true`，见「首次安装的一次性授权」）；用方式 B 的本地 tgz
-则不涉及这一步。
+不要使用指向 `packages/icomposer-workbench-dist` 的 `#path:` 地址：那是**开发源码
+目录**（未构建、含 scripts 与 devDependencies），安装会失败。
 
 ### Release tooling（维护者）
 
