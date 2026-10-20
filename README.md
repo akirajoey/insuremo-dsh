@@ -6,146 +6,159 @@ Workbench 的包修改。
 
 ---
 
-## 安装到官方 Desktop（默认 profile）
+## 安装
 
-普通使用者只需要官方 **DeepSeek Harness Desktop** App，不需要 Node、npm、pnpm、
-编译器，也不需要构建整个 harness。
+插件以 GitHub spec 指向仓库里**已跟踪**的预构建目录 `git-dist/icomposer-workbench/`：
+安装即用（零构建）、不是目录 link 安装；不需要 clone 仓库、不需要构建 harness、
+也不需要 `pnpm install`。
 
-### 前置
+> 整条 spec 必须用引号包住：`&` 是 shell 的运算符，不加引号会被当成后台执行并把
+> 参数截断。
 
-1. 已安装 **DeepSeek Harness Desktop**（官方 App），本文命令在官方 **0.2.1-rc.2**
-   上验证通过（包内 `engines.dsh` 为 `>=0.2.1-rc.2 <0.3.0-0`）。
-2. 启动一次官方 App，让它初始化默认 profile（`desktop`）。
-3. 之后**用 ⌘Q 完全退出 App**，再做任何 CLI 操作。
+### 官方 Desktop（默认 profile）
+
+前置：
+
+1. 已安装官方 **DeepSeek Harness Desktop**；下面命令在官方 **0.2.1-rc.2** 上验证
+   （包内 `engines.dsh` 为 `>=0.2.1-rc.2 <0.3.0-0`）。
+2. **先启动一次 App**，让它初始化默认 profile（`desktop`）。
+3. 之后**用 ⌘Q 完全退出 App**再执行 CLI 命令：
    - profile 尚未被 App 初始化时，CLI 会提示 “Open DeepSeek Harness Desktop once to
      initialize its profile, then fully quit it before running dsh plugin --profile desktop.”；
-   - App 仍在运行时，命令可能以别的方式失败（profile 被占用/写入冲突），**不保证**
-     是同一条提示。两种情况下都请先 ⌘Q。
-4. 命令必须使用 **App 自带的官方 CLI**（绝对路径，见下）：本机另装的旧版 `dsh` 会
-   直接拒绝 `--profile desktop`（该 profile 由 Electron App 独占管理）。
-
-### 获取插件
-
-插件只来自本仓库中**已跟踪**的预构建目录 `git-dist/icomposer-workbench/`。
-不要使用 `dist-release/`（被 gitignore，仓库里没有），也不要为了安装去构建
-harness 或跑 `pnpm install`。
-
-首次（用 `--branch` 保证本地有 tracking 分支，后续 `git pull` 可用）：
-
-```bash
-git clone --branch "<发布者提供的新版发布分支>" "<仓库地址>" icomposer-workbench
-cd icomposer-workbench
-```
-
-已有 checkout 时更新：
-
-```bash
-git status                  # 先确认工作区干净：有未提交改动时 pull 会拒绝
-git switch "<发布分支>"
-git pull --ff-only          # 只接受快进：拒绝分叉/需要合并提交的情况
-```
-
-> 发布者给出的分支/ref 是唯一可信发布点。**本升级分支 `upgrade/dsh-0.2.1` 目前仍是
-> 本地分支、尚未 push**，在发布者给出可访问的发布分支之前无法远程 clone 到它；不要用
-> `main` 或跟随分支安装，内容会随提交漂移、不可复现。
->
-> checkout **tag 或具体 SHA** 属于固定版本用法：detached HEAD 上 `git pull` 不适用，
-> 更新时用 `git fetch` + 显式 `git checkout <新 ref>`。
-
-### 安装
+   - App 仍在运行时，命令可能以其它方式失败（profile 被占用/写入冲突），**不保证**
+     是同一条提示。两种情况都请先 ⌘Q。
+4. 必须使用 **App 自带的官方 CLI**（绝对路径）：本机另装的旧版 `dsh` 会直接拒绝
+   `--profile desktop`（该 profile 由 Electron App 独占管理）。
 
 ```bash
 # 官方 App 自带的 CLI（绝对路径；macOS 默认安装位置）
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
-# 在仓库根执行；若当前已在 payload 包根，改成 PLUGIN_DIR="$PWD"
-PLUGIN_DIR="$PWD/git-dist/icomposer-workbench"
+# 推荐：pin 到某个 commit，安装内容可复现
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
 
-# 子 shell + set -eu：任一步失败立即中止；临时目录只在全部成功后才清理
-( set -eu
-  PACK_DIR="$(mktemp -d)"
-
-  # 先打包成临时 tgz（App 自带 pnpm，不联网、不构建）
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$PLUGIN_DIR" pack --pack-destination "$PACK_DIR"
-
-  # 再安装（pack 只产出一个 tgz，用通配取版本，避免硬编码）
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
-
-  rm -rf "$PACK_DIR"
-)
+# 或者跟随 main（内容随提交漂移，只在想拿最新时使用）
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
 ```
 
 - `env -u DSH_HOME` = **不继承** shell 里残留的 `DSH_HOME`，让官方 CLI 使用默认
   `~/.dsh`（默认 profile 在 `~/.dsh/profiles/desktop`）。要装到别的 home 才显式设。
-- 先 `pack` 再 `add` tgz：tgz 是实体拷贝，`@deepseek-ai/*` peer 依赖能沿目录链被
-  宿主解析；直接 `add` 目录是 link 安装，文件留在原地，容易出现
-  `ERR_MODULE_NOT_FOUND`。
+- 装完**像平常一样点击 App 图标重新打开**，不要用 `.command` 之类的启动脚本。
+
+### Web UI（profile `web`）
+
+Web 宿主由本机安装的 `dsh` 启动，要求 **dsh >= 0.2.1-rc.2**；**0.1 的旧宿主不兼容**。
+
+```bash
+# 安装到 web profile（整条 spec 同样要加引号）
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
+
+# 或固定 commit
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+
+# 启动
+dsh --profile web
+```
 
 ### 更新
 
-同一个包里版本号可能不变，**必须 remove 再 add**，不能靠 `add` 覆盖。
-`set -eu` 保证 pack 失败不会继续 remove、remove 失败不会 add：
+同一个包里版本号可能不变，**必须 remove 再 add**，不要指望 `add` 覆盖已有安装。
+
+```bash
+# 官方 Desktop（先 ⌘Q）
+( set -eu
+  DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+)
+
+# Web
+( set -eu
+  dsh plugin --profile web remove @icomposer/workbench
+  dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
+)
+```
+
+`set -eu` + 子 shell 保证任一步失败就停：remove 失败不会继续 add。
+
+### 验证
+
+1. 重新打开 App（或重新执行 `dsh --profile web`）。
+2. 打开 **Settings → InsureMO**，应能看到 InsureMO 设置分区。
+3. 侧栏应显示 InsureMO 品牌，底部 Profile 选择器能列出 profile 并切换生效。
+   - **官方 macOS Desktop**：收起侧栏是 **0 宽、没有 rail**，需要先 “Open sidebar”
+     展开侧栏才能看到底部选择器。
+   - **Web**：收起后是 **56px rail**，Active Profile 选择器在这里以**浮层**打开
+     （面板定宽、锚在触发按钮上、按视口收拢）。
+
+### 回滚 / 卸载
+
+回滚 = 先 remove，再 `add` **旧 commit 的 spec**（用发布记录里的 SHA）：
+
+```bash
+( set -eu
+  DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<old-commit-sha>&path:git-dist/icomposer-workbench"
+)
+```
+
+只卸载：
 
 ```bash
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-PLUGIN_DIR="$PWD/git-dist/icomposer-workbench"
+env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+```
 
+不要把整个 profile 目录（`~/.dsh/profiles/desktop`）换成别处的副本：那会一并覆盖
+profile 里其它插件与宿主写入的状态，把一次插件回滚变成 profile 事故。
+
+### 兼容性与风险
+
+- 所有 dsh profile 共用同一个 `~/.dsh`（`~/.dsh/profiles/` 下并列 `desktop`、`web`
+  等）：凭据与 session 数据是共享的。
+- 不同版本对凭据、session 的格式**不做双向兼容承诺**：升级后不要让旧宿主继续复用
+  同一份数据，降级同理；跨版本切换前先备份。
+- 跨大版本回滚应连同宿主一起回退。
+- 动手前先备份：`cp -R ~/.dsh ~/.dsh.bak-$(date +%Y%m%d)`。
+- 只装插件、只删插件；不要手工改 profile 的依赖或整目录替换。
+
+### 离线 / 维护者安装（备选）
+
+没有外网、或要验证工作副本本身时，把本地 payload 打成 tgz 再安装：
+
+```bash
 ( set -eu
+  DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+  PLUGIN_DIR="$PWD/git-dist/icomposer-workbench"   # 在仓库根执行；已在 payload 包根则用 $PWD
   PACK_DIR="$(mktemp -d)"
-
   env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$PLUGIN_DIR" pack --pack-destination "$PACK_DIR"
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
   env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
-
   rm -rf "$PACK_DIR"
 )
 ```
 
-先 `pack` 成功再删旧版：打包失败时不要把一个还能用的安装删掉。
-
-### 验证
-
-不要用 `.command` 之类的启动脚本——像平常一样点击 App 图标打开。然后检查
-**Settings → InsureMO** 分区存在、侧栏品牌正常、底部 Profile 选择器能列出并切换
-profile。
-
-### 回滚 / 卸载
-
-```bash
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-```
-
-回滚到旧版 = 用旧版 tgz 重新 `add`。不要把整个 `~/.dsh/profiles/desktop` 换成别处
-的副本：那会连带覆盖其它插件与宿主写入的状态，把插件回滚变成 profile 事故。
-
-### 已知风险（从 0.1 升级的用户）
-
-- 官方 Desktop 与我们 0.1 的 web profile **共用同一个 `~/.dsh`**：凭据与 session
-  数据存在共享/迁移关系。
-- 新旧版本对凭据、session 格式**不做双向兼容承诺**；升级后不要指望旧宿主还能原样
-  读懂新宿主写下的数据，降级同理。
-- 动手前先备份：`cp -R ~/.dsh ~/.dsh.bak-$(date +%Y%m%d)`。
-
-更细的逐条说明（含命令输出与包内容）见
+逐条说明（含 Web 宿主差异与包内容）见
 [`packages/icomposer-workbench-dist/README.md`](packages/icomposer-workbench-dist/README.md)。
 
 ## 分发形态
 
 `packages/icomposer-workbench-dist`（包名 `@icomposer/workbench`）是分发包本体；
-`git-dist/icomposer-workbench/` 是它**已跟踪**的预构建副本，GitHub `#path:` 安装
-与上面的 pack/add 流程都消费它。
+`git-dist/icomposer-workbench/` 是它**已跟踪**的预构建副本——上面所有安装/更新/回滚
+都通过 GitHub `#path:` 指向它。
 
 ```sh
-# 1) 本地/离线分发（推荐，无需 npm registry；上面桌面流程即用这一形态）
-#    先 pack 成 tgz，再 add 该 tgz
+# 默认形态：GitHub 预构建路径（零构建安装，见「安装」）
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench"
 
-# 2) GitHub 预构建路径（零构建安装）
-#    pin 精确 commit——SHA 以发布者给出的 Release receipt 为准
-export DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+# 可复现：pin 精确 commit（SHA 以发布记录为准）
+DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>&path:git-dist/icomposer-workbench"
 
-# 3) npm（未来发布）
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add @icomposer/workbench
+# 离线：本地 payload 打成 tgz 再 add（见「离线 / 维护者安装」）
+
+# npm（未来发布）
+dsh plugin --profile web add @icomposer/workbench
 ```
 
 不要再使用指向 `packages/icomposer-workbench-dist` 的 `#path:` 地址：那是**开发
