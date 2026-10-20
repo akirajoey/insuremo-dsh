@@ -12,9 +12,10 @@ Workbench 的包修改。
 （`lib/`、`cordis.patch.yml`、`package.json`），所以一条命令就能装，不需要子目录参数。
 
 主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-0.2`
-可复现 pin：`github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7`
+可复现 pin：`github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7`
 
-> spec 建议整体加引号（`#`/`&` 在 shell 里都有特殊含义；含 `&path:` 的旧形式尤其必须加）。
+> spec 建议整体加引号：`#`/`&` 在 shell 里都有特殊含义（Windows 上引号内即安全；
+> 含 `&path:` 的旧形式尤其必须加引号）。
 
 ### 官方 Desktop（默认 profile）
 
@@ -23,64 +24,130 @@ Workbench 的包修改。
 1. 已安装官方 **DeepSeek Harness Desktop**；`plugin-dist-0.2` 面向 **dsh >= 0.2.1-rc.2**
    （包内 `engines.dsh` 为 `>=0.2.1-rc.2 <0.3.0-0`）。
 2. **先启动一次 App**，让它初始化默认 profile（`desktop`）。
-3. 之后**用 ⌘Q 完全退出 App**再执行 CLI 命令：
+3. 之后**完全退出 App**（macOS ⌘Q）再执行 CLI 命令：
    - profile 尚未被 App 初始化时，CLI 会提示 “Open DeepSeek Harness Desktop once to
      initialize its profile, then fully quit it before running dsh plugin --profile desktop.”；
    - App 仍在运行时，命令可能以其它方式失败（profile 被占用/写入冲突），**不保证**
-     是同一条提示。两种情况都请先 ⌘Q。
-4. 必须使用 **App 自带的官方 CLI**（绝对路径）：本机另装的旧版 `dsh` 会直接拒绝
-   `--profile desktop`（该 profile 由 Electron App 独占管理）。
+     是同一条提示。两种情况都请先退出 App。
+4. macOS / Linux 必须使用 **App 自带的官方 CLI**（绝对路径）：系统里另装的旧版 `dsh`
+   会直接拒绝 `--profile desktop`（该 profile 由 Electron App 独占管理）。
+   Windows 见下一小节（CLI 由 App 注册或直接用安装目录里的 `dsh.cmd`）。
+
+#### macOS / Linux
 
 ```bash
-# 官方 App 自带的 CLI（绝对路径；macOS 默认安装位置）
+# 官方 App 自带的 CLI（macOS 默认安装位置）
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
-# 跟随发布分支
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+# 跟随发布分支（/usr/bin/env 用绝对路径，绕开 shell 别名与 grc 等包装）
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
 # 可复现：pin 到这个 commit
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
 ```
 
-`env -u DSH_HOME` = 不继承 shell 里残留的 `DSH_HOME`，让官方 CLI 使用默认 `~/.dsh`
-（默认 profile 在 `~/.dsh/profiles/desktop`）。要装到别的 home 才显式设。
+`/usr/bin/env -u DSH_HOME` = 在不继承 shell 里残留 `DSH_HOME` 的情况下执行，让官方 CLI
+使用默认 `~/.dsh`（默认 profile 在 `~/.dsh/profiles/desktop`）。要装到别的 home 才显式设。
 装完**像平常一样点击 App 图标重新打开**，不要用 `.command` 之类的启动脚本。
+
+#### Windows
+
+Windows 的 `dsh` 命令由 App 注册：菜单 **Manage dsh Command… → Install/Repair** 会把
+`dsh.cmd` 写进**当前用户 PATH**（不是 `/usr/local/bin`，也不要手工改 `%PATH%`）。
+注册后**新开一个终端**再执行。App 内置 CLI 位于安装目录
+`<install>\resources\runtime\cli\dsh.cmd`，默认
+`%LOCALAPPDATA%\Programs\DeepSeek Harness`；profile 在
+`%USERPROFILE%\.dsh\profiles\desktop`。
+
+PowerShell：
+
+```powershell
+Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+# pin
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
+```
+
+cmd.exe：
+
+```bat
+set "DSH_HOME="
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+```
+
+`dsh` 还不可用（尚未注册或终端没重开）时，直接用安装目录里的 CLI：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+```
+
+```bat
+"%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+```
 
 ### Web UI（profile `web`）
 
 Web 宿主由本机安装的 `dsh` 启动，要求 **dsh >= 0.2.1-rc.2**；**0.1 的旧宿主不兼容**。
+
+#### macOS / Linux
 
 ```bash
 # 安装到 web profile
 dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
 # 或 pin
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7"
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
 
 # 启动
 dsh --profile web
 ```
 
-两种宿主都是**一条命令**：不需要额外授权、不会出现 `ERR_PNPM_IGNORED_BUILDS`、不需要改
-`allowBuilds`；安装后 profile 的 bundles 自动包含 `@icomposer/workbench`。
+#### Windows
+
+PowerShell：
+
+```powershell
+Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+dsh --profile web
+```
+
+cmd.exe：
+
+```bat
+set "DSH_HOME="
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+dsh --profile web
+```
+
+两种宿主、两个平台都是**一条命令**：不需要额外授权、不会出现
+`ERR_PNPM_IGNORED_BUILDS`、不需要改 `allowBuilds`；安装后 profile 的 bundles 自动包含
+`@icomposer/workbench`。
 
 ### 更新
 
 同一个包里版本号可能不变，**必须 remove 再 add**（同一条 spec）：
 
 ```bash
-# Desktop（先 ⌘Q）
+# macOS / Linux + Desktop（先退出 App）
 ( set -eu
   DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 )
 
-# Web
+# macOS / Linux + Web
 ( set -eu
   dsh plugin --profile web remove @icomposer/workbench
   dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 )
+```
+
+Windows（cmd.exe 同理，把 `set "DSH_HOME="` 放在最前）：
+
+```powershell
+dsh plugin --profile desktop remove @icomposer/workbench
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 ```
 
 `set -eu` + 子 shell 保证任一步失败就停：remove 失败不会继续 add。
@@ -95,6 +162,18 @@ dsh --profile web
    - **Web**：收起后是 **56px rail**，Active Profile 选择器在这里以**浮层**打开
      （面板定宽、锚在触发按钮上、按视口收拢）。
 
+### 故障排查
+
+- `env: /Users/<you>/.local/bin/env: Permission denied` 或 `grc: ... Permission denied`：
+  PATH 最前有一个**不可执行**的 `env`（uv 风格的 PATH 片段脚本常见），shell 的着色包装
+  （grc）把它当命令解析。与本插件无关。改用绝对路径 `/usr/bin/env -u DSH_HOME …`，
+  或先 `(unset DSH_HOME; dsh …)` 再执行。
+- `dsh: profile "desktop" is managed exclusively by the Electron application`：用了系统里
+  另装的旧版 `dsh`。macOS 用 App 自带的绝对路径；Windows 用 App 注册的 `dsh.cmd` 或
+  安装目录里的绝对路径。
+- `Open DeepSeek Harness Desktop once to initialize its profile…`：Desktop profile 还没被
+  App 初始化 —— 先启动一次 App。若 App 仍在运行，先完全退出再执行。
+
 ### 回滚 / 卸载
 
 回滚 = 先 remove，再 `add` **旧版本的 spec**（上一版的 commit 或旧分支）：
@@ -102,8 +181,8 @@ dsh --profile web
 ```bash
 ( set -eu
   DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<old-commit-sha>"
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<old-commit-sha>"
 )
 ```
 
@@ -111,16 +190,17 @@ dsh --profile web
 
 ```bash
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
 ```
 
-不要把整个 profile 目录（`~/.dsh/profiles/desktop`）换成别处的副本：那会一并覆盖
-profile 里其它插件与宿主写入的状态，把一次插件回滚变成 profile 事故。
+不要把整个 profile 目录（`~/.dsh/profiles/desktop`，Windows 为
+`%USERPROFILE%\.dsh\profiles\desktop`）换成别处的副本：那会一并覆盖 profile 里其它
+插件与宿主写入的状态，把一次插件回滚变成 profile 事故。
 
 ### 兼容性与风险
 
 - 所有 dsh profile 共用同一个 `~/.dsh`（`~/.dsh/profiles/` 下并列 `desktop`、`web`
-  等）：凭据与 session 数据是共享的。
+  等；Windows 为 `%USERPROFILE%\.dsh`）：凭据与 session 数据是共享的。
 - 不同版本对凭据、session 的格式**不做双向兼容承诺**：升级后不要让旧宿主继续复用
   同一份数据，降级同理；跨版本切换前先备份。
 - 跨大版本回滚应连同宿主一起回退。
@@ -133,7 +213,8 @@ profile 里其它插件与宿主写入的状态，把一次插件回滚变成 pr
 这种**子目录**形式，pnpm 会对 git 子目录做隐式打包，首次 `add` 会 exit 1 并报
 `ERR_PNPM_IGNORED_BUILDS`，需要在 profile 的 `pnpm-workspace.yaml` 里把 dsh 写入的
 `allowBuilds` 占位值改成 `true` 再重跑（Desktop：
-`~/.dsh/profiles/desktop/pnpm-workspace.yaml`；Web：`~/.dsh/profiles/web/pnpm-workspace.yaml`）。
+`~/.dsh/profiles/desktop/pnpm-workspace.yaml`；Web：`~/.dsh/profiles/web/pnpm-workspace.yaml`；
+Windows 在 `%USERPROFILE%\.dsh\profiles\<profile>\pnpm-workspace.yaml`）。
 **主路径（分支根 spec）不需要这一步。**
 
 ### 备选：离线 / 无网（clone + pack）
@@ -148,8 +229,8 @@ profile 里其它插件与宿主写入的状态，把一次插件回滚变成 pr
 
   PACK_DIR="$WORKDIR/pack"
   mkdir -p "$PACK_DIR"
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$WORKDIR/repo" pack --pack-destination "$PACK_DIR"
-  env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop --dir "$WORKDIR/repo" pack --pack-destination "$PACK_DIR"
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "$PACK_DIR"/*.tgz
 
   rm -rf "$WORKDIR"
 )
@@ -180,7 +261,7 @@ dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
 # 可复现：pin 精确 commit
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#05e844ef83e85ab1f1db6f6725712bdf1336fff7"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
 
 # 备选：离线/无网时 clone 后 pack 成 tgz 再 add（见「备选：离线 / 无网」）
 
