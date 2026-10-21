@@ -30802,7 +30802,23 @@ const MAX_ACTION_BODY_BYTES = 8192;
 const ACTION_HEADER = "x-workbench-action";
 /** Every POST shares one prefix under the overview read path's sibling. */
 const ACTIONS_PREFIX = `${OVERVIEW_PATH}/actions`;
-/** Same-origin write gate (runs before any service call). */
+/**
+* Same-origin write gate (runs before any service call).
+*
+* Desktop shell adaptation: Electron's `forwardWebRequest` deletes `origin`,
+* `host`, `cookie`, and `sec-fetch-site` from forwarded desktop requests, and
+* a same-origin `fetch` carries no `Referer` either — so a legitimate Desktop
+* write arrives with **neither** header. That case is admitted on the strength
+* of `X-Workbench-Action: 1`: a cross-site form/img/`no-cors` request cannot set
+* a custom header, and a cross-site `fetch` that did would need a CORS preflight
+* this host never answers (no `Access-Control-Allow-Origin` anywhere). The rest
+* of the gate is unchanged, so a write still has to be `application/json` and
+* still passes through the per-action body validation.
+*
+* This is not a relaxation: whenever `Origin`/`Referer` **is** present it must
+* parse and match the requested host exactly (cross-origin and cross-port keep
+* returning 403), and the action header remains mandatory in every case.
+*/
 function sameOriginGate(req) {
 	const host = typeof req.headers.host === "string" ? req.headers.host : void 0;
 	if (host === void 0 || host.length === 0) return {
@@ -30813,12 +30829,15 @@ function sameOriginGate(req) {
 	};
 	const originHeader = typeof req.headers.origin === "string" ? req.headers.origin : void 0;
 	const refererHeader = typeof req.headers.referer === "string" ? req.headers.referer : void 0;
-	if (originHeader === void 0 && refererHeader === void 0) return {
-		ok: false,
-		status: 403,
-		code: "origin-required",
-		message: "Origin or Referer header is required for write actions"
-	};
+	const hasActionHeader = req.headers[ACTION_HEADER] === "1";
+	if (originHeader === void 0 && refererHeader === void 0) {
+		if (!hasActionHeader) return {
+			ok: false,
+			status: 403,
+			code: "origin-required",
+			message: "Origin or Referer header is required for write actions (or X-Workbench-Action: 1 when the Desktop shell strips them)"
+		};
+	}
 	for (const header of [originHeader, refererHeader]) {
 		if (header === void 0) continue;
 		let parsed;
@@ -30839,7 +30858,7 @@ function sameOriginGate(req) {
 			message: `write actions must come from the Workbench host (${host})`
 		};
 	}
-	if (req.headers[ACTION_HEADER] !== "1") return {
+	if (!hasActionHeader) return {
 		ok: false,
 		status: 403,
 		code: "action-header-required",

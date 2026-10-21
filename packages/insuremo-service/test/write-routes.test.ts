@@ -129,12 +129,19 @@ async function call(server: ReturnType<typeof fakeWebServer>, name: string, over
   return res;
 }
 
-test("origin gate: missing origin/referer, cross-origin, and cross-port are 403", async () => {
+test("origin gate: bare no-Origin is 403, Desktop-stripped Origin with the action header is admitted, cross-origin/cross-port stay 403", async () => {
   const h = await fixture();
   try {
-    const noOrigin = await call(h.server, "imo-upgrade", { origin: undefined, referer: undefined });
-    assert.equal(noOrigin.status, 403);
-    assert.equal(JSON.parse(noOrigin.body).error.code, "origin-required");
+    // (a) Neither Origin nor Referer AND no X-Workbench-Action: indistinguishable
+    // from a bare cross-site POST, so it keeps the original rejection.
+    const bareNoOrigin = await call(h.server, "imo-upgrade", { origin: undefined, referer: undefined, actionHeader: undefined });
+    assert.equal(bareNoOrigin.status, 403);
+    assert.equal(JSON.parse(bareNoOrigin.body).error.code, "origin-required");
+    // (b) Desktop shell shape: Electron's forwarder deletes Origin and same-origin
+    // fetch sends no Referer, but the client's custom action header is present.
+    const desktopNoOrigin = await call(h.server, "imo-upgrade", { origin: undefined, referer: undefined });
+    assert.equal(desktopNoOrigin.status, 200);
+    assert.equal(JSON.parse(desktopNoOrigin.body).ok, true);
     const crossOrigin = await call(h.server, "imo-upgrade", { origin: "http://evil.example" });
     assert.equal(crossOrigin.status, 403);
     assert.equal(JSON.parse(crossOrigin.body).error.code, "origin-mismatch");
@@ -157,6 +164,10 @@ test("X-Workbench-Action header and content-type gate", async () => {
     const badContentType = await call(h.server, "skill-activation", { contentType: "text/plain" });
     assert.equal(badContentType.status, 400);
     assert.equal(JSON.parse(badContentType.body).error.code, "content-type");
+    // The Desktop fallback (no Origin/Referer) still owes the JSON content type.
+    const desktopBadContentType = await call(h.server, "skill-activation", { origin: undefined, referer: undefined, contentType: "text/plain" });
+    assert.equal(desktopBadContentType.status, 400);
+    assert.equal(JSON.parse(desktopBadContentType.body).error.code, "content-type");
   } finally { await h.dispose(); }
 });
 
