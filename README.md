@@ -12,7 +12,7 @@ Workbench 的包修改。
 （`lib/`、`cordis.patch.yml`、`package.json`），所以一条命令就能装，不需要子目录参数。
 
 主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-0.2`
-可复现 pin：`github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7`
+可复现 pin：`github:akirajoey/insuremo-dsh#46ee62d8729100e14a6867aec1f049ad9b9ab669`
 
 > spec 建议整体加引号：`#`/`&` 在 shell 里都有特殊含义（Windows 上引号内即安全；
 > 含 `&path:` 的旧形式尤其必须加引号）。
@@ -43,7 +43,7 @@ DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/b
 /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
 # 可复现：pin 到这个 commit
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#46ee62d8729100e14a6867aec1f049ad9b9ab669"
 ```
 
 `/usr/bin/env -u DSH_HOME` = 在不继承 shell 里残留 `DSH_HOME` 的情况下执行，让官方 CLI
@@ -65,7 +65,7 @@ PowerShell：
 Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
 dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 # pin
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#46ee62d8729100e14a6867aec1f049ad9b9ab669"
 ```
 
 cmd.exe：
@@ -96,7 +96,7 @@ Web 宿主由本机安装的 `dsh` 启动，要求 **dsh >= 0.2.1-rc.2**；**0.1
 dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
 # 或 pin
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#46ee62d8729100e14a6867aec1f049ad9b9ab669"
 
 # 启动
 dsh --profile web
@@ -261,7 +261,7 @@ dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-0.2"
 
 # 可复现：pin 精确 commit
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#3e94b179619d197e74195cb3e33527506dae26a7"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#46ee62d8729100e14a6867aec1f049ad9b9ab669"
 
 # 备选：离线/无网时 clone 后 pack 成 tgz 再 add（见「备选：离线 / 无网」）
 
