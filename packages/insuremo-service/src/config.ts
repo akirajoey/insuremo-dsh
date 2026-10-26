@@ -27,8 +27,6 @@ export const DEFAULT_SMOKE_COMMANDS: readonly (readonly string[])[] = [
   ["--version"],
   ["auth", "--help"],
   ["auth", "prepare", "--help"],
-  ["skills", "list", "--help"],
-  ["skills", "list", "--json"],
   ["icomposer", "--help"],
   ["icomposer", "push", "current", "--help"],
 ];

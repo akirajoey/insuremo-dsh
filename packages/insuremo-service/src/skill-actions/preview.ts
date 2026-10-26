@@ -1,8 +1,8 @@
 import { isSkillName } from "@deepseek-ai/dsh-skill";
 import type { Context } from "@deepseek-ai/cordis";
-import { IMO_REGISTRY } from "../imo-install.ts";
 import type { ImoSkillActivation, ImoSkillActivationSnapshot } from "../skill-activation.ts";
 import { parseSkillCatalogOutput, SKILLS_TOOL_SOURCE } from "./catalog.ts";
+import { SKILLS_TOOL_COMMAND, skillsToolArgs } from "./tool.ts";
 import type { ImoSkills } from "../skills.ts";
 import { digest, runCapture, runCaptureDetailed, type RunResult } from "../run.ts";
 import { failureDiagnosis } from "../diagnosis.ts";
@@ -20,18 +20,16 @@ import {
   type SkillActionResult,
 } from "./types.ts";
 
-/** Unpinned package by explicit product decision; registry is the shared trusted constant. */
-export const SKILLS_TOOL_COMMAND = "npx" as const;
-export const SKILLS_TOOL_PACKAGE = "@insuremo/skills-tool" as const;
-export const SKILLS_TOOL_REGISTRY: string = IMO_REGISTRY;
+/**
+ * Re-exported from the leaf module so existing importers keep their path; the
+ * values live in ./tool.ts because ../skills.ts needs them too.
+ */
+export { SKILLS_TOOL_COMMAND, SKILLS_TOOL_PACKAGE, SKILLS_TOOL_REGISTRY } from "./tool.ts";
 const MAX_PREVIEW_NAMES = 100;
 
 /** Read-only discovery argv for the trusted source; `-l` never mutates a store. */
 export function skillCatalogArgs(): readonly string[] {
-  return [
-    "-y", `--registry=${SKILLS_TOOL_REGISTRY}`, SKILLS_TOOL_PACKAGE, "add", SKILLS_TOOL_SOURCE,
-    "-l", "--skip-update-check",
-  ];
+  return skillsToolArgs("add", SKILLS_TOOL_SOURCE, "-l");
 }
 const ANSI_ESCAPE = /\u001B(?:\][^\u0007]*(?:\u0007|\u001B\\)|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 const BOX_DECORATION = /[┌┐└┘─━│┃┏┓┗┛╭╮╰╯═║╔╗╚╝╴╵╶╷]/gu;
@@ -45,7 +43,21 @@ export async function previewSkillAction(
   signal?: AbortSignal,
 ): Promise<SkillActionResult<SkillActionPreview>> {
   const before = await snapshotInventory(skills, signal);
-  if (!before.ok) return before;
+  if (!before.ok) {
+    // The precondition aborts the action before any tool run, so no
+    // captureRunDiagnosis entry exists and the Diagnose panel would stay empty:
+    // record the inventory read itself (command + structured error; the
+    // snapshot keeps digests only, so there are no raw streams to store).
+    failureDiagnosis.record({
+      kind: "skill",
+      operation: skillDiagnosisOperation(action),
+      commands: [`${SKILLS_TOOL_COMMAND} ${skillsToolArgs("list", "--json", "-g").join(" ")}`],
+      exitCode: null,
+      streams: { stdout: "", stderr: "", stdoutLossy: false, stderrLossy: false },
+      error: { code: before.error.code, message: before.error.message },
+    });
+    return before;
+  }
   const activationSnapshot = await activation.snapshot(before.value.names);
   if (activationSnapshot === undefined) return failure("pre-check-failed", "skill activation state is unavailable");
   if (action.kind === SKILL_INSTALL_KIND) {
@@ -123,39 +135,46 @@ export async function previewSkillAction(
   };
 }
 
-export function actionCommand(action: NormalizedSkillAction, defaultCommand: string): string {
-  const catalogInstall = action.kind === SKILL_INSTALL_KIND
-    && action.source.type === "alias"
-    && action.source.value === SKILLS_TOOL_SOURCE;
-  return action.kind === SKILL_UPDATE_KIND
-    || (action.kind === SKILL_INSTALL_KIND && (action.source.type === "scenario" || catalogInstall))
-    ? SKILLS_TOOL_COMMAND
-    : defaultCommand;
+/**
+ * Every skill action now runs through the independent tool: `imo skills` is
+ * unavailable in the observed IMO 0.2.37 (and not relied on anywhere here), so
+ * there is no `imo` branch left to pick — install, update, remove and
+ * activation all share one command.
+ */
+export function actionCommand(_action: NormalizedSkillAction, _defaultCommand: string): string {
+  return SKILLS_TOOL_COMMAND;
 }
 
 export function executionArgs(action: NormalizedSkillAction): readonly string[] {
   if (action.kind === SKILL_INSTALL_KIND) return installArgs(action, false);
-  if (action.kind === SKILL_REMOVE_KIND) return ["skills", "remove", ...action.names, "-g", "-a", action.agent, "-y"];
-  if (action.kind === SKILL_UPDATE_KIND) return ["-y", `--registry=${SKILLS_TOOL_REGISTRY}`, SKILLS_TOOL_PACKAGE, "update", "-g", "--skip-update-check"];
+  if (action.kind === SKILL_REMOVE_KIND) return skillsToolArgs("remove", ...action.names, "-g", "-a", action.agent, "-y");
+  if (action.kind === SKILL_UPDATE_KIND) return skillsToolArgs("update", "-g");
   return [];
 }
 
 export function installArgs(action: NormalizedInstallAction, preview: boolean): readonly string[] {
   const source = action.source;
   if (source.type === "scenario" || (source.type === "alias" && source.value === SKILLS_TOOL_SOURCE)) {
-    return [
-      "-y", `--registry=${SKILLS_TOOL_REGISTRY}`, SKILLS_TOOL_PACKAGE, "add", SKILLS_TOOL_SOURCE, "-g", "-a", action.agent,
+    return skillsToolArgs(
+      "add", SKILLS_TOOL_SOURCE, "-g", "-a", action.agent,
       ...(source.type === "scenario" ? ["-s", source.value] : action.skills.flatMap(skill => ["-s", skill])),
-      ...(preview ? ["-l"] : ["-y"]), "--skip-update-check",
-    ];
+      ...(preview ? ["-l"] : ["-y"]),
+    );
   }
-  const sourceArgs = source.type === "npm" ? ["--from-npm", source.value] : [source.value];
-  return [
-    "skills", "install", ...sourceArgs,
+  // `add` requires a positional source (`runAdd` exits on a missing one), so an
+  // npm source keeps the trusted alias as the positional placeholder and passes
+  // the real package through `--from-npm`; a git URL / local path is positional
+  // itself. Verified against skills-tool 1.1.2: `add insuremo-skills
+  // --from-npm <pkg> -l` lists that package's catalog and mutates nothing.
+  const sourceArgs = source.type === "npm"
+    ? [SKILLS_TOOL_SOURCE, "--from-npm", source.value]
+    : [source.value];
+  return skillsToolArgs(
+    "add", ...sourceArgs,
     "-g", "-a", action.agent,
     ...action.skills.flatMap(skill => ["-s", skill]),
-    ...(preview ? ["--list"] : ["-y"]),
-  ];
+    ...(preview ? ["-l"] : ["-y"]),
+  );
 }
 
 export function parsePreviewNames(output: string): readonly string[] {

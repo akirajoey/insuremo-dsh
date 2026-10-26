@@ -31,7 +31,7 @@ test("approved install mutates the store but keeps the new skill disabled", asyn
     assert.deepEqual(state.disabled, ["beta"]);
     const exec = fx.state.invocations.find(args => args.includes("-y"));
     assert.ok(exec !== undefined);
-    assert.ok(fx.state.invocations.some(args => args.includes("--list")));
+    assert.ok(fx.state.invocations.some(args => args.includes("-l")));
   });
 });
 
@@ -47,7 +47,8 @@ test("approved remove reconciles stale enabled names and reports removal", async
     assert.equal(result.receipt.catalogInvalidated, true);
     assert.deepEqual(Object.keys(fx.state.rows), []);
     const args = findInvocation(fx, "remove") ?? [];
-    assert.deepEqual(args.slice(2, 4), ["alpha", "-g"]);
+    const toolAt = args.indexOf("@insuremo/skills-tool");
+    assert.deepEqual(args.slice(toolAt + 2, toolAt + 4), ["alpha", "-g"]);
     assert.equal(args.includes("--all"), false);
     assert.equal(args.includes("-y"), true);
   });
@@ -65,7 +66,7 @@ test("approved update reports same-path digest changes and preserves enablement"
     assert.deepEqual(result.receipt.added, []);
     assert.deepEqual(result.receipt.removed, []);
     assert.equal(result.receipt.catalogInvalidated, true);
-    const updateArgs = fx.state.invocations.find(args => args.includes("@insuremo/skills-tool")) ?? [];
+    const updateArgs = fx.state.invocations.find(args => args.includes("@insuremo/skills-tool") && args.includes("update")) ?? [];
     assert.equal(updateArgs.at(-3), "update", "update runs via the skills-tool adapter");
     const state = await fx.activation.snapshot(["alpha"]);
     assert.deepEqual(state.enabled, ["alpha"]);
@@ -173,7 +174,12 @@ test("TASK-085: a failed install dry-run preview captures the diagnosis (direct 
     assert.ok(!diagnosis.stderr.includes("leaky-preview"));
     // No formal execution happened: rows untouched, no non-preview install argv.
     assert.deepEqual(Object.keys(fx.state.rows).sort(), rowsBefore);
-    const executeForms = fx.state.invocations.filter(args => args.includes("@insuremo/skills-tool") && !args.includes("-l"));
+    // Only execution runs count: the inventory read also hits the tool, but it
+    // is neither an `add` nor a mutation.
+    const executeForms = fx.state.invocations.filter((args) => {
+      const at = args.indexOf("@insuremo/skills-tool");
+      return at >= 0 && args[at + 1] === "add" && !args.includes("-l");
+    });
     assert.deepEqual(executeForms, []);
 
     // The error envelope the action route maps stays digest-only.
@@ -227,8 +233,10 @@ test("TASK-085: an unresolvable preview tool is diagnosable (structured reason, 
     const diagnosis = failureDiagnosis.snapshot("skill");
     assert.ok(diagnosis !== undefined, "the failed button must have a diagnosis to show");
     assert.equal(diagnosis.operation, "skill-install:scenario/ask-insuremo");
+    // The tool is unresolvable, so the precondition (global inventory) is what
+    // fails first and what the diagnosis has to describe.
     assert.deepEqual(diagnosis.commands, [
-      "npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool add insuremo-skills -g -a universal -s ask-insuremo -l --skip-update-check",
+      "npx -y --registry=https://public.insuremo.com/artifactory/api/npm/npm/ @insuremo/skills-tool list --json -g --skip-update-check",
     ]);
     // Nothing executed: null exit code, empty streams, structured reason.
     assert.equal(diagnosis.exitCode, null);
@@ -466,7 +474,10 @@ test("recordResult failure parks the receipt and a retry only writes evidence", 
       if (!first.ok) return;
       assert.equal(first.evidencePending, true);
       assert.equal(first.receipt.status, "completed");
-      assert.equal(fx.state.invocations.filter(a => a[1] === "install" && !a.includes("--list")).length, 1);
+      assert.equal(fx.state.invocations.filter((a) => {
+        const at = a.indexOf("@insuremo/skills-tool");
+        return at >= 0 && a[at + 1] === "add" && !a.includes("-l");
+      }).length, 1);
       // Retry: zero spawn, zero controller, zero invalidate — evidence only.
       const invocationCount = fx.state.invocations.length;
       const second = await fx.actions.execute(requested.value.operationId);

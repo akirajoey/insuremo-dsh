@@ -44,12 +44,14 @@ test("install https-git source is normalized and host is allowlisted", async () 
     assert.equal(results.ok, true);
     if (results.ok) {
       const args = findInvocation(fx, "install") ?? [];
-      const index = args.indexOf("install");
-      const source = args[index + 1];
-      assert.equal(source, "https://github.com/org/repo.git");
-      assert.equal(args.includes("--insecure"), false);
-      assert.equal(args.includes("--list"), true);
-      assert.equal(args.includes("-y"), false);
+      const toolAt = args.indexOf("@insuremo/skills-tool");
+      const toolArgs = args.slice(toolAt + 2);
+      assert.equal(toolArgs[0], "https://github.com/org/repo.git", "git URL is the positional source");
+      assert.equal(toolArgs.includes("--insecure"), false);
+      assert.equal(toolArgs.includes("-l"), true);
+      // `-y` before the package name is npx's own flag; the tool-level confirm
+      // flag must be absent in a preview run.
+      assert.equal(toolArgs.includes("-y"), false);
     }
     fx.state.invocations.length = 0;
     results = await fx.actions.request(installInput({ source: { type: "git", url: "https://gitlab.com/repo.git" } }));
@@ -63,14 +65,18 @@ test("npm and scenario sources build the exact preview argv", async () => {
     const npm = await fx.actions.request(installInput({ source: { type: "npm", package: "@scope/pkg@1.2.3" }, skills: ["beta"] }));
     assert.equal(npm.ok, true);
     const npmArgs = findInvocation(fx, "install") ?? [];
-    assert.deepEqual(npmArgs.slice(0, 5), ["skills", "install", "--from-npm", "@scope/pkg@1.2.3", "-g"]);
-    assert.equal(npmArgs.includes("--list"), true);
+    const npmToolAt = npmArgs.indexOf("@insuremo/skills-tool");
+    const npmTool = npmArgs.slice(npmToolAt + 1);
+    // `add` requires a positional source: the trusted alias stands in for it and
+    // the real npm package travels through --from-npm.
+    assert.deepEqual(npmTool.slice(0, 5), ["add", "insuremo-skills", "--from-npm", "@scope/pkg@1.2.3", "-g"]);
+    assert.equal(npmTool.includes("-l"), true);
     fx.state.invocations.length = 0;
     const scenario = await fx.actions.request(installInput({ source: { type: "scenario", value: "uic-developer" }, agent: "universal" }));
     assert.equal(scenario.ok, true);
     // TASK-079: scenario actions run through the unpinned skills-tool adapter
     // with the trusted registry and the fixed universal agent.
-    const scenarioArgs = fx.state.invocations.find(args => args.includes("@insuremo/skills-tool")) ?? [];
+    const scenarioArgs = fx.state.invocations.find(args => args.includes("@insuremo/skills-tool") && args.includes("add")) ?? [];
     assert.deepEqual(scenarioArgs.slice(0, 11), [
       "-y", "--registry=https://public.insuremo.com/artifactory/api/npm/npm/", "@insuremo/skills-tool",
       "add", "insuremo-skills", "-g", "-a", "universal", "-s", "uic-developer", "-l",

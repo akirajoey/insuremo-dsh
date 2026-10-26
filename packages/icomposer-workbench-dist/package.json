@@ -1,8 +1,17 @@
 {
   "name": "@icomposer/workbench",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "workbenchRelease": {
+    "distributionBranch": "plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37",
+    "sourceBranch": "release/workbench-0.1.1",
+    "testedWith": {
+      "dsh": "0.2.1-rc.2",
+      "imo": "0.2.37",
+      "skillsTool": "1.1.2"
+    }
+  },
   "private": true,
-  "description": "iComposer Workbench \u2014 InsureMO development workbench as a standard dsh plugin bundle",
+  "description": "iComposer Workbench — InsureMO development workbench as a standard dsh plugin bundle",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

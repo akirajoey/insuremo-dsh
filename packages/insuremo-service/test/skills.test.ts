@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { inspectSkillDocument } from "../src/skill-document.ts";
+import { skillsToolArgs } from "../src/skill-actions/tool.ts";
 import { InsuremoSkillProvider } from "../src/skill-provider.ts";
 import { expectOk, makeFakeIo, skillsFixture } from "./support/fake-subprocess.ts";
 
@@ -23,7 +24,7 @@ test("skills list defaults to project scope and returns a digest-only inventory"
     assert.deepEqual(value.skills, []);
     assert.match(value.stdoutDigest, /^sha256:[0-9a-f]{64}$/);
     assert.equal("stdout" in value, false);
-    assert.deepEqual(io.invocations[0], ["skills", "list", "--json"]);
+    assert.deepEqual(io.invocations[0], skillsToolArgs("list", "--json"));
   } finally {
     await fx.dispose();
   }
@@ -42,7 +43,7 @@ test("skills list parses global entries without changing reported paths", async 
       { name: "alpha", description: "Alpha skill", path: "./.agents/skills/alpha" },
       { name: "beta", description: "Beta skill", path: "/tmp/beta" },
     ]);
-    assert.deepEqual(io.invocations[0], ["skills", "list", "--json", "-g"]);
+    assert.deepEqual(io.invocations[0], skillsToolArgs("list", "--json", "-g"));
   } finally {
     await fx.dispose();
   }
@@ -85,10 +86,10 @@ test("skills validate marks a healthy inventory complete", async () => {
   const root = await mkdtemp(join(tmpdir(), "imo-skills-valid-"));
   const skill = join(root, "alpha");
   await mkdir(skill);
-  await writeFile(join(skill, "SKILL.md"), "---\ntitle: Alpha\n---\n# Alpha\n");
-  const io = makeFakeIo({ skillsListJson: JSON.stringify([
-    { name: "alpha", description: "Alpha", path: skill },
-  ]) });
+  await writeFile(join(skill, "SKILL.md"), "---\ntitle: Alpha\ndescription: Alpha\n---\n# Alpha\n");
+  // Real `skills-tool list --json` rows carry no description; validate() reads
+  // it from the SKILL.md it already inspects.
+  const io = makeFakeIo({ skillsListJson: JSON.stringify([{ name: "alpha", path: skill }]) });
   const fx = await skillsFixture(io, {}, root);
   try {
     const value = await expectOk(await fx.skills.validate("global"));
@@ -117,6 +118,7 @@ test("skills validate keeps damaged rows and marks inventory incomplete", async 
     const value = await expectOk(await fx.skills.validate());
     assert.equal(value.inventoryComplete, false);
     assert.equal(value.items.find((item) => item.name === "good")?.valid, true);
+
     assert.deepEqual(value.items.find((item) => item.name === "bad")?.reasons, ["missing-skill-md"]);
     assert.deepEqual(value.items.find((item) => item.name === "missing")?.reasons, ["missing-directory"]);
   } finally {

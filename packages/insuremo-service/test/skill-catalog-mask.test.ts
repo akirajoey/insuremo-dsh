@@ -65,7 +65,7 @@ async function fixture() {
     ctx.provide("subprocess", {
       resolveExecutable: async () => "/opt/homebrew/bin/imo",
       spawn: (spec: { argv: readonly string[] }): unknown => {
-        return makeHandle(spec.argv.join(" ").includes("skills list") ? inventoryJson : "{}");
+        return makeHandle(spec.argv.join(" ").includes("skills-tool list") ? inventoryJson : "{}");
       },
     } as never);
 

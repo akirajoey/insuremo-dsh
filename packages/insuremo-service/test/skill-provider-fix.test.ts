@@ -238,7 +238,7 @@ test("ImoSkills list and validate propagate cancellation to subprocess signals",
       assert.equal(result.ok, false);
       if (!result.ok) {
         assert.equal(result.error.code, "cancelled");
-        assert.equal(result.error.message, "IMO Skills operation was cancelled");
+        assert.equal(result.error.message, "Skills operation was cancelled");
       }
       assert.equal(observed.at(-1)?.aborted, true);
     }

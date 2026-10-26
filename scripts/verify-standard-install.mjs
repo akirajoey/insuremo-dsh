@@ -145,7 +145,10 @@ await scenario("a-repo-path", async () => distDir);
 
 // b) pack-dist tarball (the recommended local-distribution flow)
 await scenario("b-tgz-local", async () => {
-  const tgz = join(repoRoot, "dist-release", "icomposer-workbench-0.1.0.tgz");
+  // Track the manifest version instead of a literal: a release bump must not
+  // silently keep verifying the previous tarball.
+  const distVersion = JSON.parse(await readFile(join(repoRoot, "packages/icomposer-workbench-dist/package.json"), "utf8")).version;
+  const tgz = join(repoRoot, "dist-release", `icomposer-workbench-${distVersion}.tgz`);
   if (!existsSync(tgz)) throw new Error("tgz not found; run scripts/pack-dist.mjs first");
   return tgz;
 });

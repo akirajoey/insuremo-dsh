@@ -35,7 +35,7 @@ export async function snapshotInventory(
       .sort((left, right) => left.localeCompare(right));
     if (names.length > MAX_SKILLS) return failure("pre-check-failed", "global skill inventory exceeds the bounded action limit");
     const digests: Record<string, string> = {};
-    const validation = await skills.validate("global", signal);
+    const validation = await skills.validate("global", signal, listed.value);
     if (!validation.ok) return mapReadError(validation.error.code, validation.error.message, validation.error.stdoutDigest, validation.error.stderrDigest);
     const root = allowedRootOf(skills);
     const allowedRoot = await resolveAllowedSkillRoot(root);
@@ -95,7 +95,13 @@ function mapReadError(
   stdoutDigest?: string,
   stderrDigest?: string,
 ): SkillActionResult<never> {
-  const allowed = new Set(["cancelled", "not-found", "spawn-failed", "non-zero-exit", "timeout", "parse-error"]);
+  // The inventory read now runs through npx as well, so a missing executable
+  // means the skills tool cannot run at all — the same condition the preview
+  // and execution paths already report as `tool-unavailable`.
+  if (code === "not-found") {
+    return { ok: false, error: { code: "tool-unavailable", message: "npx is unavailable; install Node.js/npm to sync Skills" } };
+  }
+  const allowed = new Set(["cancelled", "spawn-failed", "non-zero-exit", "timeout", "parse-error"]);
   return {
     ok: false,
     error: {

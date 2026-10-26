@@ -3,5 +3,10 @@
   "harnessPath": "../deepseek-harness",
   "node": "^22.19.0 || >=24.0.0",
   "pnpm": "11.7.0",
-  "harnessVersion": "0.2.1-rc.2"
+  "harnessVersion": "0.2.1-rc.2",
+  "imoVersion": "0.2.37",
+  "skillsToolVersion": "1.1.2",
+  "workbenchVersion": "0.1.1",
+  "distributionBranch": "plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37",
+  "sourceBranch": "release/workbench-0.1.1"
 }

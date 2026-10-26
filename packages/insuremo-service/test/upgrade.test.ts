@@ -42,7 +42,7 @@ test("approved execution succeeds with a complete digest-only receipt", async ()
     assert.equal(receipt.before, "0.2.14");
     assert.equal(receipt.after, "0.2.17");
     assert.equal(receipt.exitCode, 0);
-    assert.equal(receipt.smoke.length, 7);
+    assert.equal(receipt.smoke.length, 5);
     assert.ok(receipt.smoke.every((entry) => entry.ok));
     assert.match(receipt.smoke[0]?.cmd ?? "", /imo --version$/);
     assert.match(receipt.recovery, /0\.2\.14/);
@@ -52,7 +52,7 @@ test("approved execution succeeds with a complete digest-only receipt", async ()
     const record = fx.opLog.records.get(request.operationId);
     assert.match(String(record?.resultDigest ?? ""), /^sha256:/);
     assert.equal(fx.upgrade.upgradeStatus().running, false);
-    // The upgrade actually ran against the fake: pre version, upgrade, then 7 smoke.
+    // The upgrade actually ran against the fake: pre version, upgrade, then 5 smoke.
     assert.deepEqual(io.invocations[0], ["--version"]);
     assert.deepEqual(io.invocations[1], ["upgrade", "--yes"]);
     assert.equal(io.version, "0.2.17");
@@ -126,7 +126,7 @@ test("a partially failing smoke battery is recorded accurately", async () => {
     const auth = result.receipt.smoke.find((entry) => entry.cmd === "imo auth --help");
     assert.equal(auth?.ok, false);
     assert.equal(auth?.exitCode, 3);
-    assert.ok(result.receipt.smoke.filter((entry) => entry.ok).length >= 6);
+    assert.equal(result.receipt.smoke.filter((entry) => entry.ok).length, 4);
   } finally {
     await fx.dispose();
   }

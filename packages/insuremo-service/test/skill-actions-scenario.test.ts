@@ -45,7 +45,8 @@ function scenarioRuntime(state: ManualState, root: string): SubprocessRuntime {
   function spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
     const args = [...spec.argv.slice(1)];
     state.invocations.push([...args]);
-    const stdout = args[0] === "skills" && args[1] === "list" && args[2] === "--json"
+    const toolAt = args.indexOf("@insuremo/skills-tool");
+    const stdout = toolAt >= 0 && args[toolAt + 1] === "list"
       ? `${JSON.stringify(Object.entries(state.rows).map(([name, row]) => ({ name, description: `desc-${name}`, path: row.path })))}\n`
       : args.includes("-l") ? state.installPreview : "";
     let settle!: (value: { exitCode: number | null; signal: string | null }) => void;
@@ -148,7 +149,7 @@ test("update-all uses the skills-tool argv and reports updated rows", async () =
     const result = await fx.actions.runDirect({ kind: "skill-update" });
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.deepEqual(fx.state.invocations.find(args => args.includes("@insuremo/skills-tool")), ["-y", REGISTRY_FLAG, SKILLS_TOOL_PACKAGE, "update", "-g", "--skip-update-check"]);
+    assert.deepEqual(fx.state.invocations.find(args => args.includes("@insuremo/skills-tool") && args.includes("update")), ["-y", REGISTRY_FLAG, SKILLS_TOOL_PACKAGE, "update", "-g", "--skip-update-check"]);
     assert.equal(result.receipt.status, "completed");
     assert.deepEqual([...result.receipt.updated].sort(), ["a-one", "b-two"]);
   });

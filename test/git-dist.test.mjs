@@ -84,7 +84,8 @@ test("git-dist matches a fresh source materialization (no drift)", async () => {
 });
 
 test("git-dist payload matches the packed release tarball (when present)", async () => {
-  const tgz = join(repoRoot, "dist-release", "icomposer-workbench-0.1.0.tgz");
+  const distVersion = JSON.parse(readFileSync(join(repoRoot, "packages/icomposer-workbench-dist/package.json"), "utf8")).version;
+  const tgz = join(repoRoot, "dist-release", `icomposer-workbench-${distVersion}.tgz`);
   if (!existsSync(tgz)) return; // tarball parity is enforced in CI after pack:dist
   // A pinned release tarball legitimately predates newer source changes
   // between releases (the desktop embeds it unchanged). Parity against the

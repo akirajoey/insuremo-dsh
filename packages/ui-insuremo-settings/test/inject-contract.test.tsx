@@ -75,7 +75,10 @@ describe("client inject contract (TASK-088)", () => {
     // wrapper reads (sessions + workspaces) — the exact production crash
     // bytes. Requires `pnpm pack:dist` to have produced dist-release.
     const root = resolve(packageRoot, "../..");
-    const tgz = join(root, "dist-release/icomposer-workbench-0.1.0.tgz");
+    // Follow the manifest version: after a release bump this must guard the
+    // NEW artifact, never a stale tarball left in dist-release.
+    const distVersion = (JSON.parse(readFileSync(join(root, "packages/icomposer-workbench-dist/package.json"), "utf8")) as { version: string }).version;
+    const tgz = join(root, "dist-release", `icomposer-workbench-${distVersion}.tgz`);
     expect(existsSync(tgz), "dist-release tgz missing; run pnpm pack:dist first").toBe(true);
     const stage = mkdtempSync(join(tmpdir(), "dsh088-inject-artifact-"));
     try {

@@ -174,7 +174,9 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
       return section;
     }
     const names = [...new Set(list.value.skills.map(skill => skill.name).filter((name): name is string => isSkillName(name)))].sort((left, right) => left.localeCompare(right));
-    const validation = await deps.imoSkills.validate("global", signal);
+    // Hand the successful inventory read over: validate() would otherwise run
+    // the tool's registry-backed list a second time for the same scope.
+    const validation = await deps.imoSkills.validate("global", signal, list.value);
     const validCount = validation.ok ? validation.value.items.filter(item => item.valid).length : undefined;
     let enabled = 0;
     let disabled = 0;
@@ -191,7 +193,12 @@ async function skillsSection(deps: OverviewDependencies, signal?: AbortSignal): 
       activationCode = "activation-unavailable";
     }
 
+    // The tool's rows carry no description; validation backfills it from each
+    // SKILL.md frontmatter, so prefer that map over the empty inventory strings.
     const described = new Map(list.value.skills.map(skill => [skill.name, skill.description]));
+    for (const item of validation.ok ? validation.value.items : []) {
+      if (item.description.length > 0) described.set(item.name, item.description);
+    }
     const validationItems = validation.ok
       ? validation.value.items.filter(item => names.includes(item.name))
       : [];

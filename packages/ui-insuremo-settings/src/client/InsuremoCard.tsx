@@ -830,7 +830,7 @@ class SkillsRegion extends Component<
         ) : null}
         {run.phase === "failed" ? (
           <p role="alert" data-scenario="failed" className={css.error}>
-            {installingFailedLabel}: {run.message}{run.diff === undefined ? "" : ` · ${diffText(run.diff, t)}`} · {t("skillsRetryHint")}
+            {installingFailedLabel}: {run.message}{run.diff === undefined ? "" : ` · ${diffText(run.diff, t)}`}
             <DiagnoseButton t={t} kind="skill" faces={this.props.faces} />
           </p>
         ) : null}
@@ -839,7 +839,7 @@ class SkillsRegion extends Component<
         ) : null}
         {this.state.updateError !== undefined ? (
           <p role="alert" data-update="failed" className={css.error}>
-            {t("skillsUpdateFailed")}: {this.state.updateError}{this.state.updateResult !== undefined && this.state.updateResult.status !== "completed" ? ` · ${diffText(diffOf(this.state.updateResult), t)}` : ""} · {t("skillsRetryHint")}
+            {t("skillsUpdateFailed")}: {this.state.updateError}{this.state.updateResult !== undefined && this.state.updateResult.status !== "completed" ? ` · ${diffText(diffOf(this.state.updateResult), t)}` : ""}
             <DiagnoseButton t={t} kind="skill" faces={this.props.faces} />
           </p>
         ) : null}

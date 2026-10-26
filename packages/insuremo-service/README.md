@@ -99,15 +99,19 @@ pnpm --filter @icomposer/insuremo-service run test
 
 `ImoSkillsService` provides `ctx.imoSkills` with three read-only operations:
 
-- `list('project' | 'global')` runs `imo skills list --json [-g]`, preserving
-  the reported `{ name, description, path }` rows and returning only a
+- `list('project' | 'global')` runs `@insuremo/skills-tool list --json [-g]`
+  through `npx` (the IMO CLI exposes no `skills` command in the observed
+  0.2.37), preserving the reported `{ name, path }` rows and returning only a
   stdout digest alongside them;
-- `configPath()` runs `imo skills config path`; a missing config file is a
+- `configPath()` runs `skills-tool config path`; a missing config file is a
   normal `{ exists: false }` result;
-- `validate(scope)` resolves each listed path under the current `homedir()`
+- `validate(scope, signal, listed)` resolves each listed path under the current `homedir()`
   only, rejects lexical and realpath/symlink escapes before candidate access,
   and checks `SKILL.md` without aborting the whole inventory when one row is
-  damaged. The result exposes `inventoryComplete` and per-row reasons.
+  damaged. The result exposes `inventoryComplete` and per-row reasons;
+  descriptions missing from the tool's rows are backfilled from the SKILL.md
+  frontmatter validation already parses, and `listed` lets a caller that just
+  read the same scope skip the second registry-backed read.
 
 The package also mounts a real `insuremo` provider into Harness
 `@deepseek-ai/dsh-skill` during plugin apply. It uses the global inventory,

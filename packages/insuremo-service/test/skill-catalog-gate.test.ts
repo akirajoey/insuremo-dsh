@@ -60,7 +60,7 @@ async function fixture() {
       resolveExecutable: async () => "/opt/homebrew/bin/imo",
       spawn: (spec: { argv: readonly string[] }): unknown => {
         const argv = spec.argv.join(" ");
-        return makeHandle(argv.includes("skills list") ? inventoryJson : "{}");
+        return makeHandle(String(argv).includes("skills-tool list") ? inventoryJson : "{}");
       },
     } as never);
 

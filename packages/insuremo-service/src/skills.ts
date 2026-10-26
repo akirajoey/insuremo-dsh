@@ -10,14 +10,19 @@ import {
   throwIfSkillAborted,
 } from "./skill-cancellation.ts";
 import { resolveAllowedSkillRoot, resolveSkillPath } from "./skill-path.ts";
+import { SKILLS_TOOL_COMMAND, skillsToolArgs } from "./skill-actions/tool.ts";
 import { inspectSkillDocument, type SkillDocumentIssue } from "./skill-document.ts";
 
-// ---- IMO Skills inventory (read-only) ----
+// ---- Skills inventory (read-only) ----
 
-/** Scope of an `imo skills list` query. */
+/** Scope of a `skills-tool list` query. */
 export type ImoSkillScope = "project" | "global";
 
-/** One skill row exactly as `imo skills list --json` reports it. */
+/**
+ * One skill row as `@insuremo/skills-tool list --json` reports it. The tool
+ * emits `{ name, path, scope, agents }`; `description` is not part of that
+ * payload, so it stays empty and the caller reads SKILL.md when it needs one.
+ */
 export interface ImoSkillEntry {
   readonly name: string;
   readonly description: string;
@@ -70,7 +75,12 @@ export const SKILLS_INVENTORY_UPDATED_EVENT = "skills/inventory-updated" as cons
 export interface ImoSkills {
   list(scope?: ImoSkillScope, signal?: AbortSignal): Promise<ImoResult<ImoSkillList>>;
   configPath(signal?: AbortSignal): Promise<ImoResult<ImoSkillConfigPath>>;
-  validate(scope?: ImoSkillScope, signal?: AbortSignal): Promise<ImoResult<ImoSkillValidation>>;
+  /**
+   * Validate the inventory. `listed` lets a caller that just read the same
+   * scope hand that result over: the tool's list costs a registry round trip,
+   * so a full overview/snapshot must not read it twice.
+   */
+  validate(scope?: ImoSkillScope, signal?: AbortSignal, listed?: ImoSkillList): Promise<ImoResult<ImoSkillValidation>>;
 }
 
 /** Read-only IMO Skills inventory service. All process operations route through `ctx.subprocess`. */
@@ -89,27 +99,30 @@ export class ImoSkillsService extends Service implements ImoSkills {
   }
 
   async list(scope: ImoSkillScope = "project", signal?: AbortSignal): Promise<ImoResult<ImoSkillList>> {
-    const args = scope === "global" ? ["skills", "list", "--json", "-g"] : ["skills", "list", "--json"];
-    if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+    // The inventory comes from the independent skills tool: `imo skills` is
+    // unavailable in the observed IMO 0.2.37, so depending on it fails before
+    // install even starts.
+    const args = skillsToolArgs("list", "--json", ...(scope === "global" ? ["-g"] : []));
+    if (signal?.aborted) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
     const run = await runCapture(this.ctx.subprocess, {
-      command: this.config.command,
+      command: SKILLS_TOOL_COMMAND,
       args,
       timeoutMs: this.config.timeoutMs,
       signal,
     });
     if (!run.ok) return run.error.code === "cancelled"
-      ? cancelledSkillsResult(this.config.command, args)
-      : { ok: false, error: mapRunFailure(run.error, this.config.command, args) };
-    if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+      ? cancelledSkillsResult(SKILLS_TOOL_COMMAND, args)
+      : { ok: false, error: mapRunFailure(run.error, SKILLS_TOOL_COMMAND, args) };
+    if (signal?.aborted) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
     let parsed: unknown;
     try {
       parsed = JSON.parse(run.value.stdout.text);
     } catch {
-      return parseSkillsError(run, this.config.command, args, "skills list output was not valid JSON");
+      return parseSkillsError(run, SKILLS_TOOL_COMMAND, args, "skills list output was not valid JSON");
     }
-    if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+    if (signal?.aborted) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
     if (!Array.isArray(parsed)) {
-      return parseSkillsError(run, this.config.command, args, "skills list JSON was not an array");
+      return parseSkillsError(run, SKILLS_TOOL_COMMAND, args, "skills list JSON was not an array");
     }
     const skills: ImoSkillEntry[] = parsed.map((row) => {
       const entry = typeof row === "object" && row !== null ? row as Record<string, unknown> : {};
@@ -119,27 +132,27 @@ export class ImoSkillsService extends Service implements ImoSkills {
         path: typeof entry.path === "string" ? entry.path : "",
       };
     });
-    // Coercion keeps parity with `imo skills list --json`; a malformed row
+    // Coercion keeps parity with the tool's JSON; a malformed row
     // surfaces through validate() instead of crashing the list.
     const stdoutDigest = run.value.stdoutDigest;
-    if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+    if (signal?.aborted) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
     this.ctx.emit(SKILLS_INVENTORY_UPDATED_EVENT, { scope, skills: [...skills], stdoutDigest });
     return { ok: true, value: { scope, skills, stdoutDigest } };
   }
 
   async configPath(signal?: AbortSignal): Promise<ImoResult<ImoSkillConfigPath>> {
-    const args = ["skills", "config", "path"] as const;
-    if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+    const args = skillsToolArgs("config", "path");
+    if (signal?.aborted) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
     const run = await runCapture(this.ctx.subprocess, {
-      command: this.config.command,
+      command: SKILLS_TOOL_COMMAND,
       args,
       timeoutMs: this.config.timeoutMs,
       signal,
     });
     if (!run.ok) return run.error.code === "cancelled"
-      ? cancelledSkillsResult(this.config.command, args)
-      : { ok: false, error: mapRunFailure(run.error, this.config.command, args) };
-    if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+      ? cancelledSkillsResult(SKILLS_TOOL_COMMAND, args)
+      : { ok: false, error: mapRunFailure(run.error, SKILLS_TOOL_COMMAND, args) };
+    if (signal?.aborted) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
     const path = run.value.stdout.text.split(/\r?\n/)[0]?.trim() ?? "";
     let exists = false;
     try {
@@ -147,15 +160,18 @@ export class ImoSkillsService extends Service implements ImoSkills {
     } catch {
       exists = false; // an absent config file must not crash the read
     }
-    if (signal?.aborted) return cancelledSkillsResult(this.config.command, args);
+    if (signal?.aborted) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
     return { ok: true, value: { path, exists } };
   }
 
-  async validate(scope: ImoSkillScope = "project", signal?: AbortSignal): Promise<ImoResult<ImoSkillValidation>> {
-    const args = scope === "global" ? ["skills", "list", "--json", "-g"] : ["skills", "list", "--json"];
+  async validate(scope: ImoSkillScope = "project", signal?: AbortSignal, listed?: ImoSkillList): Promise<ImoResult<ImoSkillValidation>> {
+    const args = skillsToolArgs("list", "--json", ...(scope === "global" ? ["-g"] : []));
     try {
       throwIfSkillAborted(signal);
-      const listResult = await this.list(scope, signal);
+      // Reuse the caller's successful read when it covers the same scope.
+      const listResult: ImoResult<ImoSkillList> = listed !== undefined && listed.scope === scope
+        ? { ok: true, value: listed }
+        : await this.list(scope, signal);
       if (!listResult.ok) return listResult;
       throwIfSkillAborted(signal);
       const allowedRoot = await resolveAllowedSkillRoot(this.skillsAllowedRoot);
@@ -168,6 +184,10 @@ export class ImoSkillsService extends Service implements ImoSkills {
         const absolute = resolved.canonical ?? resolved.absolute;
         const reasons: string[] = [];
         let diagnostic: ImoSkillValidationDiagnostic | undefined;
+        // `skills-tool list --json` carries no description; the inspection that
+        // validation already performs reads it from SKILL.md frontmatter, so the
+        // Settings overview keeps showing skill descriptions without extra IO.
+        let description = skill.description;
         const addPathReason = (code: string): void => {
           reasons.push(code);
           diagnostic = { code };
@@ -208,6 +228,9 @@ export class ImoSkillsService extends Service implements ImoSkills {
                   } else {
                     const inspection = await inspectSkillDocument(manifest.canonical, signal);
                     throwIfSkillAborted(signal);
+                    if (description.length === 0 && inspection.frontmatter?.description !== undefined) {
+                      description = inspection.frontmatter.description;
+                    }
                     if (inspection.invalid) {
                       const issue: SkillDocumentIssue = inspection.issue ?? {
                         code: "skill-file-unreadable",
@@ -236,7 +259,7 @@ export class ImoSkillsService extends Service implements ImoSkills {
         }
         items.push({
           name: skill.name,
-          description: skill.description,
+          description,
           path: absolute,
           valid: reasons.length === 0,
           reasons,
@@ -249,7 +272,7 @@ export class ImoSkillsService extends Service implements ImoSkills {
         value: { scope, inventoryComplete: items.every((item) => item.valid), items, checkedAt: new Date().toISOString() },
       };
     } catch (error) {
-      if (isSkillAbortError(error)) return cancelledSkillsResult(this.config.command, args);
+      if (isSkillAbortError(error)) return cancelledSkillsResult(SKILLS_TOOL_COMMAND, args);
       throw error;
     }
   }
@@ -258,7 +281,7 @@ export class ImoSkillsService extends Service implements ImoSkills {
 function cancelledSkillsResult<T>(command: string, args: readonly string[]): ImoResult<T> {
   return {
     ok: false,
-    error: { code: "cancelled", message: "IMO Skills operation was cancelled", command, args },
+    error: { code: "cancelled", message: "Skills operation was cancelled", command, args },
   };
 }
 

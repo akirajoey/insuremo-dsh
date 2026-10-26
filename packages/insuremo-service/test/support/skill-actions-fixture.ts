@@ -77,37 +77,30 @@ export function scripted(state: ScriptedState, root: string): SubprocessRuntime 
     let stdout = "";
     let stderr = "";
     let exitCode: number | null = 0;
-    if (args[0] === "skills" && args[1] === "list" && args[2] === "--json") {
+    // Every skill operation now runs through @insuremo/skills-tool via npx:
+    // `-y --registry=… <pkg> <subcommand> … --skip-update-check`.
+    const toolAt = args.indexOf("@insuremo/skills-tool");
+    const toolSub = toolAt >= 0 ? args[toolAt + 1] : undefined;
+    if (toolSub === "list") {
       if (state.failNextList) {
         state.failNextList = false;
         stderr = "list failed";
         exitCode = 1;
       } else {
-        stdout = JSON.stringify(Object.entries(state.rows).map(([name, row]) => ({ name, description: `desc-${name}`, path: row.path })));
+        // The tool's rows carry no description; validate() backfills it from SKILL.md.
+        stdout = JSON.stringify(Object.entries(state.rows).map(([name, row]) => ({ name, path: row.path })));
       }
-    } else if (args[0] === "skills" && args[1] === "install") {
-      if (args.includes("--list")) {
-        if (state.previewError !== null) {
-          ({ exitCode, stderr } = state.previewError);
-        } else {
-          stdout = state.installPreview;
-        }
-      } else if (state.mutationError !== null) {
-        ({ exitCode, stderr } = state.mutationError);
-        state.mutationError = null;
-      } else {
-        for (const name of flagValues(args, "-s")) applyInstall(state, root, name);
-        stdout = "installed\n";
-      }
-    } else if (args[0] === "skills" && args[1] === "remove") {
+    } else if (toolSub === "config") {
+      stdout = "/tmp/skills-config.json\n";
+    } else if (toolSub === "remove") {
       if (state.mutationError !== null) {
         ({ exitCode, stderr } = state.mutationError);
         state.mutationError = null;
       } else {
-        for (const name of args.slice(2, args.indexOf("-g"))) applyRemove(state, root, name);
+        for (const name of args.slice(toolAt + 2, args.indexOf("-g"))) applyRemove(state, root, name);
         stdout = "removed\n";
       }
-    } else if (args[0] === "skills" && args[1] === "update") {
+    } else if (toolSub === "update") {
       if (state.mutationError !== null) {
         ({ exitCode, stderr } = state.mutationError);
         state.mutationError = null;
@@ -115,7 +108,7 @@ export function scripted(state: ScriptedState, root: string): SubprocessRuntime 
         for (const name of Object.keys(state.rows)) applyUpdate(state, root, name);
         stdout = "updated\n";
       }
-    } else if (args[0] === "-y" && args.includes("@insuremo/skills-tool")) {
+    } else if (toolSub === "add") {
       if (args.includes("-l")) {
         if (state.previewError !== null) {
           ({ exitCode, stderr } = state.previewError);
@@ -125,12 +118,9 @@ export function scripted(state: ScriptedState, root: string): SubprocessRuntime 
       } else if (state.mutationError !== null) {
         ({ exitCode, stderr } = state.mutationError);
         state.mutationError = null;
-      } else if (args.includes("update")) {
-        for (const name of Object.keys(state.rows)) applyUpdate(state, root, name);
-        stdout = "updated\n";
-      } else if (args.includes("add")) {
-        for (const scenario of flagValues(args, "-s")) {
-          for (const name of SCENARIO_MEMBERS[scenario] ?? [`scenario-${scenario}`]) applyInstall(state, root, name);
+      } else {
+        for (const value of flagValues(args, "-s")) {
+          for (const name of SCENARIO_MEMBERS[value] ?? [value]) applyInstall(state, root, name);
         }
         stdout = "installed\n";
       }
@@ -314,8 +304,19 @@ export async function withFixture(initial: readonly string[], run: (fx: Fixture)
   }
 }
 
+/**
+ * Find one skills-tool invocation by its subcommand. The legacy `install` name
+ * maps to the tool's `add`; every other name is the tool subcommand itself.
+ * @param fx - the mounted fixture.
+ * @param sub - `install` | `add` | `remove` | `update` | `list` | `config`.
+ * @returns the recorded argv, or undefined when that subcommand never ran.
+ */
 export function findInvocation(fx: Fixture, sub: string): string[] | undefined {
-  return fx.state.invocations.find(args => args[0] === "skills" && args[1] === sub);
+  const toolSub = sub === "install" ? "add" : sub;
+  return fx.state.invocations.find((args) => {
+    const at = args.indexOf("@insuremo/skills-tool");
+    return at >= 0 && args[at + 1] === toolSub;
+  });
 }
 
 export const installInput = (over: Record<string, unknown> = {}): Record<string, unknown> => ({

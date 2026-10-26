@@ -137,6 +137,9 @@ export function fakeSubprocess(io: FakeIo): FakeSubprocess {
       let exitCode: number | null = 0;
       let pending = false;
       const key = args.join(" ");
+      // The independent skills tool runs through npx: `-y --registry=… <pkg> <subcommand> …`.
+      const toolAt = args.indexOf("@insuremo/skills-tool");
+      const toolSub = toolAt >= 0 ? args[toolAt + 1] : undefined;
       if (key === io.pendingKey) {
         pending = true;
       } else if (args[0] === "upgrade") {
@@ -151,10 +154,13 @@ export function fakeSubprocess(io: FakeIo): FakeSubprocess {
         }
       } else if (args[0] === "--version") {
         stdout = `${io.version}\n`;
-      } else if (args[0] === "skills" && args[1] === "list" && args[2] === "--json") {
+      } else if (toolSub === "list") {
         stdout = `${io.skillsListJson ?? "[]"}\n`;
-      } else if (args[0] === "skills" && args[1] === "config" && args[2] === "path") {
+      } else if (toolSub === "config" && args[toolAt + 2] === "path") {
         stdout = `${io.skillsConfigPath ?? "/tmp/skills-config.json"}\n`;
+      } else if (toolAt >= 0) {
+        // Install/update/remove/preview runs: acknowledge without touching a store.
+        stdout = `${key} ok\n`;
       } else if (io.authResponses.has(key)) {
         const response = io.authResponses.get(key)!;
         stdout = response.stdout;
