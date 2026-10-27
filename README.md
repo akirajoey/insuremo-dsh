@@ -173,6 +173,17 @@ dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-
    - **Web**：收起后是 **56px rail**，Active Profile 选择器在这里以**浮层**打开
      (面板定宽、锚在触发按钮上、按视口收拢)。
 
+### 0.1.2 增补：安装预览与诊断
+
+已知 Skills alias 的安装前校验与 Refresh 使用相同的公开目录命令和输出环境，
+再精确校验选中名称；正式安装仍只安装选中项，严格解析与白名单校验不放宽。
+CLI 即使退出码为 0，格式异常、截断或选中项消失也会保留脱敏诊断，
+Diagnose 可读取真实命令、退出码和拒绝原因。Windows 具体失败输出仍待现场复测确认。
+
+本补丁仍为 **0.1.2**，仅快进追加现有分支提交，不重写历史。
+同版本更新建议 remove 后 add **本次具体 commit SHA**，避免分支缓存读取旧包；
+具体 pin 见源码分支的根 README，本包 README 保持 `<commit-sha>` 占位以避免自引用。
+
 ### Skills 操作超时（0.1.2 起）
 
 目录刷新不再额外截断为 15 秒，与安装、更新、移除共享
