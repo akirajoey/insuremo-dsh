@@ -107,8 +107,14 @@ test("catalog source is fixed, bounded, cache-only on reads, and validates exact
 
     const requested = await fx.actions.request({ kind: "skill-install", source: { type: "alias", value: SKILLS_TOOL_SOURCE }, agent: "universal", skills: ["alpha-skill"] });
     assert.equal(requested.ok, true);
-    const preview = fx.state.invocations.find(args => args.includes(SKILLS_TOOL_PACKAGE) && args.includes("-s") && args.includes("alpha-skill"));
-    assert.deepEqual(preview, ["-y", REGISTRY_FLAG, SKILLS_TOOL_PACKAGE, "add", SKILLS_TOOL_SOURCE, "-g", "-a", "universal", "-s", "alpha-skill", "-l", "--skip-update-check"]);
+    const reads = fx.state.invocations.map((args, index) => ({ args, env: fx.state.spawnEnvs[index] }))
+      .filter(call => call.args.includes(SKILLS_TOOL_PACKAGE) && call.args.includes("-l"));
+    assert.equal(reads.length, 2);
+    for (const read of reads) {
+      assert.deepEqual(read.args, skillCatalogArgs(), "Refresh and install validation must read the same public catalog");
+      assert.deepEqual(read.env, { CI: "true", FORCE_COLOR: "0", TERM: "dumb" });
+      assert.equal(read.args.includes("-s"), false, "a selection must not change catalog discovery to include internal Skills");
+    }
   });
 });
 
@@ -303,6 +309,93 @@ test("TASK-106: the catalog child gets only the deterministic env overlay, never
       else process.env.AIGW_SSAPOC_INSUREMO_API_KEY = previousKey;
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
+    }
+  });
+});
+
+test("exit-zero format rejection is diagnosable for Refresh and install preview, without allowing mutation", async () => {
+  for (const phase of ["refresh", "preview"] as const) {
+    await withFixture([], async fx => {
+      failureDiagnosis.clear("skill");
+      try {
+        if (phase === "preview") {
+          fx.state.installPreview = CATALOG_OUTPUT;
+          assert.equal((await fx.actions.refreshCatalog()).ok, true);
+        }
+        fx.state.installPreview = `unexpected banner https://user:secret@example.test/skills\n${CATALOG_OUTPUT}`;
+        const result = phase === "refresh"
+          ? await fx.actions.refreshCatalog()
+          : await fx.actions.request({ kind: "skill-install", source: { type: "alias", value: SKILLS_TOOL_SOURCE }, agent: "universal", skills: ["alpha-skill"] });
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.error.code, "catalog-unavailable");
+        const diagnosis = failureDiagnosis.snapshot("skill");
+        assert.ok(diagnosis, `${phase} must capture a rejected exit-zero catalog`);
+        assert.equal(diagnosis.exitCode, 0);
+        assert.equal(diagnosis.operation, phase === "refresh" ? "skill-catalog" : "skill-install:alias/insuremo-skills");
+        assert.match(diagnosis.error?.message ?? "", /format/);
+        assert.equal(diagnosis.stdout.includes("unexpected banner"), true);
+        assert.equal(diagnosis.stdout.includes("user:secret"), false);
+        assert.deepEqual(diagnosis.commands, [`npx ${skillCatalogArgs().join(" ")}`]);
+        assert.deepEqual(Object.keys(fx.state.rows), []);
+        assert.equal(fx.state.invocations.some(args => args.includes("add") && !args.includes("-l")), false);
+      } finally {
+        failureDiagnosis.clear("skill");
+      }
+    });
+  }
+});
+
+test("truncated exit-zero catalogs remain rejected and carry a lossy diagnosis in both paths", async () => {
+  for (const phase of ["refresh", "preview"] as const) {
+    await withFixture([], async fx => {
+      failureDiagnosis.clear("skill");
+      try {
+        fx.state.installPreview = CATALOG_OUTPUT;
+        if (phase === "preview") assert.equal((await fx.actions.refreshCatalog()).ok, true);
+        const runtime = fx.ctx.get("subprocess")!;
+        const spawn = runtime.spawn.bind(runtime);
+        runtime.spawn = spec => {
+          const handle = spawn(spec);
+          if (!spec.argv.includes("-l")) return handle;
+          return { ...handle, collected: { ...handle.collected, stdout: {
+            readFrom: fromByte => ({ ...handle.collected.stdout!.readFrom(fromByte), lossy: true }),
+          } } };
+        };
+        const result = phase === "refresh"
+          ? await fx.actions.refreshCatalog()
+          : await fx.actions.request({ kind: "skill-install", source: { type: "alias", value: SKILLS_TOOL_SOURCE }, agent: "universal", skills: ["alpha-skill"] });
+        assert.equal(result.ok, false);
+        const diagnosis = failureDiagnosis.snapshot("skill");
+        assert.ok(diagnosis);
+        assert.equal(diagnosis.exitCode, 0);
+        assert.equal(diagnosis.stdoutTruncated, true);
+        assert.match(diagnosis.error?.message ?? "", /truncated/);
+        assert.equal(fx.state.invocations.some(args => args.includes("add") && !args.includes("-l")), false);
+      } finally {
+        failureDiagnosis.clear("skill");
+      }
+    });
+  }
+});
+
+test("a selected Skill disappearing during revalidation is denied and diagnosable", async () => {
+  await withFixture([], async fx => {
+    failureDiagnosis.clear("skill");
+    try {
+      fx.state.installPreview = CATALOG_OUTPUT;
+      assert.equal((await fx.actions.refreshCatalog()).ok, true);
+      fx.state.installPreview = CATALOG_OUTPUT.replace("Found 2 skills", "Found 1 skill")
+        .replace("|    alpha-skill\n|      Alpha helper\n", "");
+      const result = await fx.actions.request({ kind: "skill-install", source: { type: "alias", value: SKILLS_TOOL_SOURCE }, agent: "universal", skills: ["alpha-skill"] });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.error.code, "catalog-selection-invalid");
+      const diagnosis = failureDiagnosis.snapshot("skill");
+      assert.ok(diagnosis);
+      assert.equal(diagnosis.exitCode, 0);
+      assert.match(diagnosis.error?.message ?? "", /selection-mismatch/);
+      assert.equal(fx.state.invocations.some(args => args.includes("add") && !args.includes("-l")), false);
+    } finally {
+      failureDiagnosis.clear("skill");
     }
   });
 });

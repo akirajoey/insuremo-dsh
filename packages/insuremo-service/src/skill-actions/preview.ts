@@ -2,7 +2,8 @@ import { isSkillName } from "@deepseek-ai/dsh-skill";
 import type { Context } from "@deepseek-ai/cordis";
 import type { ImoSkillActivation, ImoSkillActivationSnapshot } from "../skill-activation.ts";
 import { parseSkillCatalogOutput, SKILLS_TOOL_SOURCE } from "./catalog.ts";
-import { SKILLS_TOOL_COMMAND, skillsToolArgs } from "./tool.ts";
+import { SKILLS_TOOL_COMMAND, SKILLS_TOOL_DISCOVERY_ENV, skillsToolArgs } from "./tool.ts";
+import { recordRejectedSkillCatalog } from "./catalog-diagnosis.ts";
 import type { ImoSkills } from "../skills.ts";
 import { digest, runCapture, runCaptureDetailed, type RunResult } from "../run.ts";
 import { failureDiagnosis } from "../diagnosis.ts";
@@ -68,6 +69,7 @@ export async function previewSkillAction(
       args: previewArgs,
       timeoutMs: config.timeoutMs,
       signal,
+      env: SKILLS_TOOL_DISCOVERY_ENV,
     });
     if (!run.ok) {
       // TASK-085: the dry-run failure IS the user-visible install failure —
@@ -98,11 +100,16 @@ export async function previewSkillAction(
       && action.source.type === "alias"
       && action.source.value === SKILLS_TOOL_SOURCE;
     if (catalogInstall) {
-      if (run.value.stdout.truncated) return failure("catalog-unavailable", "the trusted Skills catalog could not be verified");
-      const parsed = parseSkillCatalogOutput(run.value.stdout.text);
-      if (!parsed.ok) return failure("catalog-unavailable", "the trusted Skills catalog could not be verified");
+      const parsed = run.value.stdout.truncated
+        ? { ok: false as const, reason: "truncated" as const }
+        : parseSkillCatalogOutput(run.value.stdout.text);
+      if (!parsed.ok) {
+        recordRejectedSkillCatalog(skillDiagnosisOperation(action), previewArgs, run.value, parsed.reason);
+        return failure("catalog-unavailable", "the trusted Skills catalog could not be verified");
+      }
       const candidateNames = parsed.value.skills.map(entry => entry.name);
       if (action.skills.some(name => !candidateNames.includes(name))) {
+        recordRejectedSkillCatalog(skillDiagnosisOperation(action), previewArgs, run.value, "selection-mismatch");
         return failure("catalog-selection-invalid", "the selected Skill is not in the current trusted catalog");
       }
       return {
@@ -154,6 +161,12 @@ export function executionArgs(action: NormalizedSkillAction): readonly string[] 
 
 export function installArgs(action: NormalizedInstallAction, preview: boolean): readonly string[] {
   const source = action.source;
+  // A selected -s changes skills-tool discovery (including internal skills).
+  // Verify the same complete public catalog as Refresh; only the formal install
+  // receives -s/-a/-g. Exact-name validation below remains fail-closed.
+  if (preview && source.type === "alias" && source.value === SKILLS_TOOL_SOURCE) {
+    return skillCatalogArgs();
+  }
   if (source.type === "scenario" || (source.type === "alias" && source.value === SKILLS_TOOL_SOURCE)) {
     return skillsToolArgs(
       "add", SKILLS_TOOL_SOURCE, "-g", "-a", action.agent,

@@ -3,6 +3,8 @@ import type { Context } from "@deepseek-ai/cordis";
 import { isSkillName } from "@deepseek-ai/dsh-skill";
 import { Config, resolveConfig, type Config as ImoConfig } from "../config.ts";
 import { failureDiagnosis } from "../diagnosis.ts";
+import { recordRejectedSkillCatalog } from "./catalog-diagnosis.ts";
+import { SKILLS_TOOL_DISCOVERY_ENV } from "./tool.ts";
 import { SKILLS_TOOL_REGISTRY } from "./preview.ts";
 import { digest, runCaptureDetailed } from "../run.ts";
 import type { ImoSkillActivation, ImoSkillActivationSnapshot, SkillActivationController } from "../skill-activation.ts";
@@ -223,7 +225,7 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
       // clack's spinner writes to stdout. CI + no-color makes the known 1.1.2
       // envelope deterministic; the parser still accepts ANSI when a runtime
       // ignores these hints and fails closed on all other structure.
-      env: { CI: "true", FORCE_COLOR: "0", TERM: "dumb" },
+      env: SKILLS_TOOL_DISCOVERY_ENV,
     });
     if (!run.ok) {
       // TASK-106: a catalog failure must be diagnosable like the preview/install
@@ -249,10 +251,14 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
       this.cacheCatalog(cacheKey, snapshot);
       return { ok: true, value: snapshot };
     }
-    if (run.value.stdout.truncated) return resultFailure("catalog-unavailable", "the trusted Skills catalog is unavailable");
-    const parsed = parseSkillCatalogOutput(run.value.stdout.text);
+    const parsed = run.value.stdout.truncated
+      ? { ok: false as const, reason: "truncated" as const }
+      : parseSkillCatalogOutput(run.value.stdout.text);
     if (!parsed.ok) {
-      return resultFailure("catalog-unavailable", "the trusted Skills catalog could not be verified");
+      recordRejectedSkillCatalog("skill-catalog", skillCatalogArgs(), run.value, parsed.reason);
+      return resultFailure("catalog-unavailable", run.value.stdout.truncated
+        ? "the trusted Skills catalog is unavailable"
+        : "the trusted Skills catalog could not be verified");
     }
     const snapshot = buildSkillCatalog(parsed.value);
     this.cacheCatalog(cacheKey, snapshot);

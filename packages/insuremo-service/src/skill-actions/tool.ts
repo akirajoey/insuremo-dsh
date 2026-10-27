@@ -13,6 +13,9 @@ export const SKILLS_TOOL_COMMAND = "npx" as const;
 export const SKILLS_TOOL_PACKAGE = "@insuremo/skills-tool" as const;
 export const SKILLS_TOOL_REGISTRY: string = IMO_REGISTRY;
 
+/** The shared deterministic output overlay for catalog reads and install dry-runs. */
+export const SKILLS_TOOL_DISCOVERY_ENV = Object.freeze({ CI: "true", FORCE_COLOR: "0", TERM: "dumb" });
+
 /**
  * argv for one skills-tool run: `npx -y --registry=… @insuremo/skills-tool <args> --skip-update-check`.
  * `--skip-update-check` is always last so every invocation stays read-only with
