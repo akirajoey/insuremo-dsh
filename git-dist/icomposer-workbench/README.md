@@ -6,7 +6,7 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 
 本包是**预构建产物**：`lib/` 已经是纯 JS，安装时不编译、不装 npm 依赖、不需要编译器。
 
-发布形态是仓库中的 **payload 根分支**：`plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2` 分支的**根目录就是本包**
+发布形态是仓库中的 **payload 根分支**：`plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` 分支的**根目录就是本包**
 (`lib/`、`cordis.patch.yml`、`package.json`)，因此一条 `add` 即可安装，不需要子目录参数。
 
 ### 发布版本（0.1.2）
@@ -14,10 +14,10 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 | 项 | 值 |
 |---|---|
 | Workbench | **0.1.2** |
-| 分发分支（安装用） | `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2` |
+| 分发分支（安装用） | `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` |
 | 源码分支 | `release/workbench-0.1.2` |
 | 已验证组合（`testedWith`） | dsh `0.2.1-rc.2`、IMO `0.2.37`、`@insuremo/skills-tool` `1.1.2` |
-| 平台验证 | macOS Desktop、Web（本轮已验）；**Windows 未实机验证** |
+| 平台验证 | macOS Desktop/Web 隔离验证；Windows Skills 刷新、安装由用户复测通过 |
 
 > `testedWith` 是已验证组合，不是硬约束；唯一硬约束是包里的 `engines.dsh`
 > （`>=0.2.1-rc.2 <0.3.0-0`）。
@@ -44,7 +44,7 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
   `%USERPROFILE%\.dsh\profiles\desktop`。
 - Web：用本机安装的 `dsh` 直接操作 `web` profile。
 
-主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2`
+主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`
 可复现 pin：`github:akirajoey/insuremo-dsh#<commit-sha>`
 
 > spec 建议整体加引号：`#`/`&` 在 shell 里都有特殊含义（Windows 上引号内即安全）。
@@ -58,7 +58,7 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
 # 跟随发布分支(/usr/bin/env 用绝对路径，绕开 shell 别名与 grc 等包装)
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
 # 可复现：pin 到这个 commit
 /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>"
@@ -77,7 +77,7 @@ PowerShell：
 
 ```powershell
 Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 # pin
 dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>"
 ```
@@ -86,17 +86,17 @@ cmd.exe：
 
 ```bat
 set "DSH_HOME="
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 `dsh` 还不可用时，直接用安装目录里的 CLI：
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+& "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 ```bat
-"%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+"%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 ## 3. 安装到 Web UI(profile `web`)
@@ -105,7 +105,7 @@ dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-
 
 ```bash
 # 安装到 web profile
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
 # 或 pin
 dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>"
@@ -120,7 +120,7 @@ PowerShell：
 
 ```powershell
 Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 dsh --profile web
 ```
 
@@ -128,7 +128,7 @@ cmd.exe：
 
 ```bat
 set "DSH_HOME="
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 dsh --profile web
 ```
 
@@ -144,13 +144,13 @@ dsh --profile web
 ( set -eu
   DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
   /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 )
 
 # macOS / Linux + Web
 ( set -eu
   dsh plugin --profile web remove @icomposer/workbench
-  dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+  dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 )
 ```
 
@@ -158,7 +158,7 @@ Windows(PowerShell；cmd.exe 同理，先 `set "DSH_HOME="`)：
 
 ```powershell
 dsh plugin --profile desktop remove @icomposer/workbench
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2"
+dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 `set -eu` + 子 shell 保证任一步失败就停：remove 失败不会继续 add。
@@ -178,11 +178,14 @@ dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-
 已知 Skills alias 的安装前校验与 Refresh 使用相同的公开目录命令和输出环境，
 再精确校验选中名称；正式安装仍只安装选中项，严格解析与白名单校验不放宽。
 CLI 即使退出码为 0，格式异常、截断或选中项消失也会保留脱敏诊断，
-Diagnose 可读取真实命令、退出码和拒绝原因。Windows 具体失败输出仍待现场复测确认。
+Diagnose 可读取真实命令、退出码和拒绝原因。Windows 用户已复测目录刷新、安装通过；
+原失败输出未取得，不据此追认具体格式根因。
 
-本补丁仍为 **0.1.2**，仅快进追加现有分支提交，不重写历史。
-同版本更新建议 remove 后 add **本次具体 commit SHA**，避免分支缓存读取旧包；
-具体 pin 见源码分支的根 README，本包 README 保持 `<commit-sha>` 占位以避免自引用。
+验证通过的 **0.1.2** 已合入上面的兼容版本通道，临时带版本后缀的分支已合并并删除，
+历史不重写。旧具体 pin（如 `002eb6f2…`）仍作为该通道祖先可达，继续可复现；
+旧临时分支名安装者下次更新请 remove 后 add 当前通道或新 commit pin。
+当前已装测试包代码相同，无需立即重装。具体 pin 见源码分支根 README；
+本包 README 保持 `<commit-sha>` 占位以避免自引用。
 
 ### Skills 操作超时（0.1.2 起）
 
@@ -271,13 +274,13 @@ devDependencies**)。**主路径(分支根 spec)不需要这一步。**
 
 ## 10. 版本通道
 
-- `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2` —— **本版（0.1.2）主路径**，对应 dsh >= 0.2.1-rc.2
+- `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` —— **本版（0.1.2）主路径**，对应 dsh >= 0.2.1-rc.2
   (`engines.dsh` `>=0.2.1-rc.2 <0.3.0-0`)。
-- `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` —— 旧版（0.1.1），仍有 15 秒目录刷新上限，**保留原 SHA 不覆盖**。
+- `1369a924…`（commit pin）—— 0.1.1 冻结快照，仍有 15 秒目录刷新上限；兼容通道现已推进至 0.1.2。
 - `plugin-dist-0.2` —— 更早版本（0.1.0），**保留原 SHA 不覆盖**，需要回滚时 pin 它的原始 commit。
 - `plugin-dist` —— 0.1 宿主专用，**保留原 SHA**，新宿主上不要用。
-- 四者都是**payload 根分支**(根目录即插件包)，命令形态完全相同，**区别只在版本**；
-  新版本发布不覆盖旧分支。
+- 上述分支或 commit 都对应 **payload 根目录**；本次仅快进兼容通道并清理已合并临时分支，
+  不重写历史；更早的 `plugin-dist-0.2`、`plugin-dist` 分支不动。
 
 ## 11. 备选：离线 / 无网(clone + pack)
 
@@ -288,7 +291,7 @@ DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/b
 
 ( set -eu
   WORKDIR="$(mktemp -d)"
-  git clone --depth 1 --branch plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2 https://github.com/akirajoey/insuremo-dsh "$WORKDIR/repo"
+  git clone --depth 1 --branch plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37 https://github.com/akirajoey/insuremo-dsh "$WORKDIR/repo"
 
   PACK_DIR="$WORKDIR/pack"
   mkdir -p "$PACK_DIR"

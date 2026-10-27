@@ -2,7 +2,7 @@
   "name": "@icomposer/workbench",
   "version": "0.1.2",
   "workbenchRelease": {
-    "distributionBranch": "plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37-v0.1.2",
+    "distributionBranch": "plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37",
     "sourceBranch": "release/workbench-0.1.2",
     "testedWith": {
       "dsh": "0.2.1-rc.2",
