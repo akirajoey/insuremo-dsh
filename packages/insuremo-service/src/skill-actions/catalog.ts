@@ -16,7 +16,6 @@ export const SKILL_CATALOG_MAX_ENTRIES = 128;
  */
 export const SKILL_CATALOG_DESCRIPTION_MAX = 4096;
 export const SKILL_CATALOG_TTL_MS = 60_000;
-export const SKILL_CATALOG_TIMEOUT_MS = 15_000;
 export const SKILL_CATALOG_SCHEMA_VERSION = "1" as const;
 
 export interface SkillCatalogSkill {

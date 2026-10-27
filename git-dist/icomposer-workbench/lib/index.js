@@ -30302,7 +30302,6 @@ const SKILL_CATALOG_OUTPUT_LIMIT_BYTES = 65536;
 */
 const SKILL_CATALOG_DESCRIPTION_MAX = 4096;
 const SKILL_CATALOG_TTL_MS = 6e4;
-const SKILL_CATALOG_TIMEOUT_MS = 15e3;
 const ANSI_ESCAPE$1 = /\u001B(?:\](?:[^\u0007\u001B]|\u001B(?=\\))*\u0007|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
 const ERASE_SEQUENCE = /^\u001B\[[0-9;]*[JK]/u;
@@ -34544,7 +34543,7 @@ var ImoSkillActionsService = class extends Service {
 		const run = await runCaptureDetailed(this.ctx.subprocess, {
 			command: "npx",
 			args: skillCatalogArgs(),
-			timeoutMs: Math.min(this.#config.timeoutMs, SKILL_CATALOG_TIMEOUT_MS),
+			timeoutMs: this.#config.timeoutMs,
 			signal,
 			env: {
 				CI: "true",
@@ -35335,7 +35334,6 @@ var src_exports = /* @__PURE__ */ __exportAll({
 	SKILL_CATALOG_OUTPUT_LIMIT_BYTES: () => SKILL_CATALOG_OUTPUT_LIMIT_BYTES,
 	SKILL_CATALOG_PATH: () => SKILL_CATALOG_PATH,
 	SKILL_CATALOG_SCHEMA_VERSION: () => "1",
-	SKILL_CATALOG_TIMEOUT_MS: () => SKILL_CATALOG_TIMEOUT_MS,
 	SKILL_CATALOG_TTL_MS: () => SKILL_CATALOG_TTL_MS,
 	SKILL_INSTALL_KIND: () => SKILL_INSTALL_KIND,
 	SKILL_REMOVE_KIND: () => SKILL_REMOVE_KIND,

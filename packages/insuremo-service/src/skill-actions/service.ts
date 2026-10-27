@@ -20,7 +20,6 @@ import {
   catalogSkillNames,
   isEmptySkillCatalogOutput,
   parseSkillCatalogOutput,
-  SKILL_CATALOG_TIMEOUT_MS,
   SKILLS_TOOL_SOURCE,
   type SkillCatalogSnapshot,
 } from "./catalog.ts";
@@ -217,7 +216,9 @@ export class ImoSkillActionsService extends Service implements ImoSkillActions {
     const run = await runCaptureDetailed(this.ctx.subprocess, {
       command: SKILLS_TOOL_COMMAND,
       args: skillCatalogArgs(),
-      timeoutMs: Math.min(this.#config.timeoutMs, SKILL_CATALOG_TIMEOUT_MS),
+      // Discovery may probe Git and download/extract its npm fallback. Use the
+      // configured Skills operation budget rather than a separate 15s cap.
+      timeoutMs: this.#config.timeoutMs,
       signal,
       // clack's spinner writes to stdout. CI + no-color makes the known 1.1.2
       // envelope deterministic; the parser still accepts ANSI when a runtime

@@ -67,6 +67,32 @@ acceptance. Run the probe only on Windows; non-Windows exits 2 as
 node --test scripts/probe-windows-npx.test.mjs
 ```
 
+## Skills catalog/action timeout
+
+Catalog refresh and Skills install/update/remove share `skillActionTimeoutMs`:
+180000 ms by default, capped at 300000 ms by `resolveConfig`. Catalog discovery
+no longer adds a separate 15000 ms cap, so its Git probe, npm download, and
+extraction share the configured operation deadline. Cancellation, bounded
+output, and coalescing remain unchanged; there is no infinite-wait setting.
+Ordinary IMO/inventory reads still use the separate `timeoutMs` setting.
+
+For the aggregate `@icomposer/workbench` bundle, merge this row into the
+profile's existing `cordis.patch.yml` array, then restart that Host:
+
+```yaml
+- id: icomposer-workbench
+  config:
+    insuremoService:
+      skillActionTimeoutMs: 240000
+```
+
+Desktop uses `~/.dsh/profiles/desktop/cordis.patch.yml` (Windows:
+`%USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml`); Web uses the `web`
+profile instead. Preserve other patch rows and merge an existing matching id.
+This behavior ships in Workbench 0.1.2. The frozen 0.1.1 distribution still
+applies its 15-second catalog cap regardless of a larger configured value;
+install 0.1.2 before using a longer catalog refresh timeout.
+
 ## Approved upgrade loop
 
 `ImoUpgradeService` provides `ctx.imoUpgrade` — the approval-gated, single-

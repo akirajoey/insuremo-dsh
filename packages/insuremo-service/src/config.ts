@@ -6,7 +6,7 @@ export interface Config {
   command: string;
   /** Per one-shot read deadline, including lookup and process exit. */
   timeoutMs: number;
-  /** Bounded deadline for mutating Skills scenario/update actions. */
+  /** Catalog refresh and Skills action deadline; defaults to 180s, capped at 300s. */
   skillActionTimeoutMs: number;
   /** Deadline for the longer-running `imo upgrade` command. */
   upgradeTimeoutMs: number;
