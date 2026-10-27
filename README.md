@@ -44,8 +44,8 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
   `%USERPROFILE%\.dsh\profiles\desktop`。
 - Web：用本机安装的 `dsh` 直接操作 `web` profile。
 
-主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`
-可复现 pin：`github:akirajoey/insuremo-dsh#<commit-sha>`
+主 spec：`git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`
+可复现 pin：`git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#<commit-sha>`
 
 > spec 建议整体加引号：`#`/`&` 在 shell 里都有特殊含义（Windows 上引号内即安全）。
 
@@ -58,10 +58,10 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
 # 跟随发布分支(/usr/bin/env 用绝对路径，绕开 shell 别名与 grc 等包装)
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
 # 可复现：pin 到这个 commit
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#<commit-sha>"
 ```
 
 - `/usr/bin/env -u DSH_HOME` = 不继承 shell 里残留的 `DSH_HOME`，让官方 CLI 使用默认
@@ -77,26 +77,26 @@ PowerShell：
 
 ```powershell
 Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+dsh plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 # pin
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#<commit-sha>"
+dsh plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#<commit-sha>"
 ```
 
 cmd.exe：
 
 ```bat
 set "DSH_HOME="
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+dsh plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 `dsh` 还不可用时，直接用安装目录里的 CLI：
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+& "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 ```bat
-"%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+"%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\dsh.cmd" plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 ## 3. 安装到 Web UI(profile `web`)
@@ -105,10 +105,10 @@ dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-
 
 ```bash
 # 安装到 web profile
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+dsh plugin --profile web add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
 # 或 pin
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#<commit-sha>"
+dsh plugin --profile web add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#<commit-sha>"
 
 # 启动
 dsh --profile web
@@ -120,7 +120,7 @@ PowerShell：
 
 ```powershell
 Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+dsh plugin --profile web add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 dsh --profile web
 ```
 
@@ -128,7 +128,7 @@ cmd.exe：
 
 ```bat
 set "DSH_HOME="
-dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+dsh plugin --profile web add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 dsh --profile web
 ```
 
@@ -144,13 +144,13 @@ dsh --profile web
 ( set -eu
   DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
   /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 )
 
 # macOS / Linux + Web
 ( set -eu
   dsh plugin --profile web remove @icomposer/workbench
-  dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+  dsh plugin --profile web add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 )
 ```
 
@@ -158,7 +158,7 @@ Windows(PowerShell；cmd.exe 同理，先 `set "DSH_HOME="`)：
 
 ```powershell
 dsh plugin --profile desktop remove @icomposer/workbench
-dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
+dsh plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 ```
 
 `set -eu` + 子 shell 保证任一步失败就停：remove 失败不会继续 add。
@@ -229,7 +229,7 @@ Diagnose 可读取真实命令、退出码和拒绝原因。Windows 用户已复
 ( set -eu
   DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
   /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop remove @icomposer/workbench
-  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<old-commit-sha>"
+  /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#<old-commit-sha>"
 )
 ```
 
@@ -256,7 +256,7 @@ Diagnose 可读取真实命令、退出码和拒绝原因。Windows 用户已复
 
 ## 9. 备注：`&path:` 子目录形式才需要授权
 
-如果改用 `github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench` 这种
+如果改用 `git+https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git#main&path:git-dist/icomposer-workbench` 这种
 **子目录**形式，pnpm 会对 git 子目录做隐式打包，首次 `add` 会 exit 1 并报
 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @icomposer/workbench@https://codeload.github.com/...`，
 同时 dsh 已把占位写进 profile 的 `pnpm-workspace.yaml`：
@@ -291,7 +291,7 @@ DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/b
 
 ( set -eu
   WORKDIR="$(mktemp -d)"
-  git clone --depth 1 --branch plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37 https://github.com/akirajoey/insuremo-dsh "$WORKDIR/repo"
+  git clone --depth 1 --branch plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37 https://gitlab.insuremo.com/gbsbaseline/icomposer/insuremo-dsh.git "$WORKDIR/repo"
 
   PACK_DIR="$WORKDIR/pack"
   mkdir -p "$PACK_DIR"
