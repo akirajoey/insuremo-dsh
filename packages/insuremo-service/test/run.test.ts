@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SubprocessHandle, SubprocessRuntime, SubprocessSpawnSpec } from "@deepseek-ai/dsh-subprocess";
 import { test } from "node:test";
-import { parseNpmNpxShim, resolveSpawnArgv, runCapture } from "../src/run.ts";
+import { parseNpmNpxShim, parseNpmShim, resolveSpawnArgv, runCapture } from "../src/run.ts";
 import {
   cliFixture,
   fakeHandle,
@@ -178,6 +178,38 @@ const MODERN_NPX_SHIM = [
   "\"%NODE_EXE%\" \"%NPX_CLI_JS%\" %*",
 ].join("\r\n");
 
+/**
+ * The npm Windows shim text of npm 11.6.2 `bin/npm.cmd` and of the published
+ * npm 11.9.0 tarball's `bin/npm.cmd`: the two match after CRLF normalization
+ * and after dropping the artifact's single terminal newline (20 lines), so
+ * this one fixture represents both. Verified the same way against each
+ * release's `bin/npx.cmd`: the npm and npx files differ only in
+ * NPM_CLI_JS/NPX_CLI_JS, NPM_PREFIX_*_CLI_JS and the CLI filename, i.e. this
+ * is the production template, not a paraphrase of it.
+ */
+const MODERN_NPM_SHIM = [
+  ":: Created by npm, please don't edit manually.",
+  "@ECHO OFF",
+  "",
+  "SETLOCAL",
+  "",
+  "SET \"NODE_EXE=%~dp0\\node.exe\"",
+  "IF NOT EXIST \"%NODE_EXE%\" (",
+  "  SET \"NODE_EXE=node\"",
+  ")",
+  "",
+  "SET \"NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js\"",
+  "SET \"NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js\"",
+  "FOR /F \"delims=\" %%F IN ('CALL \"%NODE_EXE%\" \"%NPM_PREFIX_JS%\"') DO (",
+  "  SET \"NPM_PREFIX_NPM_CLI_JS=%%F\\node_modules\\npm\\bin\\npm-cli.js\"",
+  ")",
+  "IF EXIST \"%NPM_PREFIX_NPM_CLI_JS%\" (",
+  "  SET \"NPM_CLI_JS=%NPM_PREFIX_NPM_CLI_JS%\"",
+  ")",
+  "",
+  "\"%NODE_EXE%\" \"%NPM_CLI_JS%\" %*",
+].join("\r\n");
+
 const LEGACY_NPX_SHIM = [
   "@ECHO off",
   "GOTO start",
@@ -197,7 +229,35 @@ const LEGACY_NPX_SHIM = [
   "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\" \"%dp0%\\node_modules\\npm\\bin\\npx-cli.js\" %*",
 ].join("\r\n");
 
-interface NpxFixture {
+/** Known legacy cmd-shim shape; identical to the npx legacy form apart from the CLI. */
+const LEGACY_NPM_SHIM = [
+  "@ECHO off",
+  "GOTO start",
+  ":find_dp0",
+  "SET dp0=%~dp0",
+  "EXIT /b",
+  ":start",
+  "SETLOCAL",
+  "CALL :find_dp0",
+  "IF EXIST \"%dp0%\\node.exe\" (",
+  "  SET \"_prog=%dp0%\\node.exe\"",
+  ") ELSE (",
+  "  SET \"_prog=node\"",
+  "  SET PATHEXT=%PATHEXT:;.JS;=;%",
+  ")",
+  "",
+  "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\" \"%dp0%\\node_modules\\npm\\bin\\npm-cli.js\" %*",
+].join("\r\n");
+
+type NpmToolName = "npm" | "npx";
+type ShimFormatName = "modern" | "legacy";
+
+const SHIM_FIXTURES: Readonly<Record<NpmToolName, Readonly<Record<ShimFormatName, string>>>> = {
+  npm: { modern: MODERN_NPM_SHIM, legacy: LEGACY_NPM_SHIM },
+  npx: { modern: MODERN_NPX_SHIM, legacy: LEGACY_NPX_SHIM },
+};
+
+interface ShimFixture {
   root: string;
   shim: string;
   node: string;
@@ -205,21 +265,32 @@ interface NpxFixture {
   prefix: string;
 }
 
-async function npxFixture(withSiblingNode = true): Promise<NpxFixture> {
-  const root = await mkdtemp(join(tmpdir(), "imo-npx-shim-"));
+async function shimFixture(options: {
+  tool: NpmToolName;
+  format?: ShimFormatName;
+  withSiblingNode?: boolean;
+}): Promise<ShimFixture> {
+  const { tool, format = "modern", withSiblingNode = true } = options;
+  // The temp root deliberately contains a space: the verified node/CLI paths
+  // of the real install steps must survive a spaced installation directory.
+  const root = await mkdtemp(join(tmpdir(), `imo ${tool} shim-`));
   const npmBin = join(root, "node_modules", "npm", "bin");
-  const shim = join(root, "npx.cmd");
+  const shim = join(root, `${tool}.cmd`);
   const node = join(root, "node.exe");
-  const cli = join(npmBin, "npx-cli.js");
+  const cli = join(npmBin, `${tool}-cli.js`);
   const prefix = join(npmBin, "npm-prefix.js");
   await mkdir(npmBin, { recursive: true });
-  await writeFile(shim, MODERN_NPX_SHIM);
+  await writeFile(shim, SHIM_FIXTURES[tool][format]);
   await writeFile(cli, "// trusted test fixture\n");
   await writeFile(prefix, "// trusted test fixture\n");
   if (withSiblingNode) await writeFile(node, "native node test fixture\n");
   await chmod(shim, 0o755);
   if (withSiblingNode) await chmod(node, 0o755);
   return { root, shim, node, cli, prefix };
+}
+
+function npxFixture(withSiblingNode = true): Promise<ShimFixture> {
+  return shimFixture({ tool: "npx", withSiblingNode });
 }
 
 function resolver(
@@ -392,6 +463,160 @@ test("Windows npx resolver rejects wrappers and never trusts captured paths", as
   }
 });
 
+const NPM_INSTALL_ARGS = ["config", "set", "@insuremo:registry", "https://public.insuremo.com/artifactory/api/npm/npm/"] as const;
+const NPM_ADD_ARGS = ["install", "-g", "@insuremo/imo"] as const;
+
+test("Windows npm shim parser accepts the npm shapes and rejects cross-tool or drifted content", () => {
+  assert.equal(MODERN_NPM_SHIM.split("\r\n").length, 20);
+  assert.deepEqual(parseNpmShim(MODERN_NPM_SHIM, "npm"), {
+    format: "modern",
+    nodePolicy: "sibling-or-path",
+    cliPolicy: "sibling-npm-cli",
+  });
+  assert.deepEqual(parseNpmShim(LEGACY_NPM_SHIM, "npm"), {
+    format: "legacy",
+    nodePolicy: "sibling-or-path",
+    cliPolicy: "sibling-npm-cli",
+  });
+  // BOM/CRLF tolerance is unchanged; the accepted shape is not widened.
+  assert.equal(parseNpmShim(`\uFEFF${MODERN_NPM_SHIM}`, "npm")?.format, "modern");
+  assert.equal(parseNpmShim(`${MODERN_NPM_SHIM}\r\nSET "NPM_CLI_JS=C:\\attacker\\npm-cli.js"`, "npm"), undefined);
+  assert.equal(parseNpmShim(MODERN_NPM_SHIM.replace("SETLOCAL", "SETLOCAL & echo hi"), "npm"), undefined);
+  assert.equal(parseNpmShim("x".repeat(16 * 1024 + 1), "npm"), undefined);
+  // A tool only accepts its own template: npm.cmd running the npx CLI (or the
+  // reverse) is an unknown shape, not a relabeled allowed one.
+  assert.equal(parseNpmShim(MODERN_NPX_SHIM, "npm"), undefined);
+  assert.equal(parseNpmShim(MODERN_NPM_SHIM, "npx"), undefined);
+});
+
+test("Windows npm resolver launches both real install steps as native node + verified npm-cli.js", async () => {
+  const fx = await shimFixture({ tool: "npm" });
+  const resolves: string[] = [];
+  const probes: SubprocessSpawnSpec[] = [];
+  try {
+    for (const args of [NPM_INSTALL_ARGS, NPM_ADD_ARGS]) {
+      const argv = await resolveSpawnArgv(
+        resolver(
+          async command => { resolves.push(command); throw new Error(`unexpected ${command}`); },
+          spec => { probes.push(spec); return prefixProbe(fx.root)(spec); },
+        ),
+        fx.shim,
+        args,
+        { platform: "win32", cwd: "/tmp/work space" },
+      );
+      // `C:\Program Files\nodejs\npm.cmd` never reaches cmd: the argv is the
+      // npm CLI driven by its own node, with the install arguments verbatim.
+      assert.deepEqual(argv, [await realpath(fx.node), await realpath(fx.cli), ...args]);
+      // Regression guard: both verified paths live under a directory whose name
+      // contains a space, i.e. this is the spaced-install-path case.
+      assert.match(String(argv[0]), /imo npm shim-/u);
+      assert.match(String(argv[1]), /imo npm shim-.*node_modules/u);
+    }
+    assert.deepEqual(resolves, []);
+    assert.equal(probes.length, 2);
+    for (const spec of probes) assert.deepEqual(spec.argv, [await realpath(fx.node), await realpath(fx.prefix)]);
+  } finally {
+    await rm(fx.root, { recursive: true, force: true });
+  }
+});
+
+test("legacy npm shim resolves the sibling npm-cli.js without probing a prefix", async () => {
+  const fx = await shimFixture({ tool: "npm", format: "legacy" });
+  const spawns: SubprocessSpawnSpec[] = [];
+  try {
+    const argv = await resolveSpawnArgv(
+      resolver(
+        async () => { throw new Error("sibling node should satisfy the shim"); },
+        spec => { spawns.push(spec); return fakeHandle({ stdout: "", stderr: "", exitCode: 0 }, spec.signal); },
+      ),
+      fx.shim,
+      NPM_ADD_ARGS,
+      { platform: "win32" },
+    );
+    assert.deepEqual(argv, [await realpath(fx.node), await realpath(fx.cli), ...NPM_ADD_ARGS]);
+    assert.equal(spawns.length, 0);
+  } finally {
+    await rm(fx.root, { recursive: true, force: true });
+  }
+});
+
+test("modern npm shim follows a verified global prefix to the npm CLI, never the npx one", async () => {
+  const fx = await shimFixture({ tool: "npm" });
+  const prefixRoot = await mkdtemp(join(tmpdir(), "imo-npm-prefix-"));
+  const prefixBin = join(prefixRoot, "node_modules", "npm", "bin");
+  await mkdir(prefixBin, { recursive: true });
+  await writeFile(join(prefixBin, "npm-cli.js"), "// relocated npm CLI test fixture\n");
+  await writeFile(join(prefixBin, "npx-cli.js"), "// decoy CLI test fixture\n");
+  try {
+    const argv = await resolveSpawnArgv(
+      resolver(async () => { throw new Error("sibling node should satisfy the shim"); }, prefixProbe(prefixRoot)),
+      fx.shim,
+      ["--version"],
+      { platform: "win32" },
+    );
+    assert.deepEqual(argv, [await realpath(fx.node), await realpath(join(prefixBin, "npm-cli.js")), "--version"]);
+  } finally {
+    await rm(fx.root, { recursive: true, force: true });
+    await rm(prefixRoot, { recursive: true, force: true });
+  }
+});
+
+test("missing npm CLI fails closed instead of falling back to cmd", async () => {
+  const fx = await shimFixture({ tool: "npm" });
+  const emptyPrefix = await mkdtemp(join(tmpdir(), "imo-npm-empty-prefix-"));
+  try {
+    await unlink(fx.cli);
+    await assert.rejects(
+      resolveSpawnArgv(
+        resolver(async () => { throw new Error("sibling node should satisfy the shim"); }, prefixProbe(emptyPrefix)),
+        fx.shim,
+        [],
+        { platform: "win32" },
+      ),
+      /npm cli is unavailable/,
+    );
+  } finally {
+    await rm(fx.root, { recursive: true, force: true });
+    await rm(emptyPrefix, { recursive: true, force: true });
+  }
+});
+
+test("npm.cmd carrying the npx template is rejected before any launch", async () => {
+  const fx = await shimFixture({ tool: "npm" });
+  try {
+    await writeFile(fx.shim, MODERN_NPX_SHIM);
+    await assert.rejects(
+      resolveSpawnArgv(resolver(async () => { throw new Error("must not resolve a companion node"); }), fx.shim, [], { platform: "win32" }),
+      /unsupported npm shim/,
+    );
+  } finally {
+    await rm(fx.root, { recursive: true, force: true });
+  }
+});
+
+test("npm resolver rejects a sibling npm CLI that escapes the shim directory", async () => {
+  const fx = await shimFixture({ tool: "npm" });
+  const outsideRoot = await mkdtemp(join(tmpdir(), "imo-npm-outside-"));
+  const outsideCli = join(outsideRoot, "npm-cli.js");
+  await writeFile(outsideCli, "outside npm CLI test fixture\n");
+  try {
+    await unlink(fx.cli);
+    await symlink(outsideCli, fx.cli);
+    await assert.rejects(
+      resolveSpawnArgv(
+        resolver(async () => { throw new Error("sibling node should satisfy the shim"); }, prefixProbe(fx.root)),
+        fx.shim,
+        [],
+        { platform: "win32" },
+      ),
+      /path outside shim directory/,
+    );
+  } finally {
+    await rm(fx.root, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
 test("Windows npx prefix probe shares the caller cancellation signal", async () => {
   const fx = await npxFixture();
   const controller = new AbortController();
@@ -428,5 +653,11 @@ test("non-Windows and non-npx shim argv preserve their existing shell-free/legac
   assert.deepEqual(
     await resolveSpawnArgv(runtime, "C:\\Program Files\\imo.cmd", ["--version"], { platform: "win32", comspec: "C:\\Windows\\System32\\cmd.exe" }),
     ["C:\\Windows\\System32\\cmd.exe", "/d", "/s", "/c", "C:\\Program Files\\imo.cmd --version"],
+  );
+  // Residual, unchanged on purpose: pnpm.cmd keeps the historical cmd boundary
+  // (and its unquoted join) — this card does not widen the adapter to it.
+  assert.deepEqual(
+    await resolveSpawnArgv(runtime, "C:\\Program Files\\pnpm\\pnpm.cmd", ["add", "-g", "@insuremo/imo"], { platform: "win32", comspec: "C:\\Windows\\System32\\cmd.exe" }),
+    ["C:\\Windows\\System32\\cmd.exe", "/d", "/s", "/c", "C:\\Program Files\\pnpm\\pnpm.cmd add -g @insuremo/imo"],
   );
 });

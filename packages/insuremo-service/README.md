@@ -22,39 +22,50 @@ call remote APIs, or provide UI. `ImoUpgradeService` and the Auth actions seam
 below are the only side-effecting surfaces; both require an approved operation
 record.
 
-### Windows npm npx compatibility
+### Windows npm/npx shim compatibility
 
-Skill catalog, preview, single-skill, scenario, and update paths all use the
-shared runner in `src/run.ts`. On Windows, a resolved `npx.cmd`/`npx.bat` is
-never handed to `cmd.exe`: the adapter reads at most 16 KiB and accepts only
-the verified npm-generated modern or legacy shim shapes. It derives the fixed
-`node_modules/npm/bin/npx-cli.js` entry from the canonical shim directory,
-verifies canonical real-file containment, prefers a sibling `node.exe` exactly
-as the shim does, and resolves bare `node` through `ctx.subprocess` only when
-the sibling is absent. npm 11's global-prefix relocation is preserved through
-the contained `npm-prefix.js` read-only helper: its single absolute prefix line
-is validated and its candidate CLI is accepted only as a canonical real file
-under that prefix. Both the helper probe and the final CLI run retain the
-managed runtime's argv, cwd, environment, output caps, grace period, and
-cancellation signal; no batch file is executed and no shell command string is
-constructed.
+Skill catalog, preview, single-skill, scenario, and update paths, plus the
+one-shot IMO install (`npm config set`, `npm install -g`) and the upgrade
+paths, all use the shared runner in `src/run.ts`. On Windows, a resolved
+`npm.cmd`/`npm.bat` or `npx.cmd`/`npx.bat` is never handed to `cmd.exe`: the
+adapter reads at most 16 KiB and accepts only the verified npm-generated modern
+or legacy shim shape **for that same tool**. It derives the fixed
+`node_modules/npm/bin/npm-cli.js` (npm) or `node_modules/npm/bin/npx-cli.js`
+(npx) entry from the canonical shim directory, verifies canonical real-file
+containment, prefers a sibling `node.exe` exactly as the shim does, and
+resolves bare `node` through `ctx.subprocess` only when the sibling is absent.
+The modern global-prefix relocation is preserved through the contained
+`npm-prefix.js` read-only helper: its single absolute prefix line is validated
+and its candidate CLI is accepted only as a canonical real file under that
+prefix and for the same tool. Both the helper probe and the final CLI run
+retain the managed runtime's argv, cwd, environment, output caps, grace period,
+and cancellation signal; no batch file is executed and no shell command string
+is constructed. This is what keeps a standard Windows Node installation at
+`C:\Program Files\nodejs` working: the spaced install path never reaches a
+shell that could split it.
 
-Version-manager/corepack wrappers, malformed or oversized shims, missing
-paired files, and symlink escapes fail with a fixed redacted error instead of
-falling back to an arbitrary executable or cache package. Other Windows
-`.cmd`/`.bat` commands (including `imo.cmd`) retain the historical cmd boundary
-and are outside this focused npx fix.
+Version-manager/corepack wrappers, malformed or oversized shims, a shim
+carrying the other tool's template, missing paired files, and symlink escapes
+fail with a fixed redacted error instead of falling back to an arbitrary
+executable, the other npm CLI, or a cache package. Other Windows `.cmd`/`.bat`
+commands — `pnpm.cmd` and `imo.cmd` in particular — retain the historical cmd
+boundary, whose unquoted join still splits a spaced executable path; that
+residual is deliberate and outside this npm/npx adapter.
 
 `scripts/probe-windows-npx.mjs` is a standalone, bounded **adapter-policy
-probe**, not the Workbench runtime or a Web smoke test. It mirrors the fixed
-shim/prefix/path checks (including one clean absolute prefix line, control
-character rejection, `node.exe` identity, canonical containment, bounded
-output, and one shared deadline), then runs `--version` only for the accepted
-pair; a relocated CLI is never started unless its prefix output and canonical
-containment checks pass. It performs no install or registry access. The probe
-intentionally does not import `src/run.ts`: the production resolver is tested
-through the package's `tsx` test entry, while this executable probe avoids a
-source-loader/Harness dependency on the Windows host. An exit-0
+probe** for the npx shim, not the Workbench runtime or a Web smoke test. It
+mirrors the fixed shim/prefix/path checks (including one clean absolute prefix
+line, control character rejection, `node.exe` identity, canonical containment,
+bounded output, and one shared deadline), then runs `--version` only for the
+accepted pair; a relocated CLI is never started unless its prefix output and
+canonical containment checks pass. It performs no install or registry access.
+The probe intentionally does not import `src/run.ts`: the production resolver
+is tested through the package's `tsx` test entry, while this executable probe
+avoids a source-loader/Harness dependency on the Windows host. It stays
+npx-only by design — it mirrors the npx shim and is not evidence for the npm
+production chain (`npm config set`, `npm install -g`). The package's `tsx`
+tests cover the adapter policy for both tools; Windows host product-chain
+regression remains required. An exit-0
 `SHIM-CHECK-PASS` proves only that this host's accepted npm pair can start
 without cmd.exe splitting a spaced path; it does **not** prove the production
 resolver, Harness subprocess lifecycle, plugin loading, Web launch, or any

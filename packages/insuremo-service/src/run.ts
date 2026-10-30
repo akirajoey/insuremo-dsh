@@ -186,66 +186,138 @@ export async function resolveWithDeadline(
 /** Maximum bytes read from an npm Windows shim during the safe adapter probe. */
 export const WINDOWS_NPX_SHIM_MAX_BYTES = 16 * 1024;
 
-const WINDOWS_NPX_CLI_PARTS = ["node_modules", "npm", "bin", "npx-cli.js"] as const;
+/**
+ * The npm CLI tools whose Windows batch shim must never reach cmd.exe: the
+ * shell splits the spaced install path (`C:\Program Files\nodejs\npm.cmd`)
+ * before npm ever starts. Both tools ship the same npm-generated shim shape.
+ */
+export type NpmTool = "npm" | "npx";
+
+/**
+ * Fixed npm-relative CLI entry per tool. Both entries are derived from the
+ * canonical shim directory (or the verified global-prefix directory); a
+ * path-looking token is never captured from the batch text.
+ */
+const NPM_TOOL_CLI_PARTS: Readonly<Record<NpmTool, readonly string[]>> = {
+	npm: ["node_modules", "npm", "bin", "npm-cli.js"],
+	npx: ["node_modules", "npm", "bin", "npx-cli.js"],
+};
+
 const WINDOWS_NPM_PREFIX_PARTS = ["node_modules", "npm", "bin", "npm-prefix.js"] as const;
 
-/** Only these two npm-generated batch shapes are accepted by the npx adapter. */
-export type NpxShimFormat = "modern" | "legacy";
+/** Only these two npm-generated batch shapes are accepted by the adapter. */
+export type NpmShimFormat = "modern" | "legacy";
 
-export interface ParsedNpxShim {
-	readonly format: NpxShimFormat;
+export interface ParsedNpmShim {
+	readonly format: NpmShimFormat;
 	/** Both accepted npm shapes prefer a sibling node.exe and fall back to PATH. */
 	readonly nodePolicy: "sibling-or-path";
 	/** The CLI path is the fixed npm package path under the shim directory. */
 	readonly cliPolicy: "sibling-npm-cli";
 }
 
-const MODERN_NPX_SHIM_LINES = [
-	":: created by npm, please don't edit manually.",
-	"@echo off",
-	"setlocal",
-	'set "node_exe=%~dp0\\node.exe"',
-	'if not exist "%node_exe%" (',
-	'set "node_exe=node"',
-	")",
-	'set "npm_prefix_js=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"',
-	'set "npx_cli_js=%~dp0\\node_modules\\npm\\bin\\npx-cli.js"',
-	'for /f "delims=" %%f in (\'call "%node_exe%" "%npm_prefix_js%"\') do (',
-	'set "npm_prefix_npx_cli_js=%%f\\node_modules\\npm\\bin\\npx-cli.js"',
-	")",
-	'if exist "%npm_prefix_npx_cli_js%" (',
-	'set "npx_cli_js=%npm_prefix_npx_cli_js%"',
-	")",
-	'"%node_exe%" "%npx_cli_js%" %*',
-] as const;
+/** Original npx-scoped names, kept so existing npx callers still typecheck. */
+export type NpxShimFormat = NpmShimFormat;
+export type ParsedNpxShim = ParsedNpmShim;
 
-const LEGACY_NPX_SHIM_LINES = [
-	"@echo off",
-	"goto start",
-	":find_dp0",
-	"set dp0=%~dp0",
-	"exit /b",
-	":start",
-	"setlocal",
-	"call :find_dp0",
-	'if exist "%dp0%\\node.exe" (',
-	'set "_prog=%dp0%\\node.exe"',
-	") else (",
-	'set "_prog=node"',
-	"set pathext=%pathext:;.js;=;%",
-	")",
-	'endlocal & goto #_undefined_# 2>nul || title %comspec% & "%_prog%" "%dp0%\\node_modules\\npm\\bin\\npx-cli.js" %*',
-] as const;
+/** `node_modules\npm\bin\<tool>-cli.js`, as spelled inside an npm batch shim. */
+const SHIM_CLI_REL: Readonly<Record<NpmTool, string>> = {
+	npm: "node_modules\\npm\\bin\\npm-cli.js",
+	npx: "node_modules\\npm\\bin\\npx-cli.js",
+};
 
 /**
- * Parse only the exact npm-generated npx shim forms known to this adapter.
+ * The modern npm shim template, parameterized by tool. Verified against
+ * `bin/npm.cmd` and `bin/npx.cmd` of npm 11.6.2 and of the published npm
+ * 11.9.0 tarball: within a release the two files are byte-identical apart from
+ * NPM_CLI_JS/NPX_CLI_JS, NPM_PREFIX_*_CLI_JS and the CLI filename, and across
+ * those releases the shims are unchanged. No other version is claimed.
+ */
+function modernShimLines(tool: NpmTool): readonly string[] {
+	const cliVar = tool === "npm" ? "npm_cli_js" : "npx_cli_js";
+	const prefixCliVar = tool === "npm" ? "npm_prefix_npm_cli_js" : "npm_prefix_npx_cli_js";
+	const cliRel = SHIM_CLI_REL[tool];
+	return [
+		":: created by npm, please don't edit manually.",
+		"@echo off",
+		"setlocal",
+		'set "node_exe=%~dp0\\node.exe"',
+		'if not exist "%node_exe%" (',
+		'set "node_exe=node"',
+		")",
+		'set "npm_prefix_js=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"',
+		`set "${cliVar}=%~dp0\\${cliRel}"`,
+		'for /f "delims=" %%f in (\'call "%node_exe%" "%npm_prefix_js%"\') do (',
+		`set "${prefixCliVar}=%%f\\${cliRel}"`,
+		")",
+		`if exist "%${prefixCliVar}%" (`,
+		`set "${cliVar}=%${prefixCliVar}%"`,
+		")",
+		`"%node_exe%" "%${cliVar}%" %*`,
+	];
+}
+
+/** The known legacy cmd-shim batch template, parameterized by tool. */
+function legacyShimLines(tool: NpmTool): readonly string[] {
+	const cliRel = SHIM_CLI_REL[tool];
+	return [
+		"@echo off",
+		"goto start",
+		":find_dp0",
+		"set dp0=%~dp0",
+		"exit /b",
+		":start",
+		"setlocal",
+		"call :find_dp0",
+		'if exist "%dp0%\\node.exe" (',
+		'set "_prog=%dp0%\\node.exe"',
+		") else (",
+		'set "_prog=node"',
+		"set pathext=%pathext:;.js;=;%",
+		")",
+		`endlocal & goto #_undefined_# 2>nul || title %comspec% & "%_prog%" "%dp0%\\${cliRel}" %*`,
+	];
+}
+
+const MODERN_NPM_SHIM_LINES = modernShimLines("npm");
+const LEGACY_NPM_SHIM_LINES = legacyShimLines("npm");
+const MODERN_NPX_SHIM_LINES = modernShimLines("npx");
+const LEGACY_NPX_SHIM_LINES = legacyShimLines("npx");
+
+/**
+ * Which npm tool, if any, this Windows executable path is the batch shim of.
+ * Everything else (pnpm.cmd, imo.cmd, POSIX shims, plain binaries) returns
+ * undefined and keeps the historical launch boundary.
+ */
+function windowsNpmTool(executablePath: string, platform: string): NpmTool | undefined {
+	if (platform !== "win32") return undefined;
+	const api = pathApiFor(platform, executablePath);
+	switch (api.basename(executablePath).toLowerCase()) {
+		case "npm.cmd":
+		case "npm.bat":
+			return "npm";
+		case "npx.cmd":
+		case "npx.bat":
+			return "npx";
+		default:
+			// Explicit matches only: no prototype key (e.g. "constructor") can
+			// ever select a tool.
+			return undefined;
+	}
+}
+
+/**
+ * Parse only the exact npm-generated npm/npx shim forms known to this adapter.
  *
  * This parser intentionally returns policies, not paths. A path-looking token
  * captured from a batch file is never trusted as an executable or CLI entry;
  * callers derive the two fixed npm-relative paths from the canonical shim
- * directory and verify them as real files before spawning.
+ * directory and verify them as real files before spawning. Content is matched
+ * against the accepted shape for THIS tool only, so an npm.cmd carrying the
+ * npx template (or the reverse) is rejected instead of silently launching the
+ * other CLI.
  */
-export function parseNpmNpxShim(content: string): ParsedNpxShim | undefined {
+export function parseNpmShim(content: string, tool: NpmTool): ParsedNpmShim | undefined {
 	if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > WINDOWS_NPX_SHIM_MAX_BYTES) return undefined;
 	const lines = content
 		.replace(/^\uFEFF/u, "")
@@ -253,13 +325,24 @@ export function parseNpmNpxShim(content: string): ParsedNpxShim | undefined {
 		.split("\n")
 		.map(normalizeBatchLine)
 		.filter(line => line.length > 0);
-	if (sameLines(lines, MODERN_NPX_SHIM_LINES)) {
+	const [modern, legacy] = tool === "npm"
+		? [MODERN_NPM_SHIM_LINES, LEGACY_NPM_SHIM_LINES]
+		: [MODERN_NPX_SHIM_LINES, LEGACY_NPX_SHIM_LINES];
+	if (sameLines(lines, modern)) {
 		return { format: "modern", nodePolicy: "sibling-or-path", cliPolicy: "sibling-npm-cli" };
 	}
-	if (sameLines(lines, LEGACY_NPX_SHIM_LINES)) {
+	if (sameLines(lines, legacy)) {
 		return { format: "legacy", nodePolicy: "sibling-or-path", cliPolicy: "sibling-npm-cli" };
 	}
 	return undefined;
+}
+
+/**
+ * npx-only view of {@link parseNpmShim}, retained for the TASK-096 probe
+ * mirror and existing callers that address the npx shim specifically.
+ */
+export function parseNpmNpxShim(content: string): ParsedNpmShim | undefined {
+	return parseNpmShim(content, "npx");
 }
 
 function normalizeBatchLine(line: string): string {
@@ -287,13 +370,6 @@ interface PathApi {
 function pathApiFor(platform: string, path: string): PathApi {
 	if (platform === "win32" && (path.includes("\\") || /^[A-Za-z]:[\\/]/u.test(path))) return win32;
 	return posix;
-}
-
-function isWindowsNpxShim(executablePath: string, platform: string): boolean {
-	if (platform !== "win32") return false;
-	const api = pathApiFor(platform, executablePath);
-	const name = api.basename(executablePath).toLowerCase();
-	return name === "npx.cmd" || name === "npx.bat";
 }
 
 function containedPath(root: string, candidate: string, api: PathApi, caseInsensitive: boolean): boolean {
@@ -357,7 +433,7 @@ async function readBoundedShim(path: string, signal: AbortSignal | undefined): P
 			if (result.bytesRead === 0) break;
 			offset += result.bytesRead;
 		}
-		if (offset > WINDOWS_NPX_SHIM_MAX_BYTES) throw new Error("npx shim is too large");
+		if (offset > WINDOWS_NPX_SHIM_MAX_BYTES) throw new Error("npm shim is too large");
 		return bytes.subarray(0, offset).toString("utf8");
 	} finally {
 		try {
@@ -440,13 +516,17 @@ async function readNpmPrefix(
 	}
 }
 
-/** Resolve the optional global-prefix npm CLI candidate emitted by npm 11's shim. */
-async function resolvePrefixedNpxCli(
+/**
+ * Resolve the optional global-prefix CLI candidate emitted by the modern npm
+ * shim, for the same tool the invoked shim belongs to.
+ */
+async function resolvePrefixedCli(
 	rt: SubprocessRuntime,
 	node: string,
 	prefixScript: string | undefined,
 	platform: string,
 	options: SpawnArgvOptions,
+	cliParts: readonly string[],
 ): Promise<string | undefined> {
 	if (prefixScript === undefined) return undefined;
 	const prefixOutput = await readNpmPrefix(rt, node, prefixScript, options);
@@ -457,7 +537,7 @@ async function resolvePrefixedNpxCli(
 	const prefixDir = await canonicalDirectory(prefixText, options.signal);
 	if (prefixDir === undefined) return undefined;
 	return optionalCanonicalFile(
-		prefixApi.join(prefixDir, ...WINDOWS_NPX_CLI_PARTS),
+		prefixApi.join(prefixDir, ...cliParts),
 		prefixDir,
 		prefixApi,
 		options.signal,
@@ -490,11 +570,14 @@ export interface SpawnArgvOptions {
 }
 
 /**
- * Resolve a managed spawn argv. npx's npm shim is the one Windows command
- * whose command line must not be handed to cmd: the standard shim is inspected
- * read-only and replaced by native node.exe + the verified npm npx-cli.js.
+ * Resolve a managed spawn argv. The npm and npx batch shims are the Windows
+ * commands whose command line must not be handed to cmd: the standard shim is
+ * inspected read-only and replaced by native node.exe + the verified
+ * `npm-cli.js`/`npx-cli.js` of the same tool. This runs the one-shot IMO
+ * install (`npm config set`, `npm install -g`) without a shell, so a spaced
+ * install path such as `C:\Program Files\nodejs\npm.cmd` can never be split.
  * Other `.cmd`/`.bat` commands retain the historical cmd fallback and its
- * existing quoting boundary; they are intentionally outside this npx fix.
+ * existing quoting boundary; they are intentionally outside this fix.
  */
 export async function resolveSpawnArgv(
 	rt: SubprocessRuntime,
@@ -503,21 +586,24 @@ export async function resolveSpawnArgv(
 	options: SpawnArgvOptions = {},
 ): Promise<readonly string[]> {
 	const platform = options.platform ?? process.platform;
-	if (!isWindowsNpxShim(executablePath, platform)) return toSpawnArgv(executablePath, args, platform, options.comspec);
+	const tool = windowsNpmTool(executablePath, platform);
+	if (tool === undefined) return toSpawnArgv(executablePath, args, platform, options.comspec);
+	const cliParts = NPM_TOOL_CLI_PARTS[tool];
 
 	const api = pathApiFor(platform, executablePath);
 	const shim = await canonicalFile(executablePath, undefined, api, options.signal, true);
 	const shimDir = api.dirname(shim);
-	const parsed = parseNpmNpxShim(await readBoundedShim(shim, options.signal));
-	if (parsed === undefined) throw new Error("unsupported npx shim");
+	const parsed = parseNpmShim(await readBoundedShim(shim, options.signal), tool);
+	if (parsed === undefined) throw new Error(`unsupported ${tool} shim`);
 
-	// The parser permits only the fixed npm-relative entry. Modern npm also
-	// probes a global prefix; the prefix helper is itself a contained npm file,
-	// so its read-only managed result is validated before it can replace the
-	// contained fallback. No batch path capture is ever trusted as-is.
-	if (parsed.cliPolicy !== "sibling-npm-cli") throw new Error("unsupported npx cli policy");
+	// The parser permits only the fixed npm-relative entry for this tool.
+	// Modern npm also probes a global prefix; the prefix helper is itself a
+	// contained npm file, so its read-only managed result is validated before
+	// it can replace the contained fallback. No batch path capture is ever
+	// trusted as-is.
+	if (parsed.cliPolicy !== "sibling-npm-cli") throw new Error(`unsupported ${tool} cli policy`);
 	const siblingCli = await optionalCanonicalFile(
-		api.join(shimDir, ...WINDOWS_NPX_CLI_PARTS),
+		api.join(shimDir, ...cliParts),
 		shimDir,
 		api,
 		options.signal,
@@ -549,16 +635,17 @@ export async function resolveSpawnArgv(
 	}
 	if (node === undefined) throw new Error("node executable is unavailable");
 
-	const prefixedCli = await resolvePrefixedNpxCli(rt, node, prefixScript, platform, options);
+	const prefixedCli = await resolvePrefixedCli(rt, node, prefixScript, platform, options, cliParts);
 	const cli = prefixedCli ?? siblingCli;
-	if (cli === undefined) throw new Error("npm npx cli is unavailable");
+	if (cli === undefined) throw new Error(`${tool} cli is unavailable`);
 	return [node, cli, ...args];
 }
 
 /**
- * Legacy fallback for non-npx Windows shims. It remains intentionally
- * unchanged in this card: callers with paths such as `imo.cmd` still use the
- * cmd boundary and must be handled by a separate compatibility decision.
+ * Legacy fallback for Windows shims outside the npm/npx adapter. It remains
+ * intentionally unchanged: callers with paths such as `imo.cmd` or `pnpm.cmd`
+ * still use the cmd boundary (including its unquoted join) and would need a
+ * separate compatibility decision.
  */
 export function toSpawnArgv(
 	executablePath: string,
@@ -658,8 +745,8 @@ async function captureCore(
 					? "IMO CLI operation timed out"
 					: cancelled()
 						? "IMO CLI operation was cancelled"
-						: isWindowsNpxShim(executablePath, process.platform)
-							? "the resolved npx shim is unsupported or incomplete; use a standard npm Node installation"
+						: windowsNpmTool(executablePath, process.platform) !== undefined
+							? "the resolved npm/npx shim is unsupported or incomplete; use a standard npm Node installation"
 							: "IMO CLI executable could not be safely launched",
 			},
 		};

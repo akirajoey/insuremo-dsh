@@ -25,7 +25,7 @@ Workbench 的包修改。
 > `engines.dsh`（`>=0.2.1-rc.2 <0.3.0-0`）。
 
 主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`
-可复现 pin：`github:akirajoey/insuremo-dsh#ae99dfefffaa4ebbb3adc7550d4a035b9190faa4`（发布时由维护者填真实分发分支 SHA）
+可复现 pin：`github:akirajoey/insuremo-dsh#f5ed159e05f9d20de82f9667ae7f3a2881dc3c8c`（发布时由维护者填真实分发分支 SHA）
 
 > spec 建议整体加引号：`#`/`&` 在 shell 里都有特殊含义（Windows 上引号内即安全；
 > 含 `&path:` 的旧形式尤其必须加引号）。
@@ -56,7 +56,7 @@ DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/b
 /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
 # 可复现：pin 到这个 commit
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#ae99dfefffaa4ebbb3adc7550d4a035b9190faa4"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#f5ed159e05f9d20de82f9667ae7f3a2881dc3c8c"
 ```
 
 `/usr/bin/env -u DSH_HOME` = 在不继承 shell 里残留 `DSH_HOME` 的情况下执行，让官方 CLI
@@ -312,7 +312,7 @@ dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.
 
 # 可复现：pin 精确 commit
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#ae99dfefffaa4ebbb3adc7550d4a035b9190faa4"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#f5ed159e05f9d20de82f9667ae7f3a2881dc3c8c"
 
 # 备选：离线/无网时 clone 后 pack 成 tgz 再 add（见「备选：离线 / 无网」）
 
