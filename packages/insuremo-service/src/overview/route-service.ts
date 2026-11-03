@@ -1,6 +1,5 @@
 import { Service } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import { mountOverviewRoute } from "./route.ts";
 import { mountSkillCatalogRoute } from "./skill-catalog-route.ts";
 import { mountWriteRoutes } from "./write-routes.ts";
@@ -15,53 +14,43 @@ export function setActivationControllerOnContext(ctx: Context, controller: Activ
 
 type RouteDisposer = () => void;
 
-/**
- * Route/section host for the InsureMO UI bridges.
- *
- * Registration happens DIRECTLY in `[Service.init]` — not via `ctx.effect`.
- * Effects registered by plugins mounted inside a loader entry were observed
- * to be swept ~25ms after mount (the entry fiber's pre-activation epoch
- * unloads effect runners that never reached ACTIVE), which silently removed
- * every route while the process kept serving (`overview 404` with a clean
- * boot). Direct registration with an idempotence guard keeps the routes for
- * the process lifetime; disposers are only invoked on fiber unload via the
- * service registry teardown (and double-registration is tolerated).
- */
+/** Route/section host for the InsureMO UI bridges. */
 export class InsuremoRoutesService extends Service {
-  // TASK-043: systemPrompt and imoAuth are declared so the loader guarantees
-  // an active fiber before the runtime-context mounts; a missing service is a
-  // loud failure here, never a swallowed no-op.
   static inject = ["webServer"] as const;
 
   #activationController: ActivationControllerLike | undefined;
-  #disposers: RouteDisposer[] = [];
-  #registered = false;
 
   /** Capture point for the activation controller (composition wiring). */
   setActivationController(controller: ActivationControllerLike | undefined): void {
     this.#activationController = controller;
   }
 
-  protected async [Service.init](): Promise<void> {
-    if (this.#registered) return;
-    this.#registered = true;
+  protected [Service.init](): void {
     const ctx = this.ctx;
-    const safe = (register: () => RouteDisposer): void => {
+    // Own the registrations on this service fiber, not the transient loader
+    // entry. Each successful acquisition is captured immediately, and a later
+    // registration error cannot leave the earlier routes behind.
+    ctx.effect(() => {
+      const disposers: RouteDisposer[] = [];
+      const dispose = (): void => {
+        const errors: unknown[] = [];
+        for (const release of disposers.splice(0).reverse()) {
+          try { release(); } catch (error) { errors.push(error); }
+        }
+        if (errors.length > 0) throw new AggregateError(errors, "failed to release InsureMO routes");
+      };
       try {
-        this.#disposers.push(register());
-      } catch {
-        // duplicate route from an earlier mount of this same process: keep the
-        // existing registration alive instead of failing the whole service
+        disposers.push(mountOverviewRoute(ctx));
+        disposers.push(mountSkillCatalogRoute(ctx));
+        disposers.push(mountWriteRoutes(ctx));
+        disposers.push(mountWorkspacesStatusRoute(ctx));
+      } catch (error) {
+        try { dispose(); } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], "route registration and rollback failed", { cause: error });
+        }
+        throw error;
       }
-    };
-    safe(() => mountOverviewRoute(ctx));
-    safe(() => mountSkillCatalogRoute(ctx));
-    safe(() => mountWriteRoutes(ctx));
-    safe(() => mountWorkspacesStatusRoute(ctx));
-    const firstRequestGuard = (_req: IncomingMessage, res: ServerResponse): void => {
-      res.writeHead(500);
-      res.end();
-    };
-    void firstRequestGuard;
+      return dispose;
+    }, "insuremo routes");
   }
 }

@@ -204,12 +204,28 @@ function faceError(error: { code?: string; message?: string } | undefined, fallb
  */
 export function mountWriteRoutes(ctx: Context): () => void {
   const disposers: Array<() => void> = [];
+  const dispose = (): void => {
+    const errors: unknown[] = [];
+    for (const release of disposers.splice(0).reverse()) {
+      try { release(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "failed to release InsureMO write routes");
+  };
   const register = (route: { path: string; handle(req: IncomingMessage, res: ServerResponse): void }): void => {
-    disposers.push(ctx.webServer.register({
-      kind: "exact",
-      path: route.path,
-      handler: (req, res) => route.handle(req, res),
-    }));
+    try {
+      disposers.push(ctx.webServer.register({
+        kind: "exact",
+        path: route.path,
+        handler: (req, res) => route.handle(req, res),
+      }));
+    } catch (error) {
+      // A failure can occur before the caller receives the composite disposer.
+      // Roll back only routes already acquired by this invocation.
+      try { dispose(); } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], "write route registration and rollback failed", { cause: error });
+      }
+      throw error;
+    }
   };
 
   // imo-upgrade: direct one-shot kernel (no operation record).
@@ -406,7 +422,7 @@ export function mountWriteRoutes(ctx: Context): () => void {
     }
   }));
 
-  return () => { for (const dispose of disposers) dispose(); };
+  return dispose;
 }
 
 interface DirectSkillReceipt {
