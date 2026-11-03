@@ -150,6 +150,11 @@ function allTools(ctx: Context): string[] {
   return ctx.tools.schemas().map(tool => tool.name).sort();
 }
 
+function logRecords(ctx: Context): unknown[][] {
+  const buffer = (ctx.logger as unknown as { buffer?: Array<{ args?: unknown[] }> }).buffer ?? [];
+  return buffer.map(message => message.args ?? []);
+}
+
 function fixtureSafety(calls: ReturnType<typeof addFixtureFaces>) {
   assert.equal(calls.spawn, 0, 'no subprocess, including a real IMO/Skills CLI, may run');
   assert.equal(calls.job, 0, 'no fixture job may run');
@@ -192,6 +197,10 @@ test('standalone real Loader unwraps to CLI with the patch inject and isolated c
     const fiber = await startLoaderEntry(ctx, 'compat-standalone', insuremo, {
       ...patch, config: { command: 'fixture-imo', timeoutMs: 1234 },
     });
+    // TASK-165: one plugin shape at the root — the loader selects the default
+    // CLI class, and no top-level `apply` competes with it.
+    assert.equal('apply' in insuremo, false, 'insuremo root must not expose a second plugin shape');
+    assert.equal(typeof insuremo.insuremoServiceMount?.apply, 'function', 'the aggregate mount object still exists');
     assert.equal(ctx.loader.unwrapExports(insuremo), insuremo.default);
     assert.equal(fiber.runtime?.callback, insuremo.default);
     assert.equal(fiber.config.command, 'fixture-imo');
@@ -233,13 +242,30 @@ test('aggregate real Loader preserves child capabilities with settings absent/pr
       const health = await request(origin, healthPath);
       assert.equal(health.status, 200);
       assert.deepEqual(JSON.parse(health.body), { workspaces: [] });
-      const usesNamedApply = typeof insuremo.apply === 'function' && ctx.registry.has(insuremo.apply as never);
-      t.diagnostic(`settings=${withSettings}: aggregate child uses named insuremo apply = ${usesNamedApply} (observation, not a permanent export-shape requirement)`);
+      // TASK-165: the aggregate mounts the explicit object plugin; the root no
+      // longer exposes a top-level `apply`.
+      assert.equal('apply' in insuremo, false, 'insuremo root must expose one plugin shape');
+      assert.equal(ctx.registry.has(insuremo.insuremoServiceMount.apply as never), true, 'aggregate must mount the object plugin');
+      t.diagnostic(`settings=${withSettings}: aggregate mounted insuremoServiceMount (explicit object plugin).`);
       await fiber.dispose();
-      assert.equal(ctx.get('imoCli'), undefined);
+      // Every aggregate child must be released with the owner, not just the CLI.
+      for (const name of ['imoCli', 'imoSkills', 'imoAuth', 'imoOverview', 'operationLog', 'workspaceBinding', 'icomposerVerify', 'icomposerVerifyTools']) {
+        assert.equal(ctx.get(name as never), undefined, `aggregate child ${name} survived unload`);
+      }
       fixtureSafety(calls);
     } finally { await ctx.fiber.dispose(); }
   }
+});
+
+test('dist root inject is one source, equals the loader patch, and keeps systemPrompt child-level', () => {
+  const patch = yaml.parse(readFileSync(join(root, 'packages/icomposer-workbench-dist/cordis.patch.yml'), 'utf8')) as Array<{ insert?: Array<{ name: string; inject?: string[] }> }>;
+  const entry = patch.flatMap(group => group.insert ?? []).find(item => item.name === '@icomposer/workbench');
+  assert.ok(entry);
+  assert.deepEqual(entry.inject, [...aggregate.WORKBENCH_ROOT_INJECT]);
+  assert.deepEqual([...aggregate.WORKBENCH_ROOT_INJECT], [...aggregate.default.inject]);
+  assert.equal(aggregate.WORKBENCH_ROOT_INJECT.length, 10);
+  assert.equal(aggregate.WORKBENCH_ROOT_INJECT.includes('systemPrompt' as never), false, 'systemPrompt must stay a child dependency');
+  assert.equal(Object.hasOwn(aggregate, 'inject'), false, 'no second drifting inject export');
 });
 
 test('aggregate without systemPrompt keeps independent services active while tool child waits', async () => {
@@ -516,6 +542,15 @@ test('real Loader aggregate exposes a route-child duplicate failure and preserve
     assert.ok(rootFiber);
     const rootError: unknown = await rootFiber.await().then(() => undefined, error => error);
     await waitFor('route child fiber to appear', () => Boolean(ctx.registry.get(InsuremoRoutesService as never)));
+    // TASK-165: an activation-time child failure is reported through the
+    // structured host log (bounded window) instead of being silent; healthy
+    // siblings keep running. Later-activation failures are not covered by it.
+    await waitFor('structured child-failure log', () => logRecords(ctx).some(args =>
+      args[0] === 'insuremo-service: child %s failed: %s' && args[1] === 'routes' && /duplicate exact route/.test(String(args[2]))));
+    for (const name of ['imoCli', 'imoAuth', 'imoOverview']) {
+      assert.ok(ctx.get(name as never), `healthy sibling ${name} must keep running`);
+    }
+    t.diagnostic(`child-failure log captured; root state=${rootFiber.state} (ACTIVE means mount calls completed, not every child healthy).`);
     const runtime = ctx.registry.get(InsuremoRoutesService as never);
     assert.ok(runtime);
     const children = [...runtime.fibers];

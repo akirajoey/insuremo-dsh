@@ -52,10 +52,11 @@ test("host entry aggregates nine packages in dependency order with union inject"
   assert.equal(names.length, 9, "aggregate must mount nine packages");
   for (const name of names) {
     const alias = requireAlias(name);
-    assert.ok(source.includes(name === "verify" || name === "code-intelligence" ? alias : `as ${alias}`), `aggregate missing import for ${name}`);
+    // TASK-165: insuremo-service is imported by its explicit mount object name.
+    assert.ok(source.includes(["verify", "code-intelligence", "insuremo-service"].includes(name) ? alias : `as ${alias}`), `aggregate missing import for ${name}`);
   }
   // APPLY order (P0): service first, then registries, then imoAuth injectors
-  const applyOrder = ["insuremoService", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "IcomposerVerifyService", "IciContextService", "IciEngineService", "ExplainConfigService", "ExplainScheduler", "ExplainRoutesService", "IcomposerVerifyToolService", "write"];
+  const applyOrder = ["insuremoServiceMount", "operationLog", "workspaceBinding", "catalog", "reference", "lifecycle", "IcomposerVerifyService", "IciContextService", "IciEngineService", "ExplainConfigService", "ExplainScheduler", "ExplainRoutesService", "IcomposerVerifyToolService", "write"];
   let lastApply = -1;
   for (const alias of applyOrder) {
     const idx = source.indexOf(`ctx.plugin(${alias} as never`);
@@ -64,7 +65,7 @@ test("host entry aggregates nine packages in dependency order with union inject"
     lastApply = idx;
   }
   // apply order: insuremo-service before every imoAuth injector
-  const serviceApply = source.indexOf("ctx.plugin(insuremoService as never");
+  const serviceApply = source.indexOf("ctx.plugin(insuremoServiceMount as never");
   for (const injector of ["lifecycle", "IcomposerVerifyService", "IciEngineService", "write"]) {
     const injectorApply = source.indexOf(`ctx.plugin(${injector} as never`);
     assert.ok(serviceApply >= 0 && injectorApply > serviceApply, `${injector} must mount after insuremo-service (imoAuth)`);
@@ -83,7 +84,7 @@ test("host entry aggregates nine packages in dependency order with union inject"
   // the interactive test plugin is excluded
   assert.equal(source.includes("plugin-workbench-test"), false);
   function requireAlias(name) {
-    const map = { "operation-log": "operationLog", "workspace-binding": "workspaceBinding", "code-intelligence": "IciEngineService", "insuremo-service": "insuremoService", verify: "IcomposerVerifyService" };
+    const map = { "operation-log": "operationLog", "workspace-binding": "workspaceBinding", "code-intelligence": "IciEngineService", "insuremo-service": "insuremoServiceMount", verify: "IcomposerVerifyService" };
     return map[name] ?? name;
   }
 

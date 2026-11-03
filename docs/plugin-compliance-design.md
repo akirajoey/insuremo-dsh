@@ -287,7 +287,7 @@ H2/H5 `packages/client/ui-layout/src/client/index.ts:95-105,178-186`：`shell.ov
 ## 9. 决策、阻塞和验收顺序
 
 1. **D1 已决定**：保留 Workspace 行内图标原位、observer/root/footer/轮询和交互，标注唯一功能冲突 `EX-WH-01`；不迁 Settings/面板/Session、不新增宿主 slot。B06 deferred；未来实际不支持时带证据回报用户，不自动迁移。
-2. **D2 兼容默认**：按已证实的现有释放语义实施；公开方案无法等价时 TASK-164 BLOCKED，不静默删除 internal listener 或扩成第二例外。同 turn 与 await 分开验证，真实 HMR 尚未通过。
+2. **D2 兼容默认**：保现同步释放语义优先。公开机制无法等价保持同 turn 同步释放时，保留现有 `internal/plugin` 监听，并在 tests/README 明确披露依赖场景与移除条件（公开同步卸载 API + 真实 HMR 通过），不静默删除、不扩成第二例外。同 turn 与 await 分开验证，真实 HMR 尚未通过。
 3. **D3 兼容默认**：保留独立 CLI 与 aggregate 各自能力，`systemPrompt` 仍为子级依赖，不新增根硬依赖。
 4. **D4/D5/D6 兼容默认**：配置默认、clamp、未知键兼容保留且不记录配置值；能力缺席无法维持交互则 BLOCKED，不擅增 Settings 替代。允许本地实施、隔离依赖准备/验证和独立 PASS 后本地提交；**不授权 push、发布、用户部署、宿主升级或改版本/pin**。资源权利、Windows/H5 runner 及未来发布仍需证据/另行决定。
 5. 当前正式顺序是 `TASK-162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170`，每卡 DEV→VERIFY→COMMIT→DONE；B06 不进入依赖链。当前只在 TASK-162 做文档和测试基线；TASK-170 前分发产物不刷新。提交仅由 maintainer 执行。

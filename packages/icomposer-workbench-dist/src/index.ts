@@ -32,14 +32,19 @@ import { ExplainConfigService } from "../../icomposer-code-intelligence/src/expl
 import { ExplainScheduler } from "../../icomposer-code-intelligence/src/explain-scheduler.ts";
 import { ExplainRoutesService } from "../../icomposer-code-intelligence/src/explain-routes.ts";
 import * as write from "../../icomposer-write/src/index.ts";
-import * as insuremoService from "../../insuremo-service/src/index.ts";
+import { insuremoServiceMount } from "../../insuremo-service/src/index.ts";
 import { BRAND_ASSET_ROUTE, serveBrandAsset } from "../../ui-insuremo-status/src/brand-assets-server.ts";
 
 /** Loader-facing plugin name (the distributable package identity). */
 export const name = "@icomposer/workbench";
 
-/** Union of every sub-plugin's inject — the loader provides them all up front. */
-export const inject = [
+/**
+ * Root services the aggregate needs from the loader patch. Single source for
+ * both `WorkbenchDistService.static inject` and the dist patch entry; the test
+ * suite asserts the YAML list equals this constant. `systemPrompt` stays a
+ * child-level dependency (`IcomposerVerifyToolService`), not a root hard one.
+ */
+export const WORKBENCH_ROOT_INJECT = [
   "subprocess",
   "storageDomain",
   "workspaceRegistry",
@@ -50,7 +55,6 @@ export const inject = [
   "llm",
   "agents",
   "directoryPicker",
-  "systemPrompt",
 ] as const;
 
 /** Per-package config overrides keyed by package id (all optional). */
@@ -66,6 +70,7 @@ export interface WorkbenchDistConfig {
  * then registries, then the imoAuth-injecting readers/writers.
  */
 export class WorkbenchDistService extends Service {
+  static inject = WORKBENCH_ROOT_INJECT;
   constructor(ctx: Context, config: WorkbenchDistConfig = {}) {
     super(ctx, "@icomposer/workbench");
     this.#config = config;
@@ -84,7 +89,7 @@ export class WorkbenchDistService extends Service {
       }),
       "@icomposer/workbench: emitted brand assets",
     );
-    await ctx.plugin(insuremoService as never, this.#config.insuremoService);
+    await ctx.plugin(insuremoServiceMount as never, this.#config.insuremoService);
     await ctx.plugin(operationLog as never);
     await ctx.plugin(workspaceBinding as never);
     await ctx.plugin(catalog as never);
