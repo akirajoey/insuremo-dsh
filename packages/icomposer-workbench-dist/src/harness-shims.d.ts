@@ -73,6 +73,14 @@ declare module "@deepseek-ai/dsh-tools" {
 declare module "@deepseek-ai/schemastery" {
   class z<T = unknown> {
     constructor(value?: T);
+    default(value: unknown): z<T>;
+    static object<T extends object>(shape: Record<string, unknown>): z<T>;
+    static any<T = unknown>(): z<T>;
+    static string(): z<string>;
+    static natural(): z<number>;
+    static boolean(): z<boolean>;
+    static array<T = unknown>(inner: z<T>): z<readonly T[]>;
+    static transform<S, T>(inner: z<S>, callback: (value: S, options: { path?: readonly (string | number | symbol)[] }) => T): z<T>;
   }
   export = z;
 }

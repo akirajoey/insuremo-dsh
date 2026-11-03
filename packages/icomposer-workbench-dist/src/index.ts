@@ -33,6 +33,7 @@ import { ExplainScheduler } from "../../icomposer-code-intelligence/src/explain-
 import { ExplainRoutesService } from "../../icomposer-code-intelligence/src/explain-routes.ts";
 import * as write from "../../icomposer-write/src/index.ts";
 import { insuremoServiceMount } from "../../insuremo-service/src/index.ts";
+import { unknownConfigKeys, workbenchConfigSchema } from "./config.ts";
 import { BRAND_ASSET_ROUTE, serveBrandAsset } from "../../ui-insuremo-status/src/brand-assets-server.ts";
 
 /** Loader-facing plugin name (the distributable package identity). */
@@ -71,9 +72,23 @@ export interface WorkbenchDistConfig {
  */
 export class WorkbenchDistService extends Service {
   static inject = WORKBENCH_ROOT_INJECT;
+
+  /**
+   * Loader-facing nested config. Validation happens before `[Service.init]`,
+   * so a rejected value leaves no service or route partially mounted.
+   */
+  static Config = workbenchConfigSchema;
+
   constructor(ctx: Context, config: WorkbenchDistConfig = {}) {
     super(ctx, "@icomposer/workbench");
     this.#config = config;
+    // D4 compatibility: unknown keys stay merged by the non-strict resolver.
+    // Warn with key names only (never values), bounded and redacted.
+    const unknown = unknownConfigKeys(config);
+    if (unknown.length > 0) {
+      const logger = (ctx as unknown as { logger?: { warn(format: string, ...args: unknown[]): void } }).logger;
+      logger?.warn("workbench config keeps unknown keys (ignored by the Workbench): %s", unknown.join(", "));
+    }
   }
 
   readonly #config: WorkbenchDistConfig;

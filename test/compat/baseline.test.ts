@@ -33,6 +33,8 @@ const insuremo = await import('../../packages/insuremo-service/src/index.ts');
 const { InsuremoRoutesService } = await import('../../packages/insuremo-service/src/overview/route-service.ts');
 const { mountWriteRoutes } = await import('../../packages/insuremo-service/src/overview/write-routes.ts');
 const aggregate = await import('../../packages/icomposer-workbench-dist/src/index.ts');
+const workbenchConfig = await import('../../packages/icomposer-workbench-dist/src/config.ts');
+const { resolveConfig: resolveInsuremoConfig } = await import('../../packages/insuremo-service/src/config.ts');
 const { IcomposerVerifyToolService } = await import('../../packages/icomposer-verify/src/tool-service.ts');
 const requireForTests = createRequire(join(root, 'packages/insuremo-service/package.json'));
 const requireForTs = createRequire(join(root, 'packages/icomposer-verify/package.json'));
@@ -266,6 +268,191 @@ test('dist root inject is one source, equals the loader patch, and keeps systemP
   assert.equal(aggregate.WORKBENCH_ROOT_INJECT.length, 10);
   assert.equal(aggregate.WORKBENCH_ROOT_INJECT.includes('systemPrompt' as never), false, 'systemPrompt must stay a child dependency');
   assert.equal(Object.hasOwn(aggregate, 'inject'), false, 'no second drifting inject export');
+});
+
+test('aggregate static Config is a real nested schema whose defaults match the constructors', () => {
+  const schema = aggregate.WorkbenchDistService.Config;
+  assert.equal(typeof schema, 'function');
+  // Root is an object-validating transform: a non-object is rejected with a
+  // path before schemastery's native resolver can echo the value.
+  assert.throws(() => schema('SECRET_SENTINEL'), /\$ must be an object/);
+  const parsed = schema({}) as Record<string, { command: string; timeoutMs: number }>;
+  // lifecycle/verify/write default to their constructor defaults (imo, 30s).
+  for (const field of ['lifecycle', 'verify', 'write'] as const) {
+    assert.deepEqual(parsed[field], { command: 'imo', timeoutMs: 30_000 }, `${field} defaults drifted`);
+  }
+  // insuremoService reuses the existing Config schema unchanged.
+  assert.deepEqual(parsed.insuremoService, resolveInsuremoConfig({}));
+  const overridden = schema({
+    lifecycle: { command: '/opt/fixture/imo', timeoutMs: 5000 },
+    insuremoService: { command: 'fixture-imo', timeoutMs: 1234, skillActionTimeoutMs: 999_999, overviewTtlMs: 999_999 },
+  }) as Record<string, Record<string, unknown>>;
+  assert.deepEqual(overridden.lifecycle, { command: '/opt/fixture/imo', timeoutMs: 5000 });
+  assert.deepEqual(overridden.verify, { command: 'imo', timeoutMs: 30_000 });
+  // Existing normalization stays a clamp, not a rejection.
+  const clamped = resolveInsuremoConfig(overridden.insuremoService);
+  assert.equal(clamped.command, 'fixture-imo');
+  assert.equal(clamped.timeoutMs, 1234);
+  assert.equal(clamped.skillActionTimeoutMs, 300_000);
+  assert.equal(clamped.overviewTtlMs, 5_000);
+});
+
+test('aggregate config rejects bad values with a located, value-free error', () => {
+  const schema = aggregate.WorkbenchDistService.Config;
+  const cases: Array<[unknown, RegExp]> = [
+    // Object-level values (root and each field) must not echo either.
+    ['SECRET_SENTINEL', /\$ must be an object/],
+    [['SECRET_SENTINEL'], /\$ must be an object/],
+    [{ lifecycle: 'SECRET_SENTINEL' }, /\$\.lifecycle must be an object/],
+    [{ verify: [] }, /\$\.verify must be an object/],
+    [{ write: 42 }, /\$\.write must be an object/],
+    [{ insuremoService: 'SECRET_SENTINEL' }, /\$\.insuremoService must be an object/],
+    // Leaf values.
+    [{ lifecycle: { timeoutMs: 0 } }, /\$\.lifecycle\.timeoutMs must be between 1 and/],
+    [{ lifecycle: { timeoutMs: -1 } }, /\$\.lifecycle\.timeoutMs must be between 1 and/],
+    [{ verify: { timeoutMs: 1.5 } }, /\$\.verify\.timeoutMs must be an integer/],
+    [{ write: { timeoutMs: 2_147_483_648 } }, /\$\.write\.timeoutMs must be between 1 and/],
+    [{ lifecycle: { timeoutMs: 'SECRET_TIMEOUT' } }, /\$\.lifecycle\.timeoutMs must be an integer/],
+    [{ verify: { command: '' } }, /\$\.verify\.command must be a non-empty string/],
+    [{ write: { command: 'SECRET\u0000CMD' } }, /\$\.write\.command must not contain control characters/],
+  ];
+  for (const [input, pattern] of cases) {
+    let error: unknown;
+    try { schema(input); } catch (caught) { error = caught; }
+    assert.ok(error instanceof Error, `expected rejection for ${JSON.stringify(input)}`);
+    assert.match(error.message, pattern);
+    assert.equal(error.message.includes('SECRET'), false, 'error must not echo configured values');
+  }
+});
+
+test('real Loader validates the aggregate through static Config before mounting', async () => {
+  const ctx = new Context();
+  const calls = addFixtureFaces(ctx);
+  try {
+    const origin = await startHttp(ctx);
+    // The aggregate root injects `tools`; real ToolRuntime/SystemPrompt satisfy it
+    // so the fiber actually activates and the loader validates its config.
+    await ctx.plugin(SystemPrompt, {});
+    await ctx.plugin(ToolRuntime, {});
+    await ctx.plugin(Loader);
+    ctx.loader.builtins['compat-valid-config'] = aggregate;
+    const patch = patchEntry('packages/icomposer-workbench-dist/cordis.patch.yml', '@icomposer/workbench');
+    const raw = { lifecycle: { command: '/opt/fixture/imo', timeoutMs: 5000 }, verify: { timeoutMs: 2000 } };
+    const id = await ctx.loader.create({ name: 'cordis:compat-valid-config', ...patch, config: raw });
+    await ctx.loader.await();
+    const fiber = ctx.loader.resolve(id).fiber!;
+    await fiber.await();
+    assert.equal((fiber as unknown as { _error?: unknown })._error, undefined);
+    // The loader validated with our schema, not by passing the raw object through.
+    assert.deepEqual(fiber.config, aggregate.WorkbenchDistService.Config(raw));
+    assert.deepEqual(fiber.config.lifecycle, { command: '/opt/fixture/imo', timeoutMs: 5000 });
+    assert.deepEqual(fiber.config.verify, { command: 'imo', timeoutMs: 2000 });
+    assert.deepEqual(fiber.config.write, { command: 'imo', timeoutMs: 30_000 });
+    assert.ok(ctx.get('imoCli'));
+    assert.equal((await request(origin, healthPath)).status, 200);
+    fixtureSafety(calls);
+    await fiber.dispose();
+  } finally { await ctx.fiber.dispose(); }
+});
+
+test('invalid aggregate config fails before any mount and never echoes the value', async () => {
+  const ctx = new Context();
+  const calls = addFixtureFaces(ctx);
+  try {
+    const origin = await startHttp(ctx);
+    // The aggregate root injects `tools`; real ToolRuntime/SystemPrompt satisfy it
+    // so the fiber actually activates and the loader validates its config.
+    await ctx.plugin(SystemPrompt, {});
+    await ctx.plugin(ToolRuntime, {});
+    await ctx.plugin(Loader);
+    ctx.loader.builtins['compat-bad-config'] = aggregate;
+    const patch = patchEntry('packages/icomposer-workbench-dist/cordis.patch.yml', '@icomposer/workbench');
+    const id = await ctx.loader.create({
+      name: 'cordis:compat-bad-config', ...patch,
+      config: { lifecycle: { timeoutMs: 'SECRET_TIMEOUT' } },
+    });
+    await ctx.loader.await();
+    const fiber = ctx.loader.resolve(id).fiber!;
+    const error: unknown = await fiber.await().then(() => undefined, caught => caught);
+    assert.ok(error instanceof Error, 'invalid config must fail the fiber');
+    assert.match(error.message, /\$\.lifecycle\.timeoutMs must be an integer/);
+    assert.equal(error.message.includes('SECRET_TIMEOUT'), false);
+    // Zero partial mount: no service, no route, no brand asset registration.
+    for (const name of ['imoCli', 'imoAuth', 'operationLog', 'workspaceBinding', 'icomposerVerify']) {
+      assert.equal(ctx.get(name as never), undefined, `${name} must not mount with an invalid config`);
+    }
+    assert.equal((await request(origin, overviewPath)).status, 404);
+    assert.equal((await request(origin, healthPath)).status, 404);
+    fixtureSafety(calls);
+  } finally { await ctx.fiber.dispose(); }
+});
+
+test('real Loader rejects non-object config without echoing it in the error or host log', async () => {
+  const cases: unknown[] = ['SECRET_SENTINEL', { lifecycle: 'SECRET_SENTINEL' }];
+  for (const [index, raw] of cases.entries()) {
+    const ctx = new Context();
+    const calls = addFixtureFaces(ctx);
+    try {
+      await startHttp(ctx);
+      await ctx.plugin(SystemPrompt, {});
+      await ctx.plugin(ToolRuntime, {});
+      await ctx.plugin(Loader);
+      const label = `compat-bad-shape-${index}`;
+      ctx.loader.builtins[label] = aggregate;
+      const patch = patchEntry('packages/icomposer-workbench-dist/cordis.patch.yml', '@icomposer/workbench');
+      const id = await ctx.loader.create({ name: `cordis:${label}`, ...patch, config: raw });
+      await ctx.loader.await();
+      const fiber = ctx.loader.resolve(id).fiber!;
+      const error: unknown = await fiber.await().then(() => undefined, caught => caught);
+      assert.ok(error instanceof Error, `expected rejection for ${JSON.stringify(raw)}`);
+      assert.match(error.message, /\$(\.lifecycle)? must be an object/);
+      assert.equal(error.message.includes('SECRET_SENTINEL'), false, 'fiber error must not echo the value');
+      // The host logs the rejection; its buffered message must be clean too.
+      const logged = logRecords(ctx).flat().map(value => String(value)).join(' ');
+      assert.equal(logged.includes('SECRET_SENTINEL'), false, 'host log must not echo the value');
+      fixtureSafety(calls);
+    } finally { await ctx.fiber.dispose(); }
+  }
+});
+
+test('unknown aggregate config keys stay merged and warn without values', async () => {
+  const ctx = new Context();
+  const calls = addFixtureFaces(ctx);
+  try {
+    await startHttp(ctx); // provides the aggregate's webServer dependency
+    // WARN is filtered by the default in-process buffer exporter; capture it
+    // explicitly (the app boot configures level 2, so the warning is visible there).
+    const warnings: unknown[][] = [];
+    const stopExporter = ctx.logger.exporter({
+      levels: { default: 2 },
+      export: (message) => { if (message.type === 'warn') warnings.push(message.args); },
+    });
+    await ctx.plugin(SystemPrompt, {});
+    await ctx.plugin(ToolRuntime, {});
+    await ctx.plugin(Loader);
+    ctx.loader.builtins['compat-unknown-config'] = aggregate;
+    const patch = patchEntry('packages/icomposer-workbench-dist/cordis.patch.yml', '@icomposer/workbench');
+    const id = await ctx.loader.create({
+      name: 'cordis:compat-unknown-config', ...patch,
+      config: { mystery: { token: 'SECRET_VALUE' }, lifecycle: { surprise: 'SECRET_VALUE' } },
+    });
+    await ctx.loader.await();
+    const fiber = ctx.loader.resolve(id).fiber!;
+    await fiber.await();
+    assert.equal((fiber as unknown as { _error?: unknown })._error, undefined, 'unknown keys must stay compatible');
+    // D4: unknown keys are preserved by the non-strict resolver.
+    assert.deepEqual(fiber.config.mystery, { token: 'SECRET_VALUE' });
+    assert.equal(fiber.config.lifecycle.surprise, 'SECRET_VALUE');
+    const warning = warnings.find(args => String(args[0]).includes('unknown keys'));
+    assert.ok(warning, 'unknown keys must produce a migration warning');
+    const text = warning.join(' ');
+    assert.match(text, /mystery/);
+    assert.match(text, /lifecycle\.surprise/);
+    assert.equal(text.includes('SECRET_VALUE'), false, 'warning must not include values');
+    stopExporter();
+    fixtureSafety(calls);
+    await fiber.dispose();
+  } finally { await ctx.fiber.dispose(); }
 });
 
 test('aggregate without systemPrompt keeps independent services active while tool child waits', async () => {
