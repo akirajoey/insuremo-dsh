@@ -79,26 +79,41 @@ function errorText(code: string): string {
  */
 export function registerIcomposerToolsWith(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
   const disposers: Array<() => void> = [];
-  disposers.push(ctx.systemPrompt.section({
-    name: "tool:icomposer_catalog_list",
-    order: 150,
-    text: "icomposer_catalog_list lists the local iComposer asset catalog of a registered workspace (api/function/batch/model, join status vs server metadata). No InsureMO binding is required."
-  }));
-  disposers.push(ctx.systemPrompt.section({
-    name: "tool:icomposer_sdk_query",
-    order: 150,
-    text: "icomposer_sdk_query searches local SDK client operations of a registered workspace by client name or keyword. No InsureMO binding is required."
-  }));
-  disposers.push(ctx.systemPrompt.section({
-    name: "tool:icomposer_verify_utils",
-    order: 150,
-    text: "icomposer_verify_utils lists utility classes or searches utility methods of a registered workspace using the Workbench Active Profile for CLI authentication. It fails closed when that profile is unavailable."
-  }));
+  const track = (dispose: () => void): void => { disposers.push(dispose); };
+  try {
+    track(ctx.systemPrompt.section({
+      name: "tool:icomposer_catalog_list",
+      order: 150,
+      text: "icomposer_catalog_list lists the local iComposer asset catalog of a registered workspace (api/function/batch/model, join status vs server metadata). No InsureMO binding is required."
+    }));
+    track(ctx.systemPrompt.section({
+      name: "tool:icomposer_sdk_query",
+      order: 150,
+      text: "icomposer_sdk_query searches local SDK client operations of a registered workspace by client name or keyword. No InsureMO binding is required."
+    }));
+    track(ctx.systemPrompt.section({
+      name: "tool:icomposer_verify_utils",
+      order: 150,
+      text: "icomposer_verify_utils lists utility classes or searches utility methods of a registered workspace using the Workbench Active Profile for CLI authentication. It fails closed when that profile is unavailable."
+    }));
 
-  disposers.push(...registerIciTools(ctx, defineTool as never));
-  // TASK-132: ici_search was defined but never mounted, so the capability existed only on paper.
-  disposers.push(...registerIciSearchTool(ctx, defineTool as never));
-  disposers.push(...registerIciJobTools(ctx, defineTool as never));
-  disposers.push(...registerIciExplainTools(ctx, defineTool as never));
-  return disposers;
+    registerIciTools(ctx, defineTool as never, track);
+    // TASK-132: ici_search was defined but never mounted, so the capability existed only on paper.
+    registerIciSearchTool(ctx, defineTool as never, track);
+    registerIciJobTools(ctx, defineTool as never, track);
+    registerIciExplainTools(ctx, defineTool as never, track);
+    return disposers;
+  } catch (error) {
+    // A partial registration must not leak tools or prompt sections. Release
+    // only this invocation's own handles, newest first, and keep the original
+    // registration error visible (never swallow a duplicate-name conflict).
+    const failures: unknown[] = [];
+    for (const dispose of disposers.splice(0).reverse()) {
+      try { dispose(); } catch (failure) { failures.push(failure); }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError([error, ...failures], "iComposer tool registration and rollback failed", { cause: error });
+    }
+    throw error;
+  }
 }

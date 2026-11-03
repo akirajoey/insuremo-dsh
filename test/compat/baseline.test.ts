@@ -593,13 +593,18 @@ test('real ToolRuntime/SystemPrompt preserve workbench owner same-turn cleanup a
     const sections = (await ctx.systemPrompt.assemble()).sections.map(section => section.name).filter(name => name.startsWith('tool:')).sort();
     assert.deepEqual(sections, promptNames);
     const stopping = fiber.dispose();
-    assert.deepEqual(allTools(ctx), [], 'existing workbench listener releases its own tools in the same turn');
+    // Same-turn: this is the retained `internal/plugin` listener, not the
+    // public effect teardown (the effect-only control below needs an await).
+    assert.deepEqual(allTools(ctx), [], 'workbench listener releases its own tools in the same turn');
     for (const name of promptNames) {
       // A real duplicate check on the same turn also proves each prompt name
       // is released before awaiting the owner's dispose promise.
       const release = ctx.systemPrompt.section({ name, order: 150, text: 'isolated fixture' });
       release();
     }
+    // No duplicate window for this owner: another owner may take a name now.
+    const sameTurnReuse = ctx.tools.register(defineContentToolFixture({ name: 'ici_query', description: 'reuse probe', parameters: {}, async execute() { return []; } }));
+    sameTurnReuse();
     await stopping;
     const afterSections = (await ctx.systemPrompt.assemble()).sections.map(section => section.name).filter(name => name.startsWith('tool:'));
     assert.deepEqual(afterSections, []);
@@ -609,7 +614,66 @@ test('real ToolRuntime/SystemPrompt preserve workbench owner same-turn cleanup a
     assert.deepEqual(allTools(ctx), toolNames);
     await again.dispose();
     assert.deepEqual(allTools(ctx), []);
-    t.diagnostic('Real W tool service + H2 registries: 8 tools/7 prompts, same-turn release and awaited remount; not an HMR test.');
+    // A second teardown of an already-released owner is a no-op.
+    await again.dispose();
+    assert.deepEqual(allTools(ctx), []);
+    t.diagnostic('Real W tool service + H2 registries: 8 tools/7 prompts exactly once, same-turn release (retained internal listener), immediate name reuse, awaited remount; not an HMR test.');
+  } finally { await ctx.fiber.dispose(); }
+});
+
+test('partial tool registration failure rolls back every acquired handle and stays loud', async (t) => {
+  for (const conflict of ['tool:ici_query', 'ici_status'] as const) {
+    const ctx = new Context();
+    try {
+      await ctx.plugin(SystemPrompt, {});
+      await ctx.plugin(ToolRuntime, {});
+      // A foreign owner already holds a name this registration needs.
+      const releaseForeign = conflict.startsWith('tool:')
+        ? ctx.systemPrompt.section({ name: conflict, order: 150, text: 'foreign section' })
+        : ctx.tools.register(defineContentToolFixture({ name: conflict, description: 'foreign tool', parameters: {}, async execute() { return []; } }));
+      const fiber = ctx.plugin(IcomposerVerifyToolService);
+      const error: unknown = await fiber.await().then(() => undefined, caught => caught);
+      assert.ok(error instanceof Error, `${conflict}: duplicate must fail loudly`);
+      assert.match(error.message, /already registered/, `${conflict}: original error must stay visible`);
+      assert.deepEqual(allTools(ctx), conflict.startsWith('tool:') ? [] : [conflict], `${conflict}: no leaked workbench tools`);
+      const sections = (await ctx.systemPrompt.assemble()).sections.map(section => section.name).filter(name => name.startsWith('tool:'));
+      assert.deepEqual(sections, conflict.startsWith('tool:') ? [conflict] : [], `${conflict}: no leaked prompt sections`);
+      await fiber.dispose();
+      // The foreign owner is untouched by the failed/rolled-back workbench owner.
+      assert.deepEqual(allTools(ctx), conflict.startsWith('tool:') ? [] : [conflict]);
+      assert.equal((await ctx.systemPrompt.assemble()).sections.filter(section => section.name === conflict).length, conflict.startsWith('tool:') ? 1 : 0);
+      releaseForeign();
+      t.diagnostic(`${conflict}: failure propagated, foreign registration preserved, all partial handles rolled back.`);
+    } finally { await ctx.fiber.dispose(); }
+  }
+});
+
+test('tool owner releases on dependency loss and re-registers exactly once on restore', async (t) => {
+  const ctx = new Context();
+  try {
+    await ctx.plugin(SystemPrompt, {});
+    const toolsFiber = ctx.plugin(ToolRuntime, {});
+    await toolsFiber.await();
+    const fiber = ctx.plugin(IcomposerVerifyToolService);
+    await fiber.await();
+    assert.equal((fiber as unknown as { _error?: unknown })._error, undefined);
+    assert.deepEqual(allTools(ctx), toolNames);
+    assert.equal((await ctx.systemPrompt.assemble()).sections.filter(section => section.name.startsWith('tool:')).length, promptNames.length);
+    // The real tool service disappears: the owner must unload rather than
+    // keep a stale generation, and its prompt sections must go with it.
+    await toolsFiber.dispose();
+    await waitFor('tool owner to unload without tools', () => ctx.get('icomposerVerifyTools') === undefined);
+    assert.equal(ctx.get('tools'), undefined);
+    assert.equal((await ctx.systemPrompt.assemble()).sections.filter(section => section.name.startsWith('tool:')).length, 0, 'prompts released with the owner');
+    const restored = ctx.plugin(ToolRuntime, {});
+    await restored.await();
+    await waitFor('tool owner to re-register after tools return', () => Boolean(ctx.get('icomposerVerifyTools')));
+    assert.deepEqual(allTools(ctx), toolNames, 'exactly one new generation, no duplicates');
+    assert.equal((await ctx.systemPrompt.assemble()).sections.filter(section => section.name.startsWith('tool:')).length, promptNames.length);
+    await fiber.dispose();
+    await restored.dispose();
+    assert.equal((await ctx.systemPrompt.assemble()).sections.filter(section => section.name.startsWith('tool:')).length, 0);
+    t.diagnostic('Real ToolRuntime dependency withdrawal/restore: owner unloaded, prompts/tools removed, single re-registration; not HMR.');
   } finally { await ctx.fiber.dispose(); }
 });
 

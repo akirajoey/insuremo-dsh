@@ -47,9 +47,13 @@ function objectSchema2(properties: Record<string, unknown>, required: string[]):
  * tool using the host defineTool factory.
  * @returns one disposer for the registered tool.
  */
-export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
+export function registerIciSearchTool(ctx: Context, defineTool: DefineToolFn, onRegister?: (dispose: () => void) => void): Array<() => void> {
   const disposers: Array<() => void> = [];
-  disposers.push(ctx.tools.register(defineTool({
+  // Report each disposer as it is acquired so an outer transaction can roll
+  // back a partially completed registration (the returned array only exists
+  // after this function returns).
+  const track = (dispose: () => void): void => { disposers.push(dispose); onRegister?.(dispose); };
+  track(ctx.tools.register(defineTool({
     name: "ici_search",
     description: "Find APIs by what they DO, in natural language -- capability discovery over the workspace API explanations (iComposer Code Intelligence). Use this FIRST for questions like 'which APIs can modify the group policy member', 'is there an API that cancels a rider', or 'what handles claim rejection', instead of grepping the source tree. Returns ranked APIs (apiId/apiName/score/evidence); follow up with ici_query (query=api-chain) for the call chain of a hit. Local term-frequency ranking is used and the result is marked degraded when the embedding index or the Workbench Active Profile is unavailable.",
     parameters: {

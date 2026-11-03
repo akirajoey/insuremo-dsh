@@ -135,14 +135,18 @@ interface IciEngineFace {
  * defineTool factory.
  * @returns one disposer for the registered tool.
  */
-export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
+export function registerIciTools(ctx: Context, defineTool: DefineToolFn, onRegister?: (dispose: () => void) => void): Array<() => void> {
   const disposers: Array<() => void> = [];
-  disposers.push(ctx.systemPrompt.section({
+  // Report each disposer as it is acquired so an outer transaction can roll
+  // back a partially completed registration (the returned array only exists
+  // after this function returns).
+  const track = (dispose: () => void): void => { disposers.push(dispose); onRegister?.(dispose); };
+  track(ctx.systemPrompt.section({
     name: "tool:ici_query",
     order: 150,
     text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Use it after a capability hit to inspect one API. To DISCOVER which APIs can do something (by capability, in natural language) use ici_search first; this tool walks a graph, it does not search explanations. No InsureMO binding is required and the operation is read-only.",
   }));
-  disposers.push(ctx.tools.register(defineTool({
+  track(ctx.tools.register(defineTool({
     name: "icomposer_catalog_list",
     description: "List the read-only local iComposer asset catalog (api/function/batch/model) of a registered workspace with join status. No InsureMO binding is required.",
     parameters: {
@@ -184,7 +188,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
     },
   })));
 
-  disposers.push(ctx.tools.register(defineTool({
+  track(ctx.tools.register(defineTool({
     name: "icomposer_sdk_query",
     description: "Query local SDK client operations of a registered workspace by client name and/or keyword. No InsureMO binding is required.",
     parameters: {
@@ -234,7 +238,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
     },
   })));
 
-  disposers.push(ctx.tools.register(defineTool({
+  track(ctx.tools.register(defineTool({
     name: "icomposer_verify_utils",
     description: "List known iComposer utility classes or search their methods in a registered workspace using the Workbench Active Profile for CLI authentication. Fails closed when that profile is unavailable.",
     parameters: {
@@ -297,7 +301,7 @@ export function registerIciTools(ctx: Context, defineTool: DefineToolFn): Array<
     },
   })));
 
-  disposers.push(ctx.tools.register(defineTool({
+  track(ctx.tools.register(defineTool({
     name: "ici_query",
     description: "Run local iComposer Code Intelligence graph queries on a registered workspace: mode api-chain walks an API's downstream call tree; mode impact traces upstream callers of a function/method to APIs. No InsureMO binding is required.",
     parameters: {

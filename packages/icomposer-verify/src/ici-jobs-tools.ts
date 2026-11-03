@@ -82,20 +82,24 @@ function objectSchema2(properties: Record<string, unknown>, required: string[]):
  * ones synchronously; `ici_status` is a read-only diagnostics projection.
  * @returns one disposer per registered tool.
  */
-export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Array<() => void> {
+export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn, onRegister?: (dispose: () => void) => void): Array<() => void> {
   const disposers: Array<() => void> = [];
-  disposers.push(ctx.systemPrompt.section({
+  // Report each disposer as it is acquired so an outer transaction can roll
+  // back a partially completed registration (the returned array only exists
+  // after this function returns).
+  const track = (dispose: () => void): void => { disposers.push(dispose); onRegister?.(dispose); };
+  track(ctx.systemPrompt.section({
     name: "tool:ici_build",
     order: 150,
     text: "ici_build builds the local iComposer Code Intelligence graph from a registered workspace canonical path. Small workspaces complete inline; larger ones run as cancellable background jobs.",
   }));
-  disposers.push(ctx.systemPrompt.section({
+  track(ctx.systemPrompt.section({
     name: "tool:ici_status",
     order: 150,
     text: "ici_status reports local iComposer Code Intelligence diagnostics for a registered workspace: snapshot counts, index vectors, staleness, and required-file presence. No InsureMO binding is required."
   }));
 
-  disposers.push(ctx.tools.register(defineTool({
+  track(ctx.tools.register(defineTool({
     name: "ici_build",
     description: "Build the local iComposer Code Intelligence graph for a registered workspace. No InsureMO binding is required.",
     parameters: {
@@ -152,7 +156,7 @@ export function registerIciJobTools(ctx: Context, defineTool: DefineToolFn): Arr
     },
   })));
 
-  disposers.push(ctx.tools.register(defineTool({
+  track(ctx.tools.register(defineTool({
     name: "ici_status",
     description: "Read-only local iComposer Code Intelligence diagnostics for a registered workspace: snapshot counts, staleness, index vectors, and required files. No InsureMO binding is required.",
     parameters: {
