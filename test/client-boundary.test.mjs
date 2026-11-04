@@ -47,11 +47,15 @@ test("react-dom/client is limited to the exact reviewed health file, not its pac
   assert.ok(codes('import { createPortal } from "react-dom";').includes("REACT_RUNTIME_NOT_ALLOWED"));
 });
 
-test("emitted module references stay in the React table and react-dom only in the status bundle", () => {
+test("emitted module references stay in the React table and react-dom only in the reviewed health-bearing bundles", () => {
   const ok = auditClientBundle('const a = require("react"); const b = require("react/jsx-runtime");', resolve(root, "packages/ui-workbench-jobs/lib/client.js"));
   assert.deepEqual(ok.issues, []);
   const health = auditClientBundle('const a = require("react-dom/client");', resolve(root, "packages/ui-insuremo-status/lib/client.js"));
   assert.deepEqual(health.issues, []);
+  const aggregate = auditClientBundle('const a = require("react-dom/client");', resolve(root, "packages/icomposer-workbench-dist/lib/client.js"));
+  assert.deepEqual(aggregate.issues, []);
+  const installed = auditClientBundle('const a = require("react-dom/client");', "/tmp/install/node_modules/@icomposer/workbench/lib/client.js");
+  assert.deepEqual(installed.issues, []);
   assert.ok(auditClientBundle('const a = require("react-dom/client");', resolve(root, "packages/ui-workbench-jobs/lib/client.js")).issues.some(issue => issue.code === "BUNDLE_REACT_DOM_OUTSIDE_HEALTH"));
   assert.ok(auditClientBundle('const a = require("@deepseek-ai/dsh-client-ui-primitives");', resolve(root, "packages/ui-workbench-jobs/lib/client.js")).issues.some(issue => issue.code === "CLIENT_HARNESS_VALUE_IMPORT"));
   assert.ok(auditClientBundle('const a = require(name);', resolve(root, "packages/ui-workbench-jobs/lib/client.js")).issues.some(issue => issue.code === "BUNDLE_DYNAMIC_MODULE_UNRESOLVED"));

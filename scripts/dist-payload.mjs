@@ -13,8 +13,9 @@
  * writes or removes anything.
  *
  * Payload contract: `lib/` (built, source-map free, host-path sanitized),
- * `lib/assets/`, `cordis.patch.yml`, `README.md`, and a package.json with no
- * lifecycle scripts, no devDependencies, and no file:/workspace: references.
+ * `lib/assets/`, `cordis.patch.yml`, `locale/*.json`, `icon.svg`, `README.md`,
+ * and a package.json with no lifecycle scripts, no devDependencies, and no
+ * file:/workspace: references.
  */
 import {
 	cp,
@@ -221,7 +222,7 @@ export async function materializePayload(
 	}
 	await buildDistLib();
 	await mkdir(targetDir, { recursive: true });
-	for (const entry of ["lib", "cordis.patch.yml", "README.md"]) {
+	for (const entry of ["lib", "cordis.patch.yml", "locale", "icon.svg", "README.md"]) {
 		await cp(join(distPackageDir, entry), join(targetDir, entry), {
 			recursive: true,
 		});

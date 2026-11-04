@@ -20,15 +20,30 @@ test("dist package metadata declares the full dsh contract", async () => {
   assert.equal(clientInject.includes("@deepseek-ai/dsh-client-runtime"), false);
   assert.equal(manifest.engines.dsh, ">=0.2.1-rc.2 <0.3.0-0");
   // exports cover the loader contract
-  for (const key of [".", "./client", "./cordis.patch.yml", "./package.json"]) {
+  for (const key of [".", "./client", "./cordis.patch.yml", "./locale/*.json", "./icon", "./package.json"]) {
     assert.ok(manifest.exports[key] !== undefined, `exports missing ${key}`);
   }
-  // files whitelist ships the payload
-  assert.deepEqual(manifest.files, ["lib", "cordis.patch.yml", "README.md"]);
+  // files whitelist ships the payload plus official display metadata
+  assert.deepEqual(manifest.files, ["lib", "cordis.patch.yml", "locale/*.json", "icon.svg", "README.md"]);
   // peers: harness packages + react, all loose (baseline documented in README)
   for (const peer of ["@deepseek-ai/cordis", "@deepseek-ai/dsh-native-command", "@deepseek-ai/dsh-subprocess", "@deepseek-ai/dsh-storage-domain", "@deepseek-ai/dsh-workspace", "@deepseek-ai/dsh-skill", "@deepseek-ai/dsh-storage", "@deepseek-ai/dsh-tools", "@deepseek-ai/dsh-jobs", "@deepseek-ai/schemastery", "@deepseek-ai/dsh-client-ui-primitives", "react"]) {
     assert.ok(manifest.peerDependencies[peer] !== undefined, `peerDependencies missing ${peer}`);
   }
+});
+
+test("official display metadata ships bilingual locale files and a bounded SVG icon", async () => {
+  const zh = JSON.parse(await readFile(join(distDir, "locale", "zh.json"), "utf8"));
+  const en = JSON.parse(await readFile(join(distDir, "locale", "en.json"), "utf8"));
+  assert.equal(zh.meta.title, "iComposer Workbench");
+  assert.equal(en.meta.title, zh.meta.title);
+  assert.equal(typeof zh.meta.description, "string");
+  assert.equal(typeof en.meta.description, "string");
+  assert.ok(zh.meta.description.length > 0 && en.meta.description.length > 0);
+  const icon = await readFile(join(distDir, "icon.svg"), "utf8");
+  assert.match(icon, /^<svg[^>]*viewBox="0 0 36 36"/);
+  assert.match(icon, /<\/svg>\s*$/);
+  assert.ok((await stat(join(distDir, "icon.svg"))).size <= 256 * 1024);
+  assert.doesNotMatch(icon, /<script|javascript:/i);
 });
 
 test("cordis.patch.yml is a single insert with the inject union", async () => {
@@ -123,7 +138,8 @@ test("clean build removes stale retired chunks and emits only fresh artifacts", 
   const retiredWord = "inter" + "com";
   const retiredService = "INTER" + "COM_SERVICE";
   await writeFile(stale, `// workbench-${retiredWord} ${retiredService} ${retiredWord}/\n`, "utf8");
-  execFileSync("pnpm", ["run", "build"], { cwd: distDir, timeout: 120_000, stdio: "ignore" });
+  execFileSync(process.execPath, [join(distDir, "..", "..", "scripts", "clean-dist-lib.mjs")], { cwd: distDir, timeout: 120_000, stdio: "ignore" });
+  execFileSync(join(distDir, "node_modules", ".bin", process.platform === "win32" ? "tsdown.cmd" : "tsdown"), [], { cwd: distDir, timeout: 120_000, stdio: "ignore" });
   const files = await readdir(libDir);
   assert.equal(files.includes("stale-retired-marker.js"), false);
   assert.ok(files.includes("index.js") && files.includes("client.js"));
@@ -178,7 +194,7 @@ test("pack-dist produces the self-contained tarball and matching manifest", asyn
   const summary = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(summary.package, "@icomposer/workbench");
   const paths = summary.files.map(file => file.path);
-  for (const required of ["lib/index.js", "lib/client.js", "cordis.patch.yml", "package.json", "README.md"]) {
+  for (const required of ["lib/index.js", "lib/client.js", "cordis.patch.yml", "locale/zh.json", "locale/en.json", "icon.svg", "package.json", "README.md"]) {
     assert.ok(paths.includes(required), `pack manifest missing ${required}`);
   }
   // no sibling sources, no node_modules in the payload

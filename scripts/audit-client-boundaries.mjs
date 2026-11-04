@@ -87,7 +87,11 @@ export function auditClientBundle(code, bundleFile) {
   const modules = [];
   const issue = code => issues.push({ code, file: normalized });
   if (source.parseDiagnostics.length) issue("BUNDLE_PARSE_ERROR");
-  const statusBundle = normalized.includes("/packages/ui-insuremo-status/lib/client.js");
+  // The status package and the aggregate that embeds it both carry the one
+  // reviewed EX-WH-01 createRoot. No other bundle may require react-dom.
+  const statusBundle = normalized.includes("/packages/ui-insuremo-status/lib/client.js")
+    || normalized.includes("/packages/icomposer-workbench-dist/lib/client.js")
+    || normalized.endsWith("/@icomposer/workbench/lib/client.js");
   function visit(node) {
     if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
       const name = literalArg(node);

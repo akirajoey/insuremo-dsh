@@ -18,11 +18,15 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
     "README.md"
   ],
   "dsh": {

@@ -6,6 +6,10 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 
 本包是**预构建产物**：`lib/` 已经是纯 JS，安装时不编译、不装 npm 依赖、不需要编译器。
 
+官方展示元数据随包发布：`locale/zh.json` 与 `locale/en.json` 提供 `meta.title` /
+`meta.description`，`icon.svg` 是自有品牌图形的最小矢量图标；manifest 通过
+`./locale/*.json` 与 `./icon` 导出，`files` 白名单包含这些资源。
+
 发布形态是仓库中的 **payload 根分支**：`plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` 分支的**根目录就是本包**
 (`lib/`、`cordis.patch.yml`、`package.json`)，因此一条 `add` 即可安装，不需要子目录参数。
 
