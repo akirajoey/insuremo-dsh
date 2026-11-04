@@ -8,24 +8,28 @@ Workbench 的包修改。
 
 ## 安装
 
-插件发布为仓库中的 **payload 根分支**：`plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` 分支**根目录本身就是插件包**
-（`lib/`、`cordis.patch.yml`、`package.json`），所以一条命令就能装，不需要子目录参数。
+插件以分发分支 **`plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`** 的 payload 根目录分发（该分支将快进到 0.1.3），
+或直接 `add` 候选 tgz。`main` 保留源码；`git-dist/` 是源码树中的预构建副本，
+不作为安装 spec。
 
-### 发布版本（0.1.2）
+### 发布版本（0.1.3）
 
 | 项 | 值 |
 |---|---|
-| Workbench | **0.1.2** |
+| Workbench | **0.1.3** |
 | 分发分支（安装用） | `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` |
-| 源码分支 | `release/workbench-0.1.2` |
+| 源码分支 | `main` |
 | 已验证组合（`testedWith`） | dsh `0.2.1-rc.2`、IMO `0.2.37`、`@insuremo/skills-tool` `1.1.2` |
 | 平台验证 | macOS Desktop/Web 隔离验证；Windows Skills 刷新、安装由用户复测通过 |
 
 > `testedWith` 是**已验证组合**，不是硬约束；唯一硬约束是包里的
 > `engines.dsh`（`>=0.2.1-rc.2 <0.3.0-0`）。
+>
+> 保留 `main`（源码）与本分发分支；`plugin-dist`、`plugin-dist-0.2`、`release/*`、
+> `desktop`、`upgrade/*` 已退役。安装以本分发分支或候选 tgz 为准。
 
 主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`
-可复现 pin：`github:akirajoey/insuremo-dsh#f5ed159e05f9d20de82f9667ae7f3a2881dc3c8c`（发布时由维护者填真实分发分支 SHA）
+可复现 pin：`github:akirajoey/insuremo-dsh#<distribution-commit-sha>`（发布时由维护者填该分发分支的真实 SHA）
 
 > spec 建议整体加引号：`#`/`&` 在 shell 里都有特殊含义（Windows 上引号内即安全；
 > 含 `&path:` 的旧形式尤其必须加引号）。
@@ -56,7 +60,7 @@ DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/b
 /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
 # 可复现：pin 到这个 commit
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#f5ed159e05f9d20de82f9667ae7f3a2881dc3c8c"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<distribution-commit-sha>"
 ```
 
 `/usr/bin/env -u DSH_HOME` = 在不继承 shell 里残留 `DSH_HOME` 的情况下执行，让官方 CLI
@@ -257,13 +261,13 @@ DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/b
 
 ### 备注：`&path:` 子目录形式才需要授权
 
-如果不用分支根 spec，而是改用 `github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench`
-这种**子目录**形式，pnpm 会对 git 子目录做隐式打包，首次 `add` 会 exit 1 并报
+主路径是分发分支根 spec，不需要这一步。**不要用 `main` 的 `git-dist/` 子目录形式**：
+它可能落后于分发分支（当前是 162–176 修复前的产物）。如确需 git 子目录形式，pnpm 会做隐式打包，首次 `add` 会 exit 1 并报
 `ERR_PNPM_IGNORED_BUILDS`，需要在 profile 的 `pnpm-workspace.yaml` 里把 dsh 写入的
 `allowBuilds` 占位值改成 `true` 再重跑（Desktop：
 `~/.dsh/profiles/desktop/pnpm-workspace.yaml`；Web：`~/.dsh/profiles/web/pnpm-workspace.yaml`；
 Windows 在 `%USERPROFILE%\.dsh\profiles\<profile>\pnpm-workspace.yaml`）。
-**主路径（分支根 spec）不需要这一步。**
+**分发分支根 spec 与候选 tgz 都不需要这一步。**
 
 ### 备选：离线 / 无网（clone + pack）
 
@@ -293,26 +297,27 @@ Windows 在 `%USERPROFILE%\.dsh\profiles\<profile>\pnpm-workspace.yaml`）。
 ## 分发形态
 
 `packages/icomposer-workbench-dist`（包名 `@icomposer/workbench`）是分发包本体；
-本仓库把它的预构建产物发布成**独立的 payload 根分支**：
+本仓库把预构建产物发布在分发分支的 payload 根目录（`git-dist/icomposer-workbench/` 是 main 中的副本），或打成候选 tgz：
 
 | 分支 | 版本 | 面向 | 说明 |
 |---|---|---|---|
-| `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` | **0.1.2** | dsh >= 0.2.1-rc.2 | **本版主路径** |
-| `1369a924…`（commit pin） | 0.1.1 | dsh >= 0.2.1-rc.2 | 旧版冻结快照，仍有 15 秒目录刷新上限；通道现已推进至 0.1.2 |
+| `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` | **0.1.3** | dsh >= 0.2.1-rc.2 | **本版主路径（将快进到 0.1.3）** |
+| `main` | 0.1.3 | 源码 | 源码分支，不直接安装 |
+| `1369a924…`（commit pin） | 0.1.1 | dsh >= 0.2.1-rc.2 | 旧版冻结快照，仍有 15 秒目录刷新上限；当前分发分支为 0.1.3 |
 | `plugin-dist-0.2` | 0.1.0 | dsh >= 0.2.1-rc.2 | 更早版本，**保留原 SHA 不覆盖** |
 | `plugin-dist` | 0.1.0 | 0.1 宿主 | 旧通道，**保留原 SHA**，新宿主不要用 |
 
-表中的分支或 commit 都对应 **payload 根目录**（根目录就是 `@icomposer/workbench` 包）。
-当前兼容通道已快进合入验证通过的 0.1.2；旧版仍可 pin 原始 commit，历史未被重写。
+分发分支与历史分支/commit 都对应 payload 根目录（根目录就是 `@icomposer/workbench` 包）；`main` 是源码。
+当前分发分支将快进到 0.1.3；0.1.1/0.1.2 历史记录保留，旧版仍可 pin 原始 commit，历史未被重写。
 更早的 `plugin-dist-0.2`、`plugin-dist` 分支保持不动。
 
 ```sh
-# 主路径：分支根 spec（一条命令）
+# 主路径：分发分支根 spec（一条命令）
 dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
 # 可复现：pin 精确 commit
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#f5ed159e05f9d20de82f9667ae7f3a2881dc3c8c"
+/usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#<distribution-commit-sha>"
 
 # 备选：离线/无网时 clone 后 pack 成 tgz 再 add（见「备选：离线 / 无网」）
 

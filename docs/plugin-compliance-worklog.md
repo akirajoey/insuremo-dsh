@@ -112,3 +112,12 @@ machine paths are intentionally omitted.
 - **Verification**: status package `vitest` 58/58, including the name-mount signal test (name mounted → mark empty; name unmounted → globe restored after the one-macrotask settle) and the combined-logo pixel/alpha checks (first column 0, last 311, globe purple at 30,1). An isolated status build passed and its bundle audit still allowed only `react`, `react/jsx-runtime`, `react-dom/client` with no issues. Dist tests 9/9; the rebuilt tarball contains the restored PNGs byte-for-byte. The tarball SHA-256 is recorded in the READY message.
 - **Residuals**: final visual confirmation must come from the user reinstalling the tarball on the real Desktop App. With more than one `SidebarRoot` at once, any mounted name hides every mark from the same apply; the real App has one sidebar. On first paint the rail may show one frame without the globe before the signal settles (empty-mark default avoids a wide-row double-globe flash). These limits are documented in the status README. `git-dist` was not refreshed.
 - **Report**: V-01, U-03.
+
+## TASK-177 — version 0.1.3 and mainline metadata
+
+- **Commit**: pending (maintainer commit after verifier PASS; parent will be the TASK-176 commit).
+- **Scope**: `packages/icomposer-workbench-dist/package.json`, `compatibility.json`, root and dist READMEs, `packages/insuremo-service/README.md`, this worklog.
+- **Changes**: Workbench version is now 0.1.3. `sourceBranch` is `main`; `distributionBranch` remains `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` in both `workbenchRelease` and `compatibility.json`; `testedWith` (dsh rc.2, IMO 0.2.37, skills-tool 1.1.2), harness pin, Node and pnpm requirements are unchanged. Both READMEs document the distribution branch (payload root) or a candidate tgz as the install source, keep `main` as source and explicitly warn that `main`'s `git-dist/` is pre-0.1.3 and not an install spec. `plugin-dist`, `plugin-dist-0.2`, `release/*`, `desktop` and `upgrade/*` are retired; 0.1.1/0.1.2 history is preserved. The service README's version pointer moved to 0.1.3.
+- **Verification**: dist tests 9/9; the rebuilt tarball is `icomposer-workbench-0.1.3.tgz`, and its manifest reports version 0.1.3, source branch `main` and distribution branch `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`. No test hard-coded 0.1.2. The tarball SHA-256 is recorded in the READY message.
+- **Residuals**: tracked `git-dist` was not refreshed, per the card. No push, branch deletion or merge was performed. Real UI/install behavior was not re-verified.
+- **Report**: V-06, U-04.
