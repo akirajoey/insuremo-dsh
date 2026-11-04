@@ -18,18 +18,32 @@ The package does not probe credentials or own sidebar button actions. Live
 status arrives from the Workbench overview endpoint; the native Harness
 buttons remain the behavior owners.
 
-## TASK-168a transitional boundaries
+## Picker overlay and remaining boundary
 
-- The Picker still renders its floating rail panel through a **component-owned
-  body portal** (`ProfilePicker.tsx` `createPortal`). This is a documented
-  transition: TASK-173 will replace it with the official `shell.overlay`.
-  **This card does not claim final DOM compliance.**
-- The only `react-dom` call sites are that Picker portal and
-  `WorkspaceHealth`'s `createRoot` (the accepted `EX-WH-01` workspace-row health
-  driver, unchanged by this card).
-- Real page rendering, focus behaviour and visuals are **not verified** here
-  (no browser automation was available); jsdom component tests do not stand in
-  for the real UI.
+The narrow-rail Picker renders through the official root/list `shell.overlay`
+slot, outside the clipped sidebar. The footer and overlay entries share a
+controller created by each client plugin apply and supplied through their slot
+`inject` factories. A declared slot is not enough: the overlay component must
+actually mount and acknowledge availability. On closure, target change, lost
+slot or plugin unload, the Picker cancels its own request and discards stale
+responses. Its frame-sized wrapper is click-through; the panel alone accepts
+pointer events. Positioning measures only the plugin's trigger, panel and overlay
+wrapper, clamps to the visible frame and responds to scroll/resize.
+
+If the overlay is absent or not rendered, the wide Picker remains inline. The
+narrow trigger instead explains that the user must **manually expand the
+sidebar**; it does not claim a sidebar-opening API or offer a Settings fallback.
+The Picker no longer creates a body portal or a separate React root.
+
+The remaining `react-dom/client` use is `WorkspaceHealth`'s existing `createRoot`
+(the accepted `EX-WH-01` workspace-row health driver, unchanged here). This
+exception is not a claim of final DOM compliance. The status package's local
+layout type-only shim is a build aid; the independent published-declaration
+contract gate remains separate and is not replaced by it.
+
+Real App page rendering, focus behaviour, frame clipping and visuals are **not
+verified** here (no browser automation was available); jsdom/component geometry
+tests do not stand in for a real UI check.
 
 The package uses the Harness Strategy A `clientBundle` preset, which keeps
 React in the browser module table rather than copying it into `lib/client.js`.

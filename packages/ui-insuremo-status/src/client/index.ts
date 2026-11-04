@@ -1,9 +1,12 @@
 import type {} from "@deepseek-ai/dsh-client-locale/client";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
+import type {} from "@deepseek-ai/dsh-client-ui-layout/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
 import { WorkspaceHealth } from "./WorkspaceHealth.tsx";
 import { WorkspaceAwareProfilePicker } from "./ProfilePicker.tsx";
+import { PickerOverlayController } from "./PickerOverlayController.ts";
+import { PickerOverlay } from "./PickerOverlay.tsx";
 import { InsuremoBrandMark, InsuremoBrandName, InsuremoHeroBrandMark } from "./InsuremoBrand.tsx";
 import { en, zh, type InsuremoStatusLocaleKey } from "./locales.ts";
 
@@ -35,6 +38,11 @@ export const inject = ["slots", "locale"];
 
 /** Register the static localized status badge in the sidebar footer. */
 export function apply(ctx: Context): void {
+	// One controller per plugin fiber, delivered through the actual slot inject
+	// faces. No global singleton or dynamically recreated Component identity.
+	const pickerOverlay = new PickerOverlayController();
+	const pickerFace = () => ({ pickerOverlay });
+	ctx.effect(() => () => { pickerOverlay.dispose(); }, "ui-insuremo-status: picker controller");
 	ctx.effect(
 		() => ctx.locale.register(NS, { zh, en }),
 		"ui-insuremo-status: dictionaries",
@@ -75,10 +83,27 @@ export function apply(ctx: Context): void {
 				order: 10,
 				locale: NS,
 				label: () => t("label"),
+				inject: pickerFace,
 			},
 			WorkspaceAwareProfilePicker,
 		),
 	);
+
+	// Follow the declaration, not an assumed plugin load order. Availability
+	// requires the rendered overlay's mount acknowledgement as well.
+	ctx.slots.inject("shell.overlay", () => {
+		const releaseDeclaration = pickerOverlay.declare();
+		try {
+			const unregister = ctx.slots.register(
+				{ name: "shell.overlay", id: "insuremo-profile-picker", inject: pickerFace },
+				PickerOverlay,
+			);
+			return () => { releaseDeclaration(); unregister(); };
+		} catch (error) {
+			releaseDeclaration();
+			throw error;
+		}
+	});
 
 	// Workspace health strip: three 16px glyphs per workspace (i / graph /
 	// brain), fed by the read-only host status route (60s TTL).

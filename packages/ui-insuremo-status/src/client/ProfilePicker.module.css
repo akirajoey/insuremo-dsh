@@ -59,20 +59,26 @@
   padding: 2px 0;
 }
 
-/* Narrow rail form (TASK-144 FIX). The collapsed column is 56px wide with
-   `overflow: hidden`, so the panel ports to <body>: fixed at a readable width,
-   clamped by useAnchoredPosition, and free of the rail's clip. The menu
-   material itself (fill, blur, radius, macOS backing) comes from MenuSurface. */
+/* Plugin-owned child of shell.overlay: the full frame stays click-through;
+   only the positioned panel opts into pointer events. */
+.overlayFrame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Outside the clipped rail, but within the official frame overlay. */
 .railPanel {
-  position: fixed;
+  position: absolute;
+  pointer-events: auto;
   z-index: 100;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 1px;
   width: 260px;
-  max-width: calc(100vw - 24px);
-  max-height: min(420px, calc(100vh - 96px));
+  max-width: calc(100% - 24px);
+  max-height: min(420px, calc(100% - 24px));
   overflow: auto;
   padding: 4px;
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
@@ -85,6 +91,17 @@
 .railPanel:focus-visible {
   outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
+}
+
+/* Missing or unmounted overlay: an explicit local fallback, not a fake
+   sidebar-opening action. It remains inside the narrow footer contribution. */
+.expandSidebarNotice {
+  display: block;
+  width: 36px;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  line-height: 12px;
 }
 
 .pickerHeader {

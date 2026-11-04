@@ -1,23 +1,11 @@
-import { Component, createRef, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { Component, createRef, useSyncExternalStore, type ReactNode } from "react";
 import { Button } from "./primitives/Button.tsx";
-import { MenuSurface } from "./primitives/MenuSurface.tsx";
-import { useAnchoredPosition } from "./primitives/anchored-position.ts";
-import { useDismissOnOutsidePointer } from "./primitives/dismiss.ts";
+import type { PickerOverlayController } from "./PickerOverlayController.ts";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import type { InsuremoStatusLocaleKey } from "./locales.ts";
 import { postAction, OVERVIEW_URL } from "./actions.ts";
 import css from "./ProfilePicker.module.css";
-
-/** Width of the floating rail panel; wide enough for a profile name and its check. */
-const RAIL_PANEL_WIDTH = 260;
-/** Gap between the rail trigger and its floating panel. */
-const RAIL_PANEL_GAP = 8;
-/** Margin the floating panel keeps from every viewport edge. */
-const RAIL_VIEWPORT_MARGIN = 12;
-/** Unplaced panel: hidden but laid out so the first placement measures real dimensions. */
-const MEASURE_STYLE = { visibility: "hidden", left: 0, top: 0 } as const;
 
 /** Props supplied by the sidebar footer-action slot owner. */
 export type ProfilePickerProps = PropsRuntime<"sidebar.footer.action">
@@ -42,7 +30,7 @@ interface ProfileRow {
 }
 
 type PickerState =
-  | { readonly phase: "collapsed"; readonly targetKey: string; readonly profiles?: readonly ProfileRow[]; readonly activeName?: string }
+  | { readonly phase: "collapsed"; readonly targetKey: string; readonly profiles?: readonly ProfileRow[]; readonly activeName?: string; readonly expandSidebarNotice?: boolean }
   | { readonly phase: "open"; readonly targetKey: string; readonly profiles: readonly ProfileRow[]; readonly activeName?: string; readonly busy: boolean; readonly error?: "network" | "workspace" | string };
 
 function tooltipOf(profile: ProfileRow, fallback: string): string {
@@ -109,91 +97,30 @@ function mergeProfileRows(rows: readonly ProfileRow[]): readonly ProfileRow[] {
   return [...byName.values()].sort((left, right) => sourceRank(left.sourceScope) - sourceRank(right.sourceScope) || left.name.localeCompare(right.name));
 }
 
+const noOverlaySubscription = (_listener: () => void): (() => void) => () => {};
+const noOverlaySnapshot = (): boolean => false;
+
 /**
  * Global slot wrapper: hooks are consumed here, while the stateful panel below
  * remains a class so the existing picker interaction and DOM stay stable.
+ * Legacy direct callers without the injected face get the same safe fallback.
  */
-export function WorkspaceAwareProfilePicker(props: ProfilePickerProps): ReactNode {
+export function WorkspaceAwareProfilePicker(props: ProfilePickerProps & { readonly pickerOverlay?: PickerOverlayController }): ReactNode {
   const sessions = props.useSessions(state => state);
   const workspaces = props.useWorkspaces(state => state);
-  return <ProfilePicker {...props} target={resolveProfileTarget(sessions, workspaces)} />;
+  const overlayAvailable = useSyncExternalStore(
+    props.pickerOverlay?.subscribeAvailability ?? noOverlaySubscription,
+    props.pickerOverlay?.getAvailable ?? noOverlaySnapshot,
+    props.pickerOverlay?.getAvailable ?? noOverlaySnapshot,
+  );
+  return <ProfilePicker {...props} overlayAvailable={overlayAvailable} target={resolveProfileTarget(sessions, workspaces)} />;
 }
 
 interface ProfilePickerPanelProps extends ProfilePickerProps {
   /** Omitted only for direct legacy consumers; registered UI always supplies it. */
   readonly target?: ProfilePickerTarget;
-}
-
-interface RailPickerPanelProps {
-  readonly anchorRef: React.RefObject<HTMLElement | null>;
-  readonly onClose: () => void;
-  readonly label: string;
-  readonly children: ReactNode;
-}
-
-/**
- * Floating form of the picker for the collapsed rail (TASK-144 FIX). The rail
- * is a 56px column with `overflow: hidden`, so an in-place panel is clipped to
- * it (measured: 151px panel, 48px of it outside). The same list therefore
- * renders through a body portal at a fixed width, anchored to the trigger that
- * stays mounted underneath. Official primitives own the two behaviours:
- * placement (viewport clamp on scroll, resize, and the panel's own resize) and
- * outside-pointer dismissal. No popover framework is introduced here.
- */
-function RailPickerPanel({ anchorRef, onClose, label, children }: RailPickerPanelProps): ReactNode {
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const position = useAnchoredPosition({
-    open: true,
-    anchorRef,
-    panelRef,
-    side: "top",
-    align: "start",
-    gap: RAIL_PANEL_GAP,
-    margin: RAIL_VIEWPORT_MARGIN,
-  });
-  const dismiss = useCallback(() => { onClose(); }, [onClose]);
-  useDismissOnOutsidePointer(anchorRef, true, dismiss, panelRef);
-  // Focus exactly once per open, and only after placement: until
-  // `useAnchoredPosition` returns coordinates the panel still carries the
-  // hidden measuring style, and Chromium discards `focus()` on a
-  // `visibility: hidden` element — the trigger kept focus and Tab then walked
-  // the whole page before reaching the portal. The dependency re-runs on every
-  // reposition (scroll, resize, the panel's own resize), so the guard — not the
-  // dependency — is what keeps those from stealing focus back out of a row.
-  // Each open remounts the panel, which resets the guard naturally.
-  const focusedRef = useRef(false);
-  useLayoutEffect(() => {
-    if (focusedRef.current || position === null) return;
-    const panel = panelRef.current;
-    if (panel === null) return;
-    focusedRef.current = true;
-    panel.focus();
-  }, [position]);
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onClose();
-      anchorRef.current?.focus();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => { document.removeEventListener("keydown", onKeyDown); };
-  }, [anchorRef, onClose]);
-  return createPortal(
-    <MenuSurface
-      ref={panelRef}
-      compact
-      tabIndex={-1}
-      role="group"
-      aria-label={label}
-      data-icomposer-picker-panel="rail"
-      className={css.railPanel}
-      style={position === null ? MEASURE_STYLE : { ...position, width: RAIL_PANEL_WIDTH }}
-    >
-      {children}
-    </MenuSurface>,
-    document.body,
-  );
+  readonly pickerOverlay?: PickerOverlayController;
+  readonly overlayAvailable?: boolean;
 }
 
 /** Sidebar Active Profile selector with workspace-scoped reads and selection. */
@@ -206,6 +133,7 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
 
   /** Collapse the panel; also the single close path for the header, Esc, and outside clicks. */
   private readonly close = (): void => {
+    this.props.pickerOverlay?.clear(this);
     this.cancelRequest();
     this.setState({
       phase: "collapsed",
@@ -214,6 +142,28 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
       activeName: this.state.activeName,
     });
   };
+
+  private readonly dismissRail = (restoreFocus: boolean): void => {
+    this.close();
+    if (restoreFocus && this.triggerRef.current?.isConnected) this.triggerRef.current.focus();
+  };
+
+  private syncOverlay(): void {
+    const controller = this.props.pickerOverlay;
+    if (controller === undefined) return;
+    if (this.props.wide || this.state.phase !== "open") {
+      controller.clear(this);
+      return;
+    }
+    if (!this.props.overlayAvailable) return;
+    controller.show({
+      owner: this,
+      anchorRef: this.triggerRef,
+      label: this.props.t("picker.label"),
+      content: this.renderPanel(false),
+      onDismiss: this.dismissRail,
+    });
+  }
 
   private currentTarget(): ProfilePickerTarget {
     return this.props.target ?? { kind: "global" };
@@ -226,13 +176,23 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
   override componentDidUpdate(previousProps: ProfilePickerPanelProps): void {
     const previousKey = targetKey(previousProps.target ?? { kind: "global" });
     const nextKey = targetKey(this.currentTarget());
-    if (previousKey === nextKey) return;
-    this.cancelRequest();
-    this.setState({ phase: "collapsed", targetKey: nextKey });
-    void this.warmActive(this.currentTarget());
+    if (previousProps.pickerOverlay !== this.props.pickerOverlay) previousProps.pickerOverlay?.clear(this);
+    if (previousKey !== nextKey) {
+      this.props.pickerOverlay?.clear(this);
+      this.cancelRequest();
+      this.setState({ phase: "collapsed", targetKey: nextKey });
+      void this.warmActive(this.currentTarget());
+      return;
+    }
+    if (!this.props.wide && this.state.phase === "open" && !this.props.overlayAvailable) {
+      this.close();
+      return;
+    }
+    this.syncOverlay();
   }
 
   override componentWillUnmount(): void {
+    this.props.pickerOverlay?.clear(this);
     this.cancelRequest();
   }
 
@@ -384,7 +344,9 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
         if (!this.isCurrent(request.generation, request.targetKey, request.signal)) return;
         this.setState(prev => prev.phase === "open"
           ? { phase: "collapsed", targetKey: request.targetKey, profiles: nextProfiles ?? prev.profiles, activeName: nextActive }
-          : prev);
+          : prev, () => {
+          if (!this.props.wide && this.triggerRef.current?.isConnected) this.triggerRef.current.focus();
+        });
       } else {
         const error = outcome.error.code === "network" ? "network" : outcome.error.code;
         this.setState(prev => prev.phase === "open" ? { ...prev, busy: false, error } : prev);
@@ -405,7 +367,9 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
     const { t, wide } = this.props;
     const current = this.state.activeName ?? "";
     const currentRow = this.state.profiles?.find(profile => profile.name === current);
-    const title = currentRow !== undefined ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
+    const baseTitle = currentRow !== undefined ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
+    const needsSidebar = !wide && !this.props.overlayAvailable;
+    const title = needsSidebar ? `${baseTitle} · ${t("picker.expandSidebar")}` : baseTitle;
     // The collapsed rail hides the footer label, as official footer actions
     // do; the dot and the accessible name carry the same information.
     return (
@@ -418,8 +382,12 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
         aria-haspopup="listbox"
         aria-expanded={open}
         title={title}
-        aria-label={current.length > 0 ? `${t("label")} · ${current}` : t("label")}
-        onClick={() => { if (open) this.close(); else void this.open(); }}
+        aria-label={`${current.length > 0 ? `${t("label")} · ${current}` : t("label")}${needsSidebar ? ` · ${t("picker.expandSidebar")}` : ""}`}
+        onClick={() => {
+          if (open) this.close();
+          else if (needsSidebar) this.setState(prev => prev.phase === "collapsed" ? { ...prev, expandSidebarNotice: true } : prev);
+          else void this.open();
+        }}
       >
         <span className={css.triggerContent}>
           <span className={css.dot} aria-hidden="true" />
@@ -487,17 +455,16 @@ export class ProfilePicker extends Component<ProfilePickerPanelProps, PickerStat
 
   override render(): ReactNode {
     const open = this.state.phase === "open";
-    // Narrow: the panel leaves the clipped column through a portal, so the
-    // trigger stays mounted as its anchor and as the close affordance.
+    // Narrow: the trigger stays in the rail; its panel is rendered by the
+    // separately mounted shell.overlay contribution. If the slot is absent or
+    // not actually mounted, tell the user to expand the sidebar manually.
     if (!this.props.wide) {
       return (
         <>
           {this.renderTrigger(open)}
-          {open ? (
-            <RailPickerPanel anchorRef={this.triggerRef} onClose={this.close} label={this.props.t("picker.label")}>
-              {this.renderPanel(false)}
-            </RailPickerPanel>
-          ) : null}
+          {!this.props.overlayAvailable && this.state.phase === "collapsed" && this.state.expandSidebarNotice
+            ? <span className={css.expandSidebarNotice} role="status">{this.props.t("picker.expandSidebar")}</span>
+            : null}
         </>
       );
     }

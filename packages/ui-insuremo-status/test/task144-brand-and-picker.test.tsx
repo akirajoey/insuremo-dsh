@@ -182,7 +182,10 @@ describe("TASK-144 picker uses the official compact Button", () => {
     });
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(overviewPayload)));
     runtime = await SlotTestRuntime.create();
-    await runtime.declare({ "sidebar.footer.action": { kind: "list", scope: "root" } });
+    await runtime.declare({
+      "sidebar.footer.action": { kind: "list", scope: "root" },
+      "shell.overlay": { kind: "list", scope: "root" },
+    });
     const locale = new LocaleRuntime(runtime.ctx);
     runtime.ctx.provide("locale", locale);
     runtime.slots.installLocale(locale);
@@ -193,6 +196,7 @@ describe("TASK-144 picker uses the official compact Button", () => {
     await feature.dispose();
     await runtime.dispose();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     document.body.innerHTML = "";
   });
 
@@ -210,14 +214,26 @@ describe("TASK-144 picker uses the official compact Button", () => {
     expect(document.querySelector("[data-icomposer-picker-panel]")).toBeNull();
   });
 
-  /** The narrow panel lives in a body portal, so queries must leave the slot container. */
+  /** jsdom has no layout: give only our own frame/trigger/panel controlled rectangles. */
+  function mockRailGeometry(): void {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const rect = this.hasAttribute("data-icomposer-picker-overlay")
+        ? { left: 0, top: 0, width: 1024, height: 768 }
+        : this.hasAttribute("data-icomposer-picker-panel")
+          ? { left: 0, top: 0, width: 260, height: 180 }
+          : { left: 20, top: 600, width: 36, height: 36 };
+      return { ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height, x: rect.left, y: rect.top, toJSON: () => ({}) } as DOMRect;
+    });
+  }
+
   function railPanel(): HTMLElement {
     const panel = document.querySelector<HTMLElement>('[data-icomposer-picker-panel="rail"]');
-    if (panel === null) throw new Error("the rail panel was not portalled");
+    if (panel === null) throw new Error("the rail panel was not rendered by shell.overlay");
     return panel;
   }
 
-  it("narrow rail: the panel portals out of the clipped column and keeps the full list", async () => {
+  it("narrow rail: the official overlay holds the full list outside the clipped footer", async () => {
+    mockRailGeometry();
     let switched = false;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -231,6 +247,7 @@ describe("TASK-144 picker uses the official compact Button", () => {
       return jsonResponse(overviewPayload);
     }));
     const view = runtime.renderSlot("sidebar.footer.action", { wide: false });
+    const overlay = runtime.renderSlot("shell.overlay", {});
     const trigger = await view.view.findByRole("button", { name: new RegExp(zh.label) });
     expect(trigger.getAttribute("data-wide")).toBe("false");
     for (const name of ghostSmallButtonClasses()) expect(trigger.classList.contains(name)).toBe(true);
@@ -245,12 +262,13 @@ describe("TASK-144 picker uses the official compact Button", () => {
     // The trigger stays mounted as the anchor, and reports the open state.
     expect(document.contains(trigger)).toBe(true);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    // Escaped the slot outlet and its clipping column: direct child of <body>.
-    expect(panel.parentElement).toBe(document.body);
+    // The official sibling outlet, not a body portal, owns the panel.
+    expect(overlay.container.contains(panel)).toBe(true);
+    expect(panel.parentElement).not.toBe(document.body);
     expect(view.container.contains(panel)).toBe(false);
-    // Readable fixed width instead of the rail's 56px.
+    // Readable frame-relative width instead of the rail's 56px.
     const panelCss = readFileSync(resolve(process.cwd(), "src/client/ProfilePicker.module.css"), "utf8");
-    expect(panelCss).toMatch(/\.railPanel \{[^}]*position: fixed;/s);
+    expect(panelCss).toMatch(/\.railPanel \{[^}]*position: absolute;/s);
     expect(panelCss).toMatch(/\.railPanel \{[^}]*width: 260px;/s);
     expect(panel.textContent).toContain("portal:microsite");
 
@@ -268,12 +286,14 @@ describe("TASK-144 picker uses the official compact Button", () => {
     await vi.waitFor(() => {
       expect(view.view.getByRole("button", { name: /portal:mo-re/ })).toBeTruthy();
     });
-    // Selection collapsed the panel and left no portal residue behind.
+    // Selection collapsed the panel and left no overlay residue behind.
     expect(document.querySelector("[data-icomposer-picker-panel]")).toBeNull();
   });
 
   it("narrow rail: Esc and outside pointers close it, inside pointers do not, and Esc returns focus", async () => {
+    mockRailGeometry();
     const view = runtime.renderSlot("sidebar.footer.action", { wide: false });
+    runtime.renderSlot("shell.overlay", {});
     const trigger = await view.view.findByRole("button", { name: new RegExp(zh.label) });
 
     trigger.click();

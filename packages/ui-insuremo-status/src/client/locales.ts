@@ -16,6 +16,7 @@ export const zh = {
   "picker.empty": "无可用 Profile",
   "picker.error": "无法连接",
   "picker.workspaceUnavailable": "当前工作区不可用",
+  "picker.expandSidebar": "请手动展开侧栏后选择 Profile",
   "picker.project": "项目 Profile",
   "picker.global": "全局 Profile",
 } as const satisfies Record<string, string>;
@@ -39,6 +40,7 @@ export const en = {
   "picker.empty": "No profiles available",
   "picker.error": "Cannot connect",
   "picker.workspaceUnavailable": "Workspace unavailable",
+  "picker.expandSidebar": "Expand the sidebar manually to select a Profile",
   "picker.project": "Project Profiles",
   "picker.global": "Global Profiles",
 } as const satisfies Record<InsuremoStatusLocaleKey, string>;

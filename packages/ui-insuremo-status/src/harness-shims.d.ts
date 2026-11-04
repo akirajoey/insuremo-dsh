@@ -35,6 +35,9 @@ declare module "@deepseek-ai/cordis" {
 
 declare module "@deepseek-ai/dsh-client-locale/client" {}
 declare module "@deepseek-ai/dsh-client-ui-sidebar/client" {}
+// Type-only public shell.overlay declaration import; the published-declaration
+// contract gate remains the authority rather than this local build shim.
+declare module "@deepseek-ai/dsh-client-ui-layout/client" {}
 declare module "@deepseek-ai/dsh-client-ui-primitives" {
   import type { ButtonHTMLAttributes, ReactElement, ReactNode, Ref } from "react";
   export function Tooltip(props: {
