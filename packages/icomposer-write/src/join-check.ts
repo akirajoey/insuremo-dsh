@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import type { AssetJoinState, TestKind } from "./types.ts";
 
 const META_LIMIT = 256 * 1024;
@@ -9,8 +9,17 @@ const GROOVY_LIMIT = 2 * 1024 * 1024;
 async function safeRealpath(p: string): Promise<string | null> {
   try { return await realpath(p); } catch { return null; }
 }
+type ContainmentPath = Pick<typeof import("node:path"), "relative" | "isAbsolute" | "sep">;
+const nativeContainmentPath: ContainmentPath = { relative, isAbsolute, sep };
+
+/** Test seam: production calls this with the native path module. */
+export function isContainedWith(pathApi: ContainmentPath, realPath: string, root: string): boolean {
+  const child = pathApi.relative(root, realPath);
+  return child === "" || (child !== ".." && !child.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(child));
+}
+
 function isContained(realPath: string, root: string): boolean {
-  return realPath === root || realPath.startsWith(root + "/");
+  return isContainedWith(nativeContainmentPath, realPath, root);
 }
 
 async function readServerMd5(canonicalRoot: string, kind: TestKind, name: string): Promise<{ state: "found"; md5?: string } | { state: "missing" }> {

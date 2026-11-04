@@ -1,15 +1,24 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { readdir, readFile, stat, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { confidenceForSource, extractMethods, stableEdgeId, stableHashText, truncateChars, assignedVariableName, calledMethodsOnVariable, containsLocalMethodCall, extractQuotedAfter, stripLineComments } from "./parser.ts";
 import type { IciEdge, IciNode, ProgressCallback } from "./types.ts";
 
 const META_LIMIT = 256 * 1024;
 const GROOVY_LIMIT = 2 * 1024 * 1024;
 
+type ContainmentPath = Pick<typeof import("node:path"), "relative" | "isAbsolute" | "sep">;
+const nativeContainmentPath: ContainmentPath = { relative, isAbsolute, sep };
+
+/** Test seam: production calls this with the native path module. */
+export function isContainedWith(pathApi: ContainmentPath, realPath: string, root: string): boolean {
+  const child = pathApi.relative(root, realPath);
+  return child === "" || (child !== ".." && !child.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(child));
+}
+
 function isContained(realPath: string, root: string): boolean {
-  return realPath === root || realPath.startsWith(root + "/");
+  return isContainedWith(nativeContainmentPath, realPath, root);
 }
 async function safeRealpath(p: string): Promise<string | null> {
   try { return await realpath(p); } catch { return null; }

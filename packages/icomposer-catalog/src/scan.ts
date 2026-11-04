@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat, realpath } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { AssetEntry, AssetType, JoinStatus } from "./types.ts";
 
 const META_LIMIT = 256 * 1024;
@@ -44,8 +44,17 @@ interface Source {
 const COMMON_KEYS = ["Path", "Id", "GroupId", "ModuleId", "Version", "Status", "RequestMethod", "RequestType", "AppName", "Md5Value", "LatestUpdateTime"];
 const BATCH_KEYS = ["JobName", "RecordUsage", "_IComposerSourceEnvironment"];
 
+type ContainmentPath = Pick<typeof import("node:path"), "relative" | "isAbsolute" | "sep">;
+const nativeContainmentPath: ContainmentPath = { relative, isAbsolute, sep };
+
+/** Test seam: production calls this with the native path module. */
+export function isContainedWith(pathApi: ContainmentPath, realPath: string, root: string): boolean {
+  const child = pathApi.relative(root, realPath);
+  return child === "" || (child !== ".." && !child.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(child));
+}
+
 function isContained(realPath: string, canonicalRoot: string): boolean {
-  return realPath === canonicalRoot || realPath.startsWith(canonicalRoot + "/");
+  return isContainedWith(nativeContainmentPath, realPath, canonicalRoot);
 }
 
 async function safeRealpath(p: string): Promise<string | null> {
