@@ -1,0 +1,12 @@
+.surface {
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, calc(100vh - 48px));
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.28));
+  background: var(--dsw-alias-bg-elevated, #fff);
+  color: var(--dsw-alias-label-primary, inherit);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.compact { border-radius: 8px; }

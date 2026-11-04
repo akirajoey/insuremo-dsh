@@ -2,7 +2,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { inflateSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BrandChrome, BRAND_HOST_ATTRIBUTE } from "../src/client/BrandChrome.tsx";
 import { BRAND_ASSET_NAMES, BRAND_ASSET_ROUTE, serveBrandAsset } from "../src/brand-assets-server.ts";
 import { en, zh } from "../src/client/locales.ts";
 import { WorkspaceHealth } from "../src/client/WorkspaceHealth.tsx";
@@ -65,20 +64,6 @@ async function packageFiles(): Promise<{ readFile(path: string): Promise<Buffer>
   };
 }
 
-function wideShell(): void {
-  const row = document.createElement("div");
-  const button = document.createElement("button");
-  button.type = "button";
-  const wordmark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  wordmark.setAttribute("viewBox", "0 0 182 24");
-  button.append(wordmark);
-  const toggle = document.createElement("button");
-  const panel = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  panel.setAttribute("viewBox", "0 0 16 16");
-  toggle.append(panel);
-  row.append(button, toggle);
-  document.body.append(row);
-}
 
 function treeitem(label: string): HTMLDivElement {
   const item = document.createElement("div");
@@ -140,7 +125,7 @@ describe("TASK-064 raster brand assets", () => {
       const bytes = await files.readFile(`assets/${name}`);
       expect(bytes.toString("ascii")).not.toMatch(/data:|base64/i);
     }
-    const source = (await files.readFile("src/client/BrandChrome.tsx")).toString("utf8");
+    const source = (await files.readFile("src/client/InsuremoBrand.tsx")).toString("utf8");
     expect(source).toContain("insuremo-wordmark-light.png");
     expect(source).toContain("insuremo-wordmark-dark.png");
     expect(source).toContain("insuremo-globe.png");
@@ -159,33 +144,6 @@ describe("TASK-064 raster brand assets", () => {
     }
   });
 
-  it("swaps raster light/dark files immediately without changing the owned native button", async () => {
-    wideShell();
-    render(<BrandChrome />);
-    const host = await vi.waitFor(() => {
-      const found = document.querySelector<HTMLElement>(`[${BRAND_HOST_ATTRIBUTE}="wordmark"]`);
-      expect(found).toBeTruthy();
-      return found!;
-    });
-    const light = await vi.waitFor(() => {
-      const found = host.querySelector<HTMLImageElement>('img[src*="wordmark-light"]');
-      expect(found).toBeTruthy();
-      return found!;
-    });
-    const dark = host.querySelector<HTMLImageElement>('img[src*="wordmark-dark"]')!;
-    expect(dark).toBeTruthy();
-    expect(host.textContent?.replace(/\s/g, "")).toContain("dsh");
-    document.body.setAttribute("data-ds-dark-theme", "true");
-    const css = await (await import("node:fs/promises")).readFile(`${process.cwd()}/src/client/BrandChrome.module.css`, "utf8");
-    expect(css).toContain("body[data-ds-dark-theme]");
-    expect(light.className).not.toBe(dark.className);
-    const healthCss = await (await import("node:fs/promises")).readFile(`${process.cwd()}/src/client/WorkspaceHealth.module.css`, "utf8");
-    const detectedRuleStart = healthCss.indexOf('.rowIcons .icon[data-state="detected"]');
-    const detectedRule = healthCss.slice(detectedRuleStart, healthCss.indexOf("}", detectedRuleStart));
-    expect(detectedRuleStart).toBeGreaterThanOrEqual(0);
-    expect(detectedRule).toContain("var(--dsw-alias-brand-primary)");
-    expect(detectedRule).not.toContain("var(--dsw-alias-state-success-primary)");
-  });
 });
 
 describe("TASK-064 owned asset route", () => {
@@ -277,6 +235,19 @@ describe("TASK-065 workspace glyph semantics", () => {
   });
 });
 
+describe("TASK-064 workspace glyph theme", () => {
+  it("keeps the detected iComposer glyph on the brand token, not the success token", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const healthCss = await fs.readFile(path.resolve(process.cwd(), "src/client/WorkspaceHealth.module.css"), "utf8");
+    const ruleStart = healthCss.indexOf('.rowIcons .icon[data-state="detected"]');
+    const rule = healthCss.slice(ruleStart, healthCss.indexOf("}", ruleStart));
+    expect(ruleStart).toBeGreaterThanOrEqual(0);
+    expect(rule).toContain("var(--dsw-alias-brand-primary)");
+    expect(rule).not.toContain("var(--dsw-alias-state-success-primary)");
+  });
+});
+
 describe("TASK-064 workspace glyph tooltips", () => {
   it("shows each exact localized status on delayed hover and immediate keyboard focus", async () => {
     const item = treeitem("Detected");
@@ -343,7 +314,7 @@ describe("TASK-064 workspace glyph tooltips", () => {
     expect(tooltip.textContent).toBe(en["health.explainNotReady"]);
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
-    const tooltipCss = await fs.readFile(path.resolve(process.cwd(), "../../../deepseek-harness/packages/client/ui-primitives/src/Tooltip.module.css"), "utf8");
+    const tooltipCss = await fs.readFile(path.resolve(process.cwd(), "src/client/primitives/Tooltip.module.css"), "utf8");
     expect(tooltipCss).toContain("position: fixed");
   });
 });

@@ -1,11 +1,9 @@
 import { Component, createRef, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import {
-  Button,
-  MenuSurface,
-  useAnchoredPosition,
-  useDismissOnOutsidePointer,
-} from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button } from "./primitives/Button.tsx";
+import { MenuSurface } from "./primitives/MenuSurface.tsx";
+import { useAnchoredPosition } from "./primitives/anchored-position.ts";
+import { useDismissOnOutsidePointer } from "./primitives/dismiss.ts";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import type { InsuremoStatusLocaleKey } from "./locales.ts";

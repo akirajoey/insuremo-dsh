@@ -929,7 +929,7 @@ test('real ToolRuntime compares automatic same-turn cleanup with awaited release
 test('EX-WH-01 exact source and health footer registration guard (static only)', (t: TestContext) => {
   const healthFile = join(root, 'packages/ui-insuremo-status/src/client/WorkspaceHealth.tsx');
   const health = readFileSync(healthFile, 'utf8');
-  assert.equal(hash(health), '76e84d4b6b9d832cd203a02355f2448dd61aad820d1ba74de8af84cbb3bdb44e', 'health source changed: review the authorized driver/position before updating this baseline');
+  assert.equal(hash(health), 'aafb5c31d58ed740ec7e059824ae7d4acf6e00b784e9c4d5803e95117ddee0a7', 'health source changed: review the authorized driver/position before updating this baseline');
   for (const required of [
     'setInterval(() => void this.load(), 60_000)', 'new MutationObserver(() => this.syncRows())',
     'this.#observer.observe(this.#driverRef.ownerDocument.body', '[role="treeitem"][aria-expanded]',

@@ -6,7 +6,7 @@ import { fireEvent, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button } from "../src/client/primitives/Button.tsx";
 import { LocaleRuntime } from "@deepseek-ai/dsh-client-locale/client";
 import { SlotTestRuntime, usePinnedBrowserLanguages } from "@deepseek-ai/dsh-client-test-runtime";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
@@ -292,12 +292,12 @@ describe("TASK-144 picker uses the official compact Button", () => {
     fireEvent.pointerDown(document.body);
     await vi.waitFor(() => expect(document.querySelector("[data-icomposer-picker-panel]")).toBeNull());
 
-    // Unmounting while open leaves neither the panel nor MenuSurface's backing.
+    // Unmounting while open removes the panel; the local MenuSurface adds no
+    // body-level backing node (that was a Harness primitive detail).
     trigger.click();
     await vi.waitFor(railPanel);
-    expect(document.querySelectorAll("[data-menu-backing]").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll("[data-menu-backing]").length).toBe(0);
     await feature.dispose();
     expect(document.querySelector("[data-icomposer-picker-panel]")).toBeNull();
-    expect(document.querySelectorAll("[data-menu-backing]").length).toBe(0);
   });
 });

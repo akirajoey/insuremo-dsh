@@ -1,9 +1,6 @@
 import type { ReactNode } from "react";
-import {
-  IconApiOutlineRegular,
-  StateDot,
-  type StateDotState,
-} from "@deepseek-ai/dsh-client-ui-primitives";
+import { IconApiOutlineRegular } from "./primitives/icons.tsx";
+import { StateDot, type StateDotState } from "./primitives/StateDot.tsx";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type { WorkbenchJobData, WorkbenchJobStatus } from "./job-data.ts";
 import type { WorkbenchJobLocaleKey } from "./locales.ts";

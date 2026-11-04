@@ -1,0 +1,25 @@
+.dot {
+  display: inline-block;
+  flex: none;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+.dot[data-state="done"] { background: var(--dsw-alias-state-success-primary, #2f9e44); }
+.dot[data-state="warning"] { background: var(--dsw-alias-state-warning-primary, #e8a33d); }
+.dot[data-state="error"] { background: var(--dsw-alias-state-error-primary, #d64545); }
+.dot[data-state="idle"] { background: var(--dsw-alias-label-tertiary, #8a8f98); }
+.spinner { display: inline-block; flex: none; }
+.spinnerTrack { fill: none; stroke: var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.35)); stroke-width: 2.5; }
+.spinnerArc {
+  fill: none;
+  stroke: var(--dsw-alias-label-secondary, #6b7280);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 16 44;
+  transform-origin: 12px 12px;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinnerArc { animation: none; }
+}

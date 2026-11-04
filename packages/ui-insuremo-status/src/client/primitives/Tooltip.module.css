@@ -1,0 +1,18 @@
+/* Plugin-owned tooltip bubble (TASK-168a). Fixed coordinates avoid clipping by
+   ancestor overflow; tokens inherit when the host theme is absent. */
+.bubble {
+  position: fixed;
+  z-index: 60;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-elevated, #1f2328);
+  color: var(--dsw-alias-label-primary, #fff);
+  border: 1px solid var(--dsw-alias-border-secondary, rgba(255, 255, 255, 0.16));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

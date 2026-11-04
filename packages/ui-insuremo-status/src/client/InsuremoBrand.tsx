@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import globeUrl from "../../assets/insuremo-globe.png";
 import wordmarkDarkUrl from "../../assets/insuremo-wordmark-dark.png";
 import wordmarkLightUrl from "../../assets/insuremo-wordmark-light.png";
-import css from "./BrandChrome.module.css";
+import css from "./InsuremoBrand.module.css";
 
 /** Same-origin brand assets served by the host-side brand-assets-server. */
 const BRAND_ASSET_URL = "/api/icomposer-workbench/ui/assets";

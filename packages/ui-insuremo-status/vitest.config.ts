@@ -6,21 +6,25 @@ import { defineConfig } from "vitest/config";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const harnessRoot = resolve(packageRoot, "../../../deepseek-harness");
-const harnessReact = resolve(harnessRoot, "node_modules/react");
-const harnessReactDom = resolve(harnessRoot, "node_modules/react-dom");
+// The H2 checkout has no hoisted root React link; its ui-primitives package
+// carries the 18.3.1 pair. Pin the plugin sources, the H2 source packages and
+// the renderer's testing-library to that one pair so no second dispatcher loads.
+const harnessReact = resolve(harnessRoot, "packages/client/ui-primitives/node_modules/react");
+const harnessReactDom = resolve(harnessRoot, "packages/client/ui-primitives/node_modules/react-dom");
+const harnessTestingReact = resolve(harnessRoot, "node_modules/@testing-library/react");
+const harnessTestingDom = resolve(harnessRoot, "node_modules/@testing-library/dom");
 
 export default defineConfig({
   plugins: [tsconfigPaths({ projects: [resolve(harnessRoot, "tsconfig.base.json")] })],
   resolve: {
-    dedupe: ["react", "react-dom"],
     alias: [
       ...harnessSourceAliases(harnessRoot),
-      // Harness source packages are symlinked outside this workspace and carry
-      // React 18.3; pin the test graph to that same React/DOM pair so Tooltip
-      // hooks and the slot renderer do not load two React dispatchers.
-      { find: "react-dom/client", replacement: resolve(harnessReactDom, "client") },
-      { find: "react-dom", replacement: harnessReactDom },
-      { find: "react", replacement: harnessReact },
+      { find: /^@testing-library\/react$/, replacement: harnessTestingReact },
+      { find: /^@testing-library\/dom$/, replacement: harnessTestingDom },
+      { find: /^react-dom$/, replacement: harnessReactDom },
+      { find: /^react-dom\/(.*)$/, replacement: `${harnessReactDom}/$1` },
+      { find: /^react$/, replacement: harnessReact },
+      { find: /^react\/(.*)$/, replacement: `${harnessReact}/$1` },
       {
         find: "@deepseek-ai/dsh-client-locale/client",
         replacement: resolve(harnessRoot, "packages/client/locale/src/client/index.ts"),
