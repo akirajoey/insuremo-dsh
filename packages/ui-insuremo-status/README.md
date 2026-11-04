@@ -4,9 +4,12 @@ Host/client Workbench plugin for the InsureMO sidebar status and brand
 identity. The footer driver stays hidden; brand identity is contributed only
 through the official `sidebar.brand.mark`, `sidebar.brand.name` and
 `conversation.hero.brand.mark` slots (no host DOM overlay or modification).
-It ships source-derived InsureMO artwork plus the lowercase `dsh` wordmark.
-Black ink follows `body[data-ds-dark-theme]` immediately while the purple mark
-is retained.
+The mark slot always draws the standalone globe; the name slot draws only the
+lettering by cropping the fixed globe region from the owned combined PNG; the
+hero keeps its own globe. These are independent public slots, so normal host
+spacing applies and the result is intentionally not a pixel-identical copy of
+the previous combined artwork. Black ink follows `body[data-ds-dark-theme]`
+immediately while the purple mark is retained.
 
 The workspace health decorator is also fail-closed: undetected workspaces get
 no host or glyphs; detected workspaces get the 16px iComposer, ICI Graph, and

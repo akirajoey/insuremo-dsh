@@ -120,8 +120,8 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
             {state.status === "error" ? <p className={css.error}>{t("error")}</p> : null}
             {state.status === "ready" ? (
               <>
-                <ImoRegion t={t} imo={state.view.imo} onChanged={() => void this.silentReload()} faces={this.props.diagnosisFaces} />
-                <SkillsRegion t={t} skills={state.view.skills} onChanged={() => void this.silentReload()} faces={this.props.diagnosisFaces} />
+                <ImoRegion t={t} imo={state.view.imo} onChanged={() => void this.silentReload()} faces={this.props.diagnosisFaces} closeSettings={this.props.close} />
+                <SkillsRegion t={t} skills={state.view.skills} onChanged={() => void this.silentReload()} faces={this.props.diagnosisFaces} closeSettings={this.props.close} />
                 {state.view.ici !== undefined ? <IciRegion t={t} ici={state.view.ici} /> : null}
               </>
             ) : null}
@@ -137,7 +137,7 @@ export class InsuremoCard extends Component<InsuremoCardProps, LoadState & { exp
 
 type Translate = (key: InsuremoLocaleKey) => string;
 
-function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; faces?: DiagnosisFaces }): ReactNode {
+function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; faces?: DiagnosisFaces; closeSettings?: () => void }): ReactNode {
   const { t, imo } = props;
   if (imo.code === "fast-uncached") {
     // Cold fast projection: loading skeleton, never a false "not detected".
@@ -161,8 +161,8 @@ function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged
         {imo.updateAvailable && imo.target !== undefined ? ` → ${imo.target}` : ""}
       </p>
       {failed ? <p role="alert" data-imo-state="error" className={css.error}>{t("imoDetectFailed")}: {imo.code}</p> : null}
-      {imo.available ? <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} faces={props.faces} /> : null}
-      {missing ? <InstallButton t={t} onChanged={props.onChanged} faces={props.faces} /> : null}
+      {imo.available ? <UpgradeButton t={t} imo={imo} onChanged={props.onChanged} faces={props.faces} closeSettings={props.closeSettings} /> : null}
+      {missing ? <InstallButton t={t} onChanged={props.onChanged} faces={props.faces} closeSettings={props.closeSettings} /> : null}
     </div>
   );
 }
@@ -173,7 +173,7 @@ function ImoRegion(props: { t: Translate; imo: ImoOverviewView["imo"]; onChanged
  * the user-level @insuremo registry write and the global package install —
  * and the failure line explains why retrying without rollback is safe.
  */
-class InstallButton extends Component<{ t: Translate; onChanged: () => void; faces?: DiagnosisFaces }, { install: UpgradeState }> {
+class InstallButton extends Component<{ t: Translate; onChanged: () => void; faces?: DiagnosisFaces; closeSettings?: () => void }, { install: UpgradeState }> {
   override state: { install: UpgradeState } = { install: { phase: "idle" } };
 
   private async run(): Promise<void> {
@@ -209,7 +209,7 @@ class InstallButton extends Component<{ t: Translate; onChanged: () => void; fac
           {this.state.install.phase === "failed" ? <span role="alert" data-install="failed" className={css.error}>{t("cliInstallFailed")}: {this.state.install.message}</span> : null}
         </p>
         {this.state.install.phase === "failed" ? (
-          <p className={css.hint} data-install-retry="1">{t("cliInstallRetryHint")} <DiagnoseButton t={t} kind="imo-cli" faces={this.props.faces} /></p>
+          <p className={css.hint} data-install-retry="1">{t("cliInstallRetryHint")} <DiagnoseButton t={t} kind="imo-cli" faces={this.props.faces} closeSettings={this.props.closeSettings} /></p>
         ) : (
           <p className={css.hint}>{t("cliInstallHint")}</p>
         )}
@@ -231,7 +231,7 @@ class InstallButton extends Component<{ t: Translate; onChanged: () => void; fac
  * success or without a captured failure; never auto-sends.
  */
 class DiagnoseButton extends Component<
-  { t: Translate; kind: "imo-cli" | "skill"; faces?: DiagnosisFaces },
+  { t: Translate; kind: "imo-cli" | "skill"; faces?: DiagnosisFaces; closeSettings?: () => void },
   {
     phase: "idle" | "busy" | "prefilled" | "draft-occupied" | "copied" | "clipboard-only" | "no-data" | "failed";
     lastText: string | null;
@@ -267,11 +267,9 @@ class DiagnoseButton extends Component<
       const prefill = await waitForDiagnosisPrefill(handoff.sessionId, 1500);
       if (prefill === "written") {
         this.setState({ phase: "prefilled", lastText: text });
-        // Close the settings modal through the shell's own close path so the
-        // user lands on the prefilled diagnosis session (owner props supply
-        // no close callback; the panel's document-level Escape handler is
-        // the one public channel a card can reach).
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        // The settings.section owner supplies the public close affordance.
+        // Legacy direct consumers without it leave Settings open safely.
+        this.props.closeSettings?.();
         return;
       }
       this.setState({ phase: prefill === "dropped" ? "draft-occupied" : "copied", lastText: text });
@@ -335,7 +333,7 @@ interface UpgradeState {
   readonly message?: string;
 }
 
-class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; faces?: DiagnosisFaces }, { upgrade: UpgradeState }> {
+class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"]; onChanged: () => void; faces?: DiagnosisFaces; closeSettings?: () => void }, { upgrade: UpgradeState }> {
   override state: { upgrade: UpgradeState } = { upgrade: { phase: "idle" } };
 
   private async run(): Promise<void> {
@@ -362,7 +360,7 @@ class UpgradeButton extends Component<{ t: Translate; imo: ImoOverviewView["imo"
         {this.state.upgrade.phase === "done" ? <span role="status" data-upgrade="done">{t("cliUpdated")}: {this.state.upgrade.message}</span> : null}
         {this.state.upgrade.phase === "failed" ? (
           <span role="alert" data-upgrade="failed" className={css.error}>
-            {t("cliUpdateFailed")}: {this.state.upgrade.message} <DiagnoseButton t={t} kind="imo-cli" faces={this.props.faces} />
+            {t("cliUpdateFailed")}: {this.state.upgrade.message} <DiagnoseButton t={t} kind="imo-cli" faces={this.props.faces} closeSettings={this.props.closeSettings} />
           </span>
         ) : null}
       </p>
@@ -441,7 +439,7 @@ function catalogKey(entry: Pick<SkillCatalogEntryView, "type" | "name">): string
 }
 
 class SkillsRegion extends Component<
-  { t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void; faces?: DiagnosisFaces },
+  { t: Translate; skills: ImoOverviewView["skills"]; onChanged: () => void; faces?: DiagnosisFaces; closeSettings?: () => void },
   {
     rows: Readonly<Record<string, SkillRowState>>;
     updatingAll: boolean;
@@ -831,7 +829,7 @@ class SkillsRegion extends Component<
         {run.phase === "failed" ? (
           <p role="alert" data-scenario="failed" className={css.error}>
             {installingFailedLabel}: {run.message}{run.diff === undefined ? "" : ` · ${diffText(run.diff, t)}`}
-            <DiagnoseButton t={t} kind="skill" faces={this.props.faces} />
+            <DiagnoseButton t={t} kind="skill" faces={this.props.faces} closeSettings={this.props.closeSettings} />
           </p>
         ) : null}
         {this.state.updateResult !== undefined && this.state.updateResult.status === "completed" ? (
@@ -840,7 +838,7 @@ class SkillsRegion extends Component<
         {this.state.updateError !== undefined ? (
           <p role="alert" data-update="failed" className={css.error}>
             {t("skillsUpdateFailed")}: {this.state.updateError}{this.state.updateResult !== undefined && this.state.updateResult.status !== "completed" ? ` · ${diffText(diffOf(this.state.updateResult), t)}` : ""}
-            <DiagnoseButton t={t} kind="skill" faces={this.props.faces} />
+            <DiagnoseButton t={t} kind="skill" faces={this.props.faces} closeSettings={this.props.closeSettings} />
           </p>
         ) : null}
         {cold ? (

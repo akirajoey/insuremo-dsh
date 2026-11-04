@@ -17,11 +17,10 @@ import { zh } from "../src/client/locales.ts";
 usePinnedBrowserLanguages("zh-CN");
 
 /**
- * TASK-144. The brand assertions mirror the official shell's own markup
- * (`ui-sidebar/SidebarRoot.tsx`): the wide identity row is a plain span on
- * macOS but a button elsewhere, and the collapsed rail is the toggle button
- * that also carries the panel icon. Both wide shapes must render the wordmark
- * alone — the wordmark PNG already contains the globe.
+ * TASK-144/169. The brand is composed from independent public slots: the mark
+ * slot always draws the globe, the name slot draws only the lettering (the
+ * local CSS crops the globe region from the owned combined PNG), and the hero
+ * keeps its own globe. No component reads host ancestors or host DOM.
  */
 
 const GLOBE = 'img[src*="insuremo-globe"]';
@@ -65,18 +64,26 @@ describe("TASK-144 brand surfaces", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
   afterEach(() => { document.body.innerHTML = ""; });
 
-  it("expanded identity row on macOS (window-drag span) renders the wordmark alone — no second globe", () => {
+  it("expanded identity row on macOS (window-drag span) renders one mark globe and text-only lettering", () => {
     const view = mount(wideRow("span"));
-    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(0);
+    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(1);
     expect(view.container.querySelectorAll('img[src*="insuremo-wordmark"]')).toHaveLength(2);
     view.unmount();
   });
 
-  it("expanded identity row elsewhere (New Session button) also renders the wordmark alone", () => {
+  it("expanded identity row elsewhere (New Session button) renders the same independent slots", () => {
     const view = mount(wideRow("button"));
-    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(0);
+    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(1);
     expect(view.container.querySelectorAll('img[src*="insuremo-wordmark"]')).toHaveLength(2);
     view.unmount();
+  });
+
+  it("brand source has no ancestor walk, host query or DOM observation", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/client/InsuremoBrand.tsx"), "utf8");
+    expect(source).not.toMatch(/parentElement|querySelector|closest|MutationObserver|document\./);
+    const css = readFileSync(resolve(process.cwd(), "src/client/InsuremoBrand.module.css"), "utf8");
+    expect(css).toMatch(/\.wordmark \{[^}]*overflow: hidden/s);
+    expect(css).toMatch(/\.wordmark img \{[^}]*margin-left: -35\.54px/s);
   });
 
   it("collapsed rail keeps the standalone globe at the slot's 24px size", () => {

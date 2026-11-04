@@ -803,7 +803,7 @@ test('real HTTP write routes retain method, origin, header, body and response ga
   } finally { await ctx.fiber.dispose(); }
 });
 
-test('real ToolRuntime/SystemPrompt preserve workbench owner same-turn cleanup and remount', async (t) => {
+test('real ToolRuntime/SystemPrompt release workbench tools on awaited unload and remount cleanly', async (t) => {
   const ctx = new Context();
   try {
     await ctx.plugin(SystemPrompt, {});
@@ -814,20 +814,10 @@ test('real ToolRuntime/SystemPrompt preserve workbench owner same-turn cleanup a
     assert.deepEqual(allTools(ctx), toolNames);
     const sections = (await ctx.systemPrompt.assemble()).sections.map(section => section.name).filter(name => name.startsWith('tool:')).sort();
     assert.deepEqual(sections, promptNames);
-    const stopping = fiber.dispose();
-    // Same-turn: this is the retained `internal/plugin` listener, not the
-    // public effect teardown (the effect-only control below needs an await).
-    assert.deepEqual(allTools(ctx), [], 'workbench listener releases its own tools in the same turn');
-    for (const name of promptNames) {
-      // A real duplicate check on the same turn also proves each prompt name
-      // is released before awaiting the owner's dispose promise.
-      const release = ctx.systemPrompt.section({ name, order: 150, text: 'isolated fixture' });
-      release();
-    }
-    // No duplicate window for this owner: another owner may take a name now.
-    const sameTurnReuse = ctx.tools.register(defineContentToolFixture({ name: 'ici_query', description: 'reuse probe', parameters: {}, async execute() { return []; } }));
-    sameTurnReuse();
-    await stopping;
+    // Public lifecycle: the effect teardown runs after the owner's dispose
+    // promise is awaited. No internal event or same-turn guarantee is claimed.
+    await fiber.dispose();
+    assert.deepEqual(allTools(ctx), []);
     const afterSections = (await ctx.systemPrompt.assemble()).sections.map(section => section.name).filter(name => name.startsWith('tool:'));
     assert.deepEqual(afterSections, []);
     const again = ctx.plugin(IcomposerVerifyToolService);
@@ -836,10 +826,9 @@ test('real ToolRuntime/SystemPrompt preserve workbench owner same-turn cleanup a
     assert.deepEqual(allTools(ctx), toolNames);
     await again.dispose();
     assert.deepEqual(allTools(ctx), []);
-    // A second teardown of an already-released owner is a no-op.
     await again.dispose();
     assert.deepEqual(allTools(ctx), []);
-    t.diagnostic('Real W tool service + H2 registries: 8 tools/7 prompts exactly once, same-turn release (retained internal listener), immediate name reuse, awaited remount; not an HMR test.');
+    t.diagnostic('Real W tool service + H2 registries: 8 tools/7 prompts exactly once, awaited unload releases all, remount clean; not an HMR test.');
   } finally { await ctx.fiber.dispose(); }
 });
 
@@ -899,7 +888,7 @@ test('tool owner releases on dependency loss and re-registers exactly once on re
   } finally { await ctx.fiber.dispose(); }
 });
 
-test('real ToolRuntime compares automatic same-turn cleanup with awaited release', async (t) => {
+test('real ToolRuntime effect-only fixture releases after awaited disposal', async (t) => {
   const ctx = new Context();
   try {
     await ctx.plugin(SystemPrompt, {});
@@ -908,21 +897,12 @@ test('real ToolRuntime compares automatic same-turn cleanup with awaited release
     const owner = ctx.plugin(Object.assign((inner: Context) => { inner.tools.register(probe); }, { inject: ['tools'] }));
     await owner.await();
     assert.ok(ctx.tools.get('compat_probe'));
-    const stopping = owner.dispose();
-    let sameTurn: 'registered' | 'duplicate' = 'registered';
-    let replacement: (() => void) | undefined;
-    try { replacement = ctx.tools.register(probe); }
-    catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('already registered')) throw error;
-      sameTurn = 'duplicate';
-    }
-    await stopping;
-    replacement?.();
+    await owner.dispose();
     assert.equal(ctx.tools.get('compat_probe'), undefined);
     const afterAwait = ctx.tools.register(probe);
     assert.ok(ctx.tools.get('compat_probe'));
     afterAwait();
-    t.diagnostic(`Real Cordis + ToolRuntime effect-only fixture: same-turn direct registration=${sameTurn}; after await dispose registration succeeds. Observation is not an HMR claim or a requirement to retain a duplicate window.`);
+    t.diagnostic('Real Cordis + ToolRuntime effect-only fixture: awaited disposal releases the registration; no same-turn invariant is claimed.');
   } finally { await ctx.fiber.dispose(); }
 });
 

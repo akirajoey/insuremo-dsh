@@ -724,10 +724,11 @@ const DIAGNOSIS_PAYLOAD = {
 } as const;
 
 /** Render the card directly with a localized t seat and injected runtime faces. */
-function renderCard(diagnosisFaces?: DiagnosisFaces, translate: (key: InsuremoLocaleKey) => string = key => zh[key]) {
+function renderCard(diagnosisFaces?: DiagnosisFaces, translate: (key: InsuremoLocaleKey) => string = key => zh[key], close?: () => void) {
   const props = {
     t: translate,
     diagnosisFaces,
+    close,
   } as unknown as ComponentProps<typeof InsuremoCard>;
   return render(<InsuremoCard {...props} />);
 }
@@ -743,7 +744,7 @@ async function renderFailedInstall(overrides: Record<string, unknown> = {}) {
     return jsonResponse(unavailableView);
   });
   vi.stubGlobal("fetch", fetchMock);
-  const view = renderCard(overrides.faces as DiagnosisFaces | undefined);
+  const view = renderCard(overrides.faces as DiagnosisFaces | undefined, undefined, overrides.close as (() => void) | undefined);
   const toggle = await view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
   toggle.click();
   await view.findByRole("button", { name: zh.cliInstall });
@@ -822,7 +823,12 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
   it("TASK-088: diagnose registers the dedicated install-diagnostics Workspace, opens the connectWorkspace-resolved session, and reports prefilled only after the entry writes", async () => {
     const faces = makeFaces();
     const dispatchSpy = vi.spyOn(document, "dispatchEvent");
-    const failed = await renderFailedInstall({ faces });
+    const close = vi.fn();
+    const failed = await renderFailedInstall({ faces, close });
+    faces.sessions.open.mockImplementation((id: string) => {
+      expect(peekDiagnosisPrefill(id)).toBeDefined();
+      faces.calls.push(`open:${id}`);
+    });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     // The hand-off keys everything by the session id connectWorkspace RESOLVED
     // (reuse or fresh) — never a current-view guess.
@@ -846,18 +852,33 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     expect(failed.view.queryByText(zh.diagPrefilled)).toBeNull();
     settleDiagnosisPrefill(sessionId, "written");
     await failed.view.findByText(zh.diagPrefilled);
-    // The settings shell's own Escape channel closes the panel only on a real
-    // prefill, landing the user on the diagnosis session.
+    // Only a confirmed write invokes the owner-provided close callback; no
+    // synthetic global Escape is dispatched to unrelated components.
+    expect(close).toHaveBeenCalledTimes(1);
     const escape = dispatchSpy.mock.calls.map(call => call[0]).find(event => event instanceof KeyboardEvent && event.key === "Escape");
-    expect(escape).toBeTruthy();
+    expect(escape).toBeUndefined();
     // The visible copy fallback rides every terminal state with text.
     expect(failed.view.getByRole("button", { name: zh.diagCopy })).toBeTruthy();
     dispatchSpy.mockRestore();
   });
 
+  it("legacy direct consumers without owner close safely leave Settings alone after a written prefill", async () => {
+    const faces = makeFaces({ sessionIdPrefix: "s-legacy" });
+    const dispatch = vi.spyOn(document, "dispatchEvent");
+    const failed = await renderFailedInstall({ faces });
+    failed.view.getByRole("button", { name: zh.diagButton }).click();
+    const sessionId = "s-legacy-ws-1";
+    await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
+    settleDiagnosisPrefill(sessionId, "written");
+    await failed.view.findByText(zh.diagPrefilled);
+    expect(dispatch.mock.calls.some(([event]) => event instanceof KeyboardEvent && event.key === "Escape")).toBe(false);
+    dispatch.mockRestore();
+  });
+
   it("TASK-088: a dropped prefill (user-first) never claims prefilled and keeps the visible copy fallback", async () => {
     const faces = makeFaces({ sessionIdPrefix: "s-drop" });
-    const failed = await renderFailedInstall({ faces });
+    const close = vi.fn();
+    const failed = await renderFailedInstall({ faces, close });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     const sessionId = "s-drop-ws-1";
     await vi.waitFor(() => { expect(peekDiagnosisPrefill(sessionId)).toBeDefined(); });
@@ -865,13 +886,15 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     await failed.view.findByText(zh.diagDraftOccupied);
     expect(failed.view.queryByText(zh.diagPrefilled)).toBeNull();
     expect(failed.view.getByRole("button", { name: zh.diagCopy })).toBeTruthy();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("TASK-088: workspace-registration failure copies the text and creates/opens NO session (never an inert Ungrouped)", async () => {
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const faces = makeFaces({ createError: new Error("mkdir failed") });
-    const failed = await renderFailedInstall({ faces });
+    const close = vi.fn();
+    const failed = await renderFailedInstall({ faces, close });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     await failed.view.findByText(zh.diagClipboardOnly);
     expect(writeText).toHaveBeenCalledTimes(1);
@@ -879,26 +902,31 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     expect(faces.uiWorkspace.connectWorkspace).not.toHaveBeenCalled();
     expect(faces.uiWorkspace.openSession).not.toHaveBeenCalled();
     expect(failed.view.getByRole("button", { name: zh.diagCopy })).toBeTruthy();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("TASK-088: connectWorkspace failure falls back to the clipboard and never opens a session", async () => {
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const faces = makeFaces({ connectError: new Error("connect failed") });
-    const failed = await renderFailedInstall({ faces });
+    const close = vi.fn();
+    const failed = await renderFailedInstall({ faces, close });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     await failed.view.findByText(zh.diagClipboardOnly);
     expect(faces.workspaces.create).toHaveBeenCalledTimes(1);
     expect(faces.uiWorkspace.openSession).not.toHaveBeenCalled();
     expect(writeText).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("without runtime faces the text is copied and no workspace/session is touched", async () => {
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const failed = await renderFailedInstall();
+    const close = vi.fn();
+    const failed = await renderFailedInstall({ close });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     await failed.view.findByText(zh.diagClipboardOnly);
+    expect(close).not.toHaveBeenCalled();
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText.mock.calls[0]?.[0] as string).toContain("请分析失败原因并给出修复步骤。");
   });
@@ -1142,8 +1170,11 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
     const connectSpy = vi.fn(async (id: string) => `session-of-${id}`);
     switchRuntime.ctx.provide("uiWorkspace", { connectWorkspace: connectSpy, openSession: openSpy });
     const switchFeature = await switchRuntime.mount({ inject, apply });
+    const close = vi.fn();
+    const globalKeydown = vi.fn();
+    document.addEventListener("keydown", globalKeydown);
     try {
-      const view = switchRuntime.renderSlot("settings.section", {});
+      const view = switchRuntime.renderSlot("settings.section", { close });
       // zh (pinned zh-CN): enter the failed state and diagnose in Chinese.
       const toggle = await view.view.findByRole("button", { name: new RegExp(`${zh.expand}: ${zh.title}`) });
       toggle.click();
@@ -1159,6 +1190,8 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
       expect(draft).toContain("请分析失败原因并给出修复步骤。");
       settleDiagnosisPrefill(sessionId, "written");
       await view.view.findByText(zh.diagPrefilled);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(globalKeydown).not.toHaveBeenCalled();
 
       // SAME mounted instance: the Settings locale flips to English and the
       // next click stages an English draft (no remount involved).
@@ -1201,7 +1234,10 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
       const connectCalls = connectSpy.mock.calls;
       expect(connectCalls).toHaveLength(3);
       for (const call of connectCalls) expect(call[0]).toBe("ws-diagnosis");
+      expect(close).toHaveBeenCalledTimes(3);
+      expect(globalKeydown).not.toHaveBeenCalled();
     } finally {
+      document.removeEventListener("keydown", globalKeydown);
       await switchFeature.dispose();
       await switchRuntime.dispose();
       vi.unstubAllGlobals();
@@ -1210,9 +1246,11 @@ describe("install/update one-click diagnosis (TASK-083/088)", () => {
 
   it("an empty diagnosis store answers no-data without touching workspaces or sessions", async () => {
     const faces = makeFaces();
-    const failed = await renderFailedInstall({ faces, diagnosis: { available: false } });
+    const close = vi.fn();
+    const failed = await renderFailedInstall({ faces, close, diagnosis: { available: false } });
     failed.view.getByRole("button", { name: zh.diagButton }).click();
     await failed.view.findByText(zh.diagNoData);
+    expect(close).not.toHaveBeenCalled();
     expect(faces.workspaces.create).not.toHaveBeenCalled();
     expect(faces.uiWorkspace.connectWorkspace).not.toHaveBeenCalled();
     expect(faces.uiWorkspace.openSession).not.toHaveBeenCalled();

@@ -36,17 +36,22 @@ full capture from the same-origin `imo-diagnosis` action (server-redacted,
 memory-only), assembles a localized diagnosis text (scene, executed commands,
 exit code, stdout/stderr code blocks, environment, and a closing
 "please analyze the failure and give fix steps" line), and hands it to a
-fresh ungrouped scratch session in the harness runtime's mandated order
-`create({ cwd }) → setDraft(id, text) → open(id)`. TASK-086: every label and
-operation name follows the Settings locale through the card's own translator
-seat — switching the UI language re-renders the card and the next click uses
-the new language, no restart — while raw material (commands, operation ids,
-stdout/stderr, error code/message, environment values) is never translated.
-The settings modal then
-closes through the shell's own Escape channel. On runtimes without draft
-staging (Desktop rc.7) the text is copied to the clipboard with a paste hint
-instead, and the ungrouped session still opens when creation is available.
-Nothing is ever sent automatically.
+session in the dedicated install-diagnostics Workspace. The flow reuses or
+creates the Workspace, connects a session, queues the text and opens that
+session; the session-scoped entry writes the draft only if it is still empty.
+TASK-086: every label and operation name follows the Settings locale through
+the card's own translator seat — switching the UI language re-renders the card
+and the next click uses the new language, no restart — while raw material
+(commands, operation ids, stdout/stderr, error code/message, environment
+values) is never translated.
+
+Only a confirmed draft write invokes the public `settings.section` owner's
+`close` callback. A dropped, failed, timed-out or clipboard-only hand-off does
+not close the panel. Direct legacy consumers without a `close` callback safely
+leave Settings open; no synthetic global Escape is dispatched. When the
+Workspace/session capability is unavailable, the text falls back to the
+clipboard instead of creating an unrelated session. Nothing is sent
+automatically.
 
 ```sh
 pnpm run typecheck

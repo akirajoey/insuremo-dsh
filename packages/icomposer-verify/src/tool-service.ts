@@ -12,13 +12,13 @@ import { registerIcomposerTools } from "./tools.ts";
  * it already acquired and rethrows the original error — no leaked tool, no
  * swallowed duplicate-name conflict, and never another owner's registration.
  *
- * The `internal/plugin` listener is retained deliberately (TASK-164, D2): the
- * public effect disposers only run after the fiber's unload turn yields, while
- * the listener releases the same handles synchronously inside `dispose()`.
- * That same-turn release is the behaviour the tool registry has observed;
- * removing the listener would regress it to await-only release. Every handle
- * is single-shot, so the later effect teardown is a no-op, and the listener
- * only touches this service's own registrations.
+ * Public lifecycle only (TASK-169): the effect teardown runs after the
+ * owner's `dispose()` promise is awaited. Earlier code also listened to the
+ * internal `internal/plugin` event to release synchronously on the dispose
+ * turn; that private dependency and its stronger same-turn invariant were
+ * removed. A caller that registers a duplicate before awaiting disposal can
+ * therefore observe the registry's duplicate error; callers that await the
+ * disposal get a fully released owner.
  */
 export class IcomposerVerifyToolService extends Service {
   static inject = ["tools", "systemPrompt"] as const;
@@ -48,10 +48,6 @@ export class IcomposerVerifyToolService extends Service {
       }
       return () => this.disposeTools();
     }, "icomposerVerifyTools.registration");
-    const ownerFiber = (this.ctx as unknown as { readonly fiber?: unknown }).fiber;
-    this.ctx.on("internal/plugin", (fiber: unknown) => {
-      if (fiber === ownerFiber) this.disposeTools();
-    });
   }
 
   /** Release this service's own handles now; safe to call more than once. */

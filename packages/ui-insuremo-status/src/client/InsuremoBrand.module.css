@@ -1,18 +1,21 @@
-/* TASK-168a: styles for the three official brand slots. No host overlay,
-   hiding, or DOM modification; the theme swap follows the live body theme. */
+/* TASK-169 minimal public-slot composition: the mark slot owns the globe and
+   the name slot owns only the lettering. The owned 312×76 PNG is displayed at
+   99×24; its globe occupies the left 112 source pixels, so the name crops that
+   fixed region instead of reading any host DOM. */
 .wordmark {
   display: block;
   flex: 0 0 auto;
-  width: 99px;
+  width: 63.5px;
   height: 24px;
+  overflow: hidden;
 }
 
-/* The owned PNGs retain the source's 312×76 pixels while rendering at 99×24,
-   so the wordmark is sampled above 3× and the O counter stays transparent. */
 .wordmark img {
   display: block;
   width: 99px;
   height: 24px;
+  max-width: none;
+  margin-left: -35.54px;
   object-fit: contain;
   image-rendering: auto;
 }
