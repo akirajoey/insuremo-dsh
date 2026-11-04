@@ -41,7 +41,7 @@ test("successful git-dist refreshes leave no backup or staging directories", () 
       assert.deepEqual(temporaryNames(join(root, "git-dist")), []);
     }
     const target = join(root, "git-dist", "icomposer-workbench");
-    assert.equal(payloadFiles(target).length, 8, "expected two entry bundles, three assets, and package metadata");
+    assert.equal(payloadFiles(target).length, 11, "expected two entry bundles, three assets, locale/icon, and package metadata");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

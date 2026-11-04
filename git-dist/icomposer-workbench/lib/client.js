@@ -7,8 +7,6 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react_dom_client = require("react-dom/client");
-		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-		let react_dom = require("react-dom");
 		//#region ../ui-insuremo-settings/src/client/ChevronIcon.tsx
 		/**
 		* Down-chevron disclosure icon mirroring the platform's
@@ -542,13 +540,13 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:asset
-		const css$5 = ".gvNigW_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.gvNigW_card:hover{border-color:var(--dsw-alias-label-dimmed)}.gvNigW_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.gvNigW_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.gvNigW_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.gvNigW_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.gvNigW_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.gvNigW_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.gvNigW_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.gvNigW_chevronOpen{transform:rotate(180deg)}.gvNigW_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.gvNigW_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.gvNigW_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.gvNigW_refresh,.gvNigW_action{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.gvNigW_refresh:hover,.gvNigW_action:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.gvNigW_refresh:focus-visible,.gvNigW_action:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.gvNigW_action:disabled{cursor:not-allowed;opacity:.55}.gvNigW_controls{flex-wrap:wrap;align-items:center;gap:8px;margin:0;display:flex}.gvNigW_catalog{flex-direction:column;gap:6px;display:flex}.gvNigW_catalogTools{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.gvNigW_catalogSearch{align-items:center;gap:4px;min-width:min(100%,340px);display:inline-flex}.gvNigW_catalogInput{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:150px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;flex:220px;padding:0 10px;font-size:13px}.gvNigW_catalogInput:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.gvNigW_catalogList{flex-direction:column;gap:4px;max-height:300px;margin:0;padding:0;display:flex;overflow-y:auto}.gvNigW_catalogOption{appearance:none;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;min-width:0;font:inherit;color:var(--dsw-alias-label-primary);text-align:left;cursor:pointer;border-radius:8px;align-items:center;gap:8px;padding:6px 10px;display:flex}.gvNigW_catalogOption:hover,.gvNigW_catalogOptionSelected{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}.gvNigW_catalogOption:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.gvNigW_catalogOption:disabled{cursor:not-allowed;opacity:.55}.gvNigW_catalogOptionTop{flex-wrap:wrap;flex:auto;align-items:baseline;gap:2px 8px;min-width:0;display:flex}.gvNigW_catalogOptionTop code{overflow-wrap:anywhere;min-width:0}.gvNigW_select{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:220px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 10px;font-size:13px}.gvNigW_select:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.gvNigW_select:disabled{cursor:not-allowed;opacity:.55}.gvNigW_region{flex-direction:column;gap:6px;display:flex}.gvNigW_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.gvNigW_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.gvNigW_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.gvNigW_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.gvNigW_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.gvNigW_toggle:disabled{cursor:not-allowed;opacity:.55}.gvNigW_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.gvNigW_toggle[aria-checked=true] .gvNigW_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.gvNigW_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.gvNigW_toggle[aria-checked=true] .gvNigW_controlThumb{transform:translate(12px)}.gvNigW_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.gvNigW_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.gvNigW_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.gvNigW_diagnostic{color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere;flex:100%;font-size:12px;line-height:1.45}.gvNigW_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.gvNigW_small:hover{color:var(--dsw-alias-state-error-primary)}";
-		const tagId$5 = "@icomposer/workbench/InsuremoCard.module.css";
-		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$5) + "]") === null) {
+		const css$9 = ".gvNigW_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;flex-direction:column;font-size:13px;transition:border-color .16s,background .16s;display:flex}.gvNigW_card:hover{border-color:var(--dsw-alias-label-dimmed)}.gvNigW_cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}.gvNigW_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.gvNigW_header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.gvNigW_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.gvNigW_name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.gvNigW_description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.gvNigW_chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}.gvNigW_chevronOpen{transform:rotate(180deg)}.gvNigW_pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.gvNigW_body{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:14px;margin:0 16px;padding:14px 0 8px;display:flex}.gvNigW_footer{justify-content:flex-end;align-items:center;gap:8px;padding:4px 0;display:flex}.gvNigW_refresh,.gvNigW_action{appearance:none;border:1px solid var(--dsw-alias-border-l2);font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.gvNigW_refresh:hover,.gvNigW_action:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.gvNigW_refresh:focus-visible,.gvNigW_action:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.gvNigW_action:disabled{cursor:not-allowed;opacity:.55}.gvNigW_controls{flex-wrap:wrap;align-items:center;gap:8px;margin:0;display:flex}.gvNigW_catalog{flex-direction:column;gap:6px;display:flex}.gvNigW_catalogTools{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.gvNigW_catalogSearch{align-items:center;gap:4px;min-width:min(100%,340px);display:inline-flex}.gvNigW_catalogInput{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:150px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;flex:220px;padding:0 10px;font-size:13px}.gvNigW_catalogInput:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.gvNigW_catalogList{flex-direction:column;gap:4px;max-height:300px;margin:0;padding:0;display:flex;overflow-y:auto}.gvNigW_catalogOption{appearance:none;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;min-width:0;font:inherit;color:var(--dsw-alias-label-primary);text-align:left;cursor:pointer;border-radius:8px;align-items:center;gap:8px;padding:6px 10px;display:flex}.gvNigW_catalogOption:hover,.gvNigW_catalogOptionSelected{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}.gvNigW_catalogOption:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.gvNigW_catalogOption:disabled{cursor:not-allowed;opacity:.55}.gvNigW_catalogOptionTop{flex-wrap:wrap;flex:auto;align-items:baseline;gap:2px 8px;min-width:0;display:flex}.gvNigW_catalogOptionTop code{overflow-wrap:anywhere;min-width:0}.gvNigW_select{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);min-width:220px;height:32px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 10px;font-size:13px}.gvNigW_select:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.gvNigW_select:disabled{cursor:not-allowed;opacity:.55}.gvNigW_region{flex-direction:column;gap:6px;display:flex}.gvNigW_region h4{color:var(--dsw-alias-label-secondary);margin:0;font-size:13px;font-weight:600}.gvNigW_list{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.gvNigW_list li{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.gvNigW_toggle{appearance:none;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:999px;flex:none;align-items:center;padding:2px 0;display:inline-flex}.gvNigW_toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.gvNigW_toggle:disabled{cursor:not-allowed;opacity:.55}.gvNigW_controlTrack{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);width:30px;height:18px;transition:background .12s var(--ds-ease-in-out), border-color .12s var(--ds-ease-in-out);border-radius:999px;align-items:center;display:inline-flex}.gvNigW_toggle[aria-checked=true] .gvNigW_controlTrack{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary)}.gvNigW_controlThumb{background:var(--dsw-alias-bg-layer-1);width:14px;height:14px;transition:transform .12s var(--ds-ease-in-out);border-radius:50%;margin-left:1px;transform:translate(0)}.gvNigW_toggle[aria-checked=true] .gvNigW_controlThumb{transform:translate(12px)}.gvNigW_meta{color:var(--dsw-alias-label-tertiary);font-size:12px}.gvNigW_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px}.gvNigW_error{color:var(--dsw-alias-state-error-primary);font-size:12px}.gvNigW_diagnostic{color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere;flex:100%;font-size:12px;line-height:1.45}.gvNigW_small{color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;padding:0 2px;font-size:13px}.gvNigW_small:hover{color:var(--dsw-alias-state-error-primary)}";
+		const tagId$9 = "@icomposer/workbench/InsuremoCard.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$9) + "]") === null) {
 			const tag = document.createElement("style");
 			tag.dataset.plugin = "@icomposer/workbench";
-			tag.dataset.pluginCss = tagId$5;
-			tag.textContent = css$5;
+			tag.dataset.pluginCss = tagId$9;
+			tag.textContent = css$9;
 			document.head.appendChild(tag);
 		}
 		var InsuremoCard_module_css_default = {
@@ -710,13 +708,15 @@ window.__ModuleLoader__.load({
 									t,
 									imo: state.view.imo,
 									onChanged: () => void this.silentReload(),
-									faces: this.props.diagnosisFaces
+									faces: this.props.diagnosisFaces,
+									closeSettings: this.props.close
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkillsRegion, {
 									t,
 									skills: state.view.skills,
 									onChanged: () => void this.silentReload(),
-									faces: this.props.diagnosisFaces
+									faces: this.props.diagnosisFaces,
+									closeSettings: this.props.close
 								}),
 								state.view.ici !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IciRegion, {
 									t,
@@ -778,12 +778,14 @@ window.__ModuleLoader__.load({
 						t,
 						imo,
 						onChanged: props.onChanged,
-						faces: props.faces
+						faces: props.faces,
+						closeSettings: props.closeSettings
 					}) : null,
 					missing ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InstallButton, {
 						t,
 						onChanged: props.onChanged,
-						faces: props.faces
+						faces: props.faces,
+						closeSettings: props.closeSettings
 					}) : null
 				]
 			});
@@ -857,7 +859,8 @@ window.__ModuleLoader__.load({
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 							t,
 							kind: "imo-cli",
-							faces: this.props.faces
+							faces: this.props.faces,
+							closeSettings: this.props.closeSettings
 						})
 					]
 				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
@@ -911,7 +914,7 @@ window.__ModuleLoader__.load({
 							phase: "prefilled",
 							lastText: text
 						});
-						document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+						this.props.closeSettings?.();
 						return;
 					}
 					this.setState({
@@ -1049,7 +1052,8 @@ window.__ModuleLoader__.load({
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 								t,
 								kind: "imo-cli",
-								faces: this.props.faces
+								faces: this.props.faces,
+								closeSettings: this.props.closeSettings
 							})
 						]
 					}) : null
@@ -1547,7 +1551,8 @@ window.__ModuleLoader__.load({
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 									t,
 									kind: "skill",
-									faces: this.props.faces
+									faces: this.props.faces,
+									closeSettings: this.props.closeSettings
 								})
 							]
 						}) : null,
@@ -1572,7 +1577,8 @@ window.__ModuleLoader__.load({
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiagnoseButton, {
 									t,
 									kind: "skill",
-									faces: this.props.faces
+									faces: this.props.faces,
+									closeSettings: this.props.closeSettings
 								})
 							]
 						}) : null,
@@ -2131,216 +2137,157 @@ window.__ModuleLoader__.load({
 			}));
 		}
 		//#endregion
-		//#region ../ui-insuremo-status/assets/insuremo-wordmark-dark.png
-		var insuremo_wordmark_dark_default = "./assets/insuremo-wordmark-dark.png";
-		//#endregion
-		//#region ../ui-insuremo-status/assets/insuremo-wordmark-light.png
-		var insuremo_wordmark_light_default = "./assets/insuremo-wordmark-light.png";
-		//#endregion
-		//#region ../ui-insuremo-status/assets/insuremo-globe.png
-		var insuremo_globe_default = "./assets/insuremo-globe.png";
-		//#endregion
 		//#region \0dsh-css:asset
-		const css$4 = ".oDW1Lq_driver{display:none}.oDW1Lq_wordmarkHost,.oDW1Lq_railHost{pointer-events:none;z-index:1;position:absolute;inset:0}.oDW1Lq_wordmarkHost{justify-content:flex-start;align-items:center;display:flex;overflow:hidden}.oDW1Lq_wordmarkInner{white-space:nowrap;align-items:center;gap:8px;height:24px;line-height:1;display:inline-flex}.oDW1Lq_wordmark{flex:none;width:99px;height:24px;display:block}.oDW1Lq_wordmark img{object-fit:contain;image-rendering:auto;width:99px;height:24px;display:block}.oDW1Lq_wordmarkDark{display:none!important}body[data-ds-dark-theme] .oDW1Lq_wordmarkLight{display:none!important}body[data-ds-dark-theme] .oDW1Lq_wordmarkDark{display:block!important}.oDW1Lq_dsh{color:currentColor;font-family:var(--ds-font-family,Inter, system-ui, sans-serif);letter-spacing:-.045em;font-size:22px;font-weight:650;line-height:24px;display:inline-block}.oDW1Lq_railHost{justify-content:center;align-items:center;display:flex}.oDW1Lq_railMark{width:24px;height:24px;color:var(--dsw-alias-label-primary);flex:none;display:block}.oDW1Lq_railMark img{object-fit:contain;image-rendering:auto;width:24px;height:24px;display:block}.oDW1Lq_heroHost{justify-content:center;align-items:center;display:flex}.oDW1Lq_heroMark{flex:none;width:34px;height:32px;display:block}.oDW1Lq_heroMark img{object-fit:contain;image-rendering:auto;width:34px;height:32px;display:block}button:hover .oDW1Lq_railHost{visibility:hidden}";
-		const tagId$4 = "@icomposer/workbench/BrandChrome.module.css";
-		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$4) + "]") === null) {
+		const css$8 = ".kIzxwa_bubble{z-index:60;background:var(--dsw-alias-bg-elevated,#1f2328);max-width:min(320px,100vw - 24px);color:var(--dsw-alias-label-primary,#fff);border:1px solid var(--dsw-alias-border-secondary,#ffffff29);pointer-events:none;white-space:normal;overflow-wrap:anywhere;border-radius:6px;padding:4px 8px;font-size:12px;line-height:1.35;position:fixed;box-shadow:0 4px 12px #0000003d}";
+		const tagId$8 = "@icomposer/workbench/Tooltip.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$8) + "]") === null) {
 			const tag = document.createElement("style");
 			tag.dataset.plugin = "@icomposer/workbench";
-			tag.dataset.pluginCss = tagId$4;
-			tag.textContent = css$4;
+			tag.dataset.pluginCss = tagId$8;
+			tag.textContent = css$8;
 			document.head.appendChild(tag);
 		}
-		var BrandChrome_module_css_default = {
-			"driver": "oDW1Lq_driver",
-			"dsh": "oDW1Lq_dsh",
-			"heroHost": "oDW1Lq_heroHost",
-			"heroMark": "oDW1Lq_heroMark",
-			"railHost": "oDW1Lq_railHost",
-			"railMark": "oDW1Lq_railMark",
-			"wordmark": "oDW1Lq_wordmark",
-			"wordmarkDark": "oDW1Lq_wordmarkDark",
-			"wordmarkHost": "oDW1Lq_wordmarkHost",
-			"wordmarkInner": "oDW1Lq_wordmarkInner",
-			"wordmarkLight": "oDW1Lq_wordmarkLight"
-		};
+		var Tooltip_module_css_default = { "bubble": "kIzxwa_bubble" };
 		//#endregion
-		//#region ../ui-insuremo-status/src/client/BrandChrome.tsx
-		/** Stable DOM signatures owned by the Harness sidebar shell. */
-		const WORDMARK_VIEWBOX = "0 0 182 24";
-		const FISH_VIEWBOX = "0 0 23.16 17.04";
-		const PANEL_VIEWBOX = "0 0 16 16";
-		const BRAND_ASSET_URL$1 = "/api/icomposer-workbench/ui/assets";
-		const BRAND_HOST_ATTRIBUTE = "data-icomposer-brand-host";
+		//#region ../ui-insuremo-status/src/client/primitives/Tooltip.tsx
 		/**
-		* Resolves the overlay anchor for one kind. wordmark/rail ride the Harness
-		* button shell; the hero fish lives inside a plain span (New Session empty
-		* state), so its span becomes the relative overlay host instead.
+		* Plugin-owned Tooltip (TASK-168a). No Harness Client value imports: the
+		* bubble is positioned with fixed coordinates and clamped to the viewport, so
+		* an ancestor's `overflow: hidden` cannot clip it and no body portal (and thus
+		* no extra `react-dom` use) is introduced.
+		*
+		* Behaviour: hover/focus triggers, delayed show with cancellation, Escape and
+		* outside pointer dismissal, `role="tooltip"` + `aria-describedby`, and full
+		* listener/timer cleanup on hide/unmount.
 		*/
-		function svgAnchor(svg, kind) {
-			if (kind === "hero") {
-				if (svg.getAttribute("viewBox") !== FISH_VIEWBOX) return null;
-				const parent = svg.parentElement;
-				if (parent === null || parent.tagName === "BUTTON") return null;
-				return parent;
-			}
-			if (svg.getAttribute("viewBox") !== (kind === "wordmark" ? WORDMARK_VIEWBOX : FISH_VIEWBOX)) return null;
-			const button = svg.parentElement;
-			if (button === null || button.tagName !== "BUTTON") return null;
-			const nativeButton = button;
-			const hasPanel = button.querySelector(`svg[viewBox="${PANEL_VIEWBOX}"]`) !== null;
-			if (kind === "rail") return hasPanel ? nativeButton : null;
-			const row = button.parentElement;
-			if (row === null) return null;
-			return Array.from(row.children).some((child) => child !== button && child.tagName === "BUTTON" && child.querySelector(`svg[viewBox="${PANEL_VIEWBOX}"]`) !== null) ? nativeButton : null;
-		}
-		function Asset({ kind }) {
-			if (kind === "wordmark") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: BrandChrome_module_css_default.wordmarkInner,
-				"aria-hidden": "true",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-					className: BrandChrome_module_css_default.wordmark,
-					"data-icomposer-brand-asset": kind,
-					"data-emitted-brand-assets": `${insuremo_wordmark_light_default}|${insuremo_wordmark_dark_default}`,
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-						className: BrandChrome_module_css_default.wordmarkLight,
-						src: `${BRAND_ASSET_URL$1}/insuremo-wordmark-light.png`,
-						alt: "",
-						width: 312,
-						height: 76,
-						decoding: "async"
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-						className: BrandChrome_module_css_default.wordmarkDark,
-						src: `${BRAND_ASSET_URL$1}/insuremo-wordmark-dark.png`,
-						alt: "",
-						width: 312,
-						height: 76,
-						decoding: "async"
-					})]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					className: BrandChrome_module_css_default.dsh,
-					children: "dsh"
-				})]
-			});
-			if (kind === "hero") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: BrandChrome_module_css_default.heroMark,
-				"data-icomposer-brand-asset": kind,
-				"data-emitted-brand-asset": insuremo_globe_default,
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-					src: `${BRAND_ASSET_URL$1}/insuremo-globe.png`,
-					alt: "",
-					width: 34,
-					height: 32,
-					decoding: "async"
-				})
-			});
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: BrandChrome_module_css_default.railMark,
-				"data-icomposer-brand-asset": kind,
-				"data-emitted-brand-asset": insuremo_globe_default,
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-					src: `${BRAND_ASSET_URL$1}/insuremo-globe.png`,
-					alt: "",
-					width: 65,
-					height: 62,
-					decoding: "async"
-				})
-			});
-		}
-		/**
-		* Hidden client driver that overlays only the Harness-owned brand SVGs.
-		* The source buttons remain the click/focus/tooltip owners; each original SVG
-		* is merely visibility-hidden and restored, while every portal host is removed
-		* on unmount or when the shell replaces a button. On rc.2+ runtimes the brand
-		* slots replace the native SVGs, so the driver simply finds nothing to own.
-		*/
-		var BrandChrome = class extends react.Component {
-			#driverRef = null;
-			#observer;
-			#ports = /* @__PURE__ */ new Map();
-			#mounted = false;
-			componentDidMount() {
-				this.#mounted = true;
-				const doc = this.#driverRef?.ownerDocument;
-				if (doc === void 0) return;
-				const Observer = doc.defaultView?.MutationObserver ?? globalThis.MutationObserver;
-				if (Observer !== void 0) {
-					this.#observer = new Observer(() => {
-						this.sync(doc);
-					});
-					this.#observer.observe(doc.body, {
-						childList: true,
-						subtree: true
-					});
+		const VIEWPORT_MARGIN = 12;
+		const GAP$1 = 8;
+		/** Show a small bubble for an anchor element (pointer and keyboard focus). */
+		function Tooltip({ label, side = "right", delayMs = 0, children }) {
+			const id = (0, react.useId)();
+			const anchorRef = (0, react.useRef)(null);
+			const bubbleRef = (0, react.useRef)(null);
+			const timer = (0, react.useRef)(null);
+			const [open, setOpen] = (0, react.useState)(false);
+			const [position, setPosition] = (0, react.useState)(null);
+			const cancelShow = (0, react.useCallback)(() => {
+				if (timer.current === null) return;
+				clearTimeout(timer.current);
+				timer.current = null;
+			}, []);
+			const hide = (0, react.useCallback)(() => {
+				cancelShow();
+				setOpen(false);
+				setPosition(null);
+			}, [cancelShow]);
+			const show = (0, react.useCallback)((delay) => {
+				cancelShow();
+				if (delay <= 0) {
+					setOpen(true);
+					return;
 				}
-				this.sync(doc);
-			}
-			componentWillUnmount() {
-				this.#mounted = false;
-				this.#observer?.disconnect();
-				this.#observer = void 0;
-				for (const original of [...this.#ports.keys()]) this.drop(original);
-			}
-			ensure(doc, original, anchor, kind) {
-				if (this.#ports.has(original)) return;
-				const originalStyle = original.getAttribute("style");
-				const anchorStyle = anchor.getAttribute("style");
-				const host = doc.createElement("span");
-				host.setAttribute(BRAND_HOST_ATTRIBUTE, kind);
-				host.setAttribute("aria-hidden", "true");
-				host.className = kind === "wordmark" ? BrandChrome_module_css_default.wordmarkHost : kind === "rail" ? BrandChrome_module_css_default.railHost : BrandChrome_module_css_default.heroHost;
-				anchor.style.position = "relative";
-				original.style.visibility = "hidden";
-				anchor.appendChild(host);
-				const root = (0, react_dom_client.createRoot)(host);
-				root.render(/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Asset, { kind }));
-				this.#ports.set(original, {
-					original,
-					anchor,
-					host,
-					root,
-					originalStyle,
-					anchorStyle
-				});
-			}
-			drop(original) {
-				const port = this.#ports.get(original);
-				if (port === void 0) return;
-				port.root.unmount();
-				port.host.remove();
-				if (port.originalStyle === null) port.original.removeAttribute("style");
-				else port.original.setAttribute("style", port.originalStyle);
-				if (port.anchorStyle === null) port.anchor.removeAttribute("style");
-				else port.anchor.setAttribute("style", port.anchorStyle);
-				this.#ports.delete(original);
-			}
-			sync(doc) {
-				if (!this.#mounted) return;
-				const matched = /* @__PURE__ */ new Set();
-				for (const kind of [
-					"wordmark",
-					"rail",
-					"hero"
-				]) {
-					const selector = `svg[viewBox="${kind === "wordmark" ? WORDMARK_VIEWBOX : FISH_VIEWBOX}"]`;
-					for (const original of Array.from(doc.querySelectorAll(selector))) {
-						const anchor = svgAnchor(original, kind);
-						if (anchor === null) continue;
-						matched.add(original);
-						this.ensure(doc, original, anchor, kind);
-					}
+				timer.current = setTimeout(() => {
+					timer.current = null;
+					setOpen(true);
+				}, delay);
+			}, [cancelShow]);
+			(0, react.useEffect)(() => cancelShow, [cancelShow]);
+			(0, react.useEffect)(() => {
+				if (!open) return;
+				const onKeyDown = (event) => {
+					if (event.key === "Escape") hide();
+				};
+				document.addEventListener("keydown", onKeyDown);
+				return () => document.removeEventListener("keydown", onKeyDown);
+			}, [hide, open]);
+			(0, react.useLayoutEffect)(() => {
+				if (!open) return;
+				const place = () => {
+					const anchor = anchorRef.current;
+					const bubble = bubbleRef.current;
+					if (anchor === null || bubble === null) return;
+					const rect = anchor.getBoundingClientRect();
+					const width = bubble.offsetWidth;
+					const height = bubble.offsetHeight;
+					let nextSide = side;
+					let left = side === "right" ? rect.right + GAP$1 : rect.left + rect.width / 2 - width / 2;
+					let top = side === "right" ? rect.top + rect.height / 2 - height / 2 : side === "top" ? rect.top - GAP$1 - height : rect.bottom + GAP$1;
+					const fitsBelow = rect.bottom + GAP$1 + height <= window.innerHeight - VIEWPORT_MARGIN;
+					const fitsAbove = rect.top - GAP$1 - height >= VIEWPORT_MARGIN;
+					if (nextSide === "bottom" && !fitsBelow && fitsAbove) nextSide = "top";
+					else if (nextSide === "top" && !fitsAbove && fitsBelow) nextSide = "bottom";
+					if (nextSide === "top") top = rect.top - GAP$1 - height;
+					else if (nextSide === "bottom") top = rect.bottom + GAP$1;
+					left = Math.min(Math.max(left, VIEWPORT_MARGIN), Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN));
+					top = Math.min(Math.max(top, VIEWPORT_MARGIN), Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN));
+					setPosition({
+						left,
+						top,
+						side: nextSide
+					});
+				};
+				place();
+				window.addEventListener("scroll", place, true);
+				window.addEventListener("resize", place);
+				let observer = null;
+				const bubble = bubbleRef.current;
+				if (typeof ResizeObserver !== "undefined" && bubble !== null) {
+					observer = new ResizeObserver(place);
+					observer.observe(bubble);
 				}
-				for (const [original, port] of this.#ports) if (!matched.has(original) || !original.isConnected || !port.host.isConnected) this.drop(original);
-			}
-			render() {
-				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					ref: (element) => {
-						this.#driverRef = element;
-					},
-					className: BrandChrome_module_css_default.driver,
-					"data-icomposer-brand-driver": ""
-				});
-			}
-		};
+				return () => {
+					observer?.disconnect();
+					window.removeEventListener("scroll", place, true);
+					window.removeEventListener("resize", place);
+				};
+			}, [open, side]);
+			const childRef = children.ref;
+			const mergedRef = (0, react.useCallback)((element) => {
+				anchorRef.current = element;
+				if (typeof childRef === "function") childRef(element);
+				else if (childRef != null && typeof childRef === "object") childRef.current = element;
+			}, [childRef]);
+			const anchor = (0, react.cloneElement)(children, {
+				ref: mergedRef,
+				"aria-describedby": open ? id : void 0,
+				onMouseEnter: (event) => {
+					children.props.onMouseEnter?.(event);
+					show(delayMs);
+				},
+				onMouseLeave: (event) => {
+					children.props.onMouseLeave?.(event);
+					hide();
+				},
+				onFocus: (event) => {
+					children.props.onFocus?.(event);
+					show(0);
+				},
+				onBlur: (event) => {
+					children.props.onBlur?.(event);
+					hide();
+				},
+				onClick: (event) => {
+					children.props.onClick?.(event);
+					hide();
+				}
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [anchor, open ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				ref: bubbleRef,
+				id,
+				role: "tooltip",
+				className: Tooltip_module_css_default.bubble,
+				"data-side": position?.side ?? side,
+				style: position === null ? {
+					visibility: "hidden",
+					left: 0,
+					top: 0
+				} : {
+					left: position.left,
+					top: position.top
+				},
+				children: typeof label === "function" ? label() : label
+			}) : null] });
+		}
 		//#endregion
 		//#region ../ui-insuremo-status/src/client/HealthGlyphs.tsx
 		/**
@@ -2425,13 +2372,13 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:asset
-		const css$3 = ".wmQOWW_driver{display:none}.wmQOWW_rowIcons{flex:none;align-items:center;gap:4px;margin-left:auto;display:inline-flex}.wmQOWW_rowIcons .wmQOWW_icon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);border-radius:4px;flex:none;justify-content:center;align-items:center;display:inline-flex;position:relative}.wmQOWW_rowIcons .wmQOWW_icon svg{display:block}.wmQOWW_rowIcons .wmQOWW_icon:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:2px}.wmQOWW_rowIcons .wmQOWW_icon[data-state=detected]{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}.wmQOWW_rowIcons .wmQOWW_icon[data-state=on]{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent)}.wmQOWW_rowIcons .wmQOWW_icon[data-state=off]{color:var(--dsw-alias-label-tertiary);opacity:.32}";
-		const tagId$3 = "@icomposer/workbench/WorkspaceHealth.module.css";
-		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$3) + "]") === null) {
+		const css$7 = ".wmQOWW_driver{display:none}.wmQOWW_rowIcons{flex:none;align-items:center;gap:4px;margin-left:auto;display:inline-flex}.wmQOWW_rowIcons .wmQOWW_icon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);border-radius:4px;flex:none;justify-content:center;align-items:center;display:inline-flex;position:relative}.wmQOWW_rowIcons .wmQOWW_icon svg{display:block}.wmQOWW_rowIcons .wmQOWW_icon:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:2px}.wmQOWW_rowIcons .wmQOWW_icon[data-state=detected]{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}.wmQOWW_rowIcons .wmQOWW_icon[data-state=on]{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent)}.wmQOWW_rowIcons .wmQOWW_icon[data-state=off]{color:var(--dsw-alias-label-tertiary);opacity:.32}";
+		const tagId$7 = "@icomposer/workbench/WorkspaceHealth.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$7) + "]") === null) {
 			const tag = document.createElement("style");
 			tag.dataset.plugin = "@icomposer/workbench";
-			tag.dataset.pluginCss = tagId$3;
-			tag.textContent = css$3;
+			tag.dataset.pluginCss = tagId$7;
+			tag.textContent = css$7;
 			document.head.appendChild(tag);
 		}
 		var WorkspaceHealth_module_css_default = {
@@ -2475,7 +2422,7 @@ window.__ModuleLoader__.load({
 				"data-icomposer-workspace-health-icons": "",
 				onClick: (event) => event.stopPropagation(),
 				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Tooltip, {
 						label: iComposerLabel,
 						side: "top",
 						delayMs: 400,
@@ -2488,7 +2435,7 @@ window.__ModuleLoader__.load({
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IcomposerGlyph, {})
 						})
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Tooltip, {
 						label: graphLabel,
 						side: "top",
 						delayMs: 400,
@@ -2501,7 +2448,7 @@ window.__ModuleLoader__.load({
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphGlyph, {})
 						})
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Tooltip, {
 						label: explainLabel,
 						side: "top",
 						delayMs: 400,
@@ -2646,7 +2593,7 @@ window.__ModuleLoader__.load({
 			}
 			render() {
 				const { t } = this.props;
-				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(BrandChrome, {}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					ref: (element) => {
 						this.#driverRef = element;
 					},
@@ -2654,9 +2601,53 @@ window.__ModuleLoader__.load({
 					role: "status",
 					"aria-label": t("health.strip"),
 					"data-icomposer-workspace-health-driver": ""
-				})] });
+				}) });
 			}
 		};
+		//#endregion
+		//#region \0dsh-css:asset
+		const css$6 = ".P44coq_button{font:inherit;cursor:pointer;color:var(--dsw-alias-label-primary,inherit);background:0 0;border:1px solid #0000;border-radius:8px;justify-content:center;align-items:center;gap:6px;transition:background-color .12s,border-color .12s;display:inline-flex}.P44coq_button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#6b6ff0);outline-offset:2px}.P44coq_button:disabled{cursor:not-allowed;opacity:.55}.P44coq_md{border-radius:12px;height:36px;padding:0 12px}.P44coq_sm{height:28px;padding:0 8px}.P44coq_ghost:hover:not(:disabled){background:var(--dsw-alias-bg-hover,#7f7f7f1f)}.P44coq_outline{border-color:var(--dsw-alias-border-secondary,#7f7f7f4d)}.P44coq_outline:hover:not(:disabled){background:var(--dsw-alias-bg-hover,#7f7f7f1f)}.P44coq_primary{background:var(--dsw-alias-button-primary-fill,#4f55d8);color:var(--dsw-alias-button-primary-label,#fff)}.P44coq_toolbar{border-radius:6px}.P44coq_icon{align-items:center;display:inline-flex}";
+		const tagId$6 = "@icomposer/workbench/Button.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$6) + "]") === null) {
+			const tag = document.createElement("style");
+			tag.dataset.plugin = "@icomposer/workbench";
+			tag.dataset.pluginCss = tagId$6;
+			tag.textContent = css$6;
+			document.head.appendChild(tag);
+		}
+		var Button_module_css_default = {
+			"button": "P44coq_button",
+			"ghost": "P44coq_ghost",
+			"icon": "P44coq_icon",
+			"md": "P44coq_md",
+			"outline": "P44coq_outline",
+			"primary": "P44coq_primary",
+			"sm": "P44coq_sm",
+			"toolbar": "P44coq_toolbar"
+		};
+		//#endregion
+		//#region ../ui-insuremo-status/src/client/primitives/Button.tsx
+		/** Plugin-owned button atom (TASK-168a): no Harness Client value imports. */
+		/** Token-styled button; always `type="button"` unless the caller overrides it. */
+		const Button = (0, react.forwardRef)(function Button({ variant = "ghost", size = "md", icon, className, children, ...rest }, ref) {
+			const classes = [
+				Button_module_css_default.button,
+				Button_module_css_default[variant],
+				Button_module_css_default[size],
+				className
+			].filter((part) => typeof part === "string" && part.length > 0).join(" ");
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+				...rest,
+				ref,
+				type: "button",
+				className: classes,
+				children: [icon != null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: Button_module_css_default.icon,
+					"aria-hidden": "true",
+					children: icon
+				}), children]
+			});
+		});
 		//#endregion
 		//#region ../ui-insuremo-status/src/client/actions.ts
 		const ACTIONS_PREFIX = "/api/icomposer-workbench/insuremo/overview/actions";
@@ -2716,23 +2707,25 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:asset
-		const css$2 = ".qpu5lG_trigger{width:100%;min-width:0;overflow:hidden}.qpu5lG_trigger[data-wide=false]{border-radius:var(--dsw-radius-md);width:36px;height:36px;padding:0}.qpu5lG_triggerContent{flex:auto;align-items:center;gap:7px;min-width:0;display:inline-flex;overflow:hidden}.qpu5lG_trigger[data-wide=false] .qpu5lG_triggerContent{flex:none;justify-content:center}.qpu5lG_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.qpu5lG_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.qpu5lG_picker{flex-direction:column;flex:auto;gap:1px;min-width:0;padding:2px 0;display:flex}.qpu5lG_railPanel{z-index:100;box-sizing:border-box;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:260px;max-width:calc(100vw - 24px);max-height:min(420px,100vh - 96px);box-shadow:var(--dsw-elevation-prominent);flex-direction:column;gap:1px;padding:4px;display:flex;position:fixed;overflow:auto}.qpu5lG_railPanel:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.qpu5lG_pickerHeader{width:100%;min-width:0;overflow:hidden}.qpu5lG_closeMark{color:var(--dsw-alias-label-tertiary);flex:none;margin-left:auto;padding-left:6px}.qpu5lG_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.qpu5lG_groupLabel{color:var(--dsw-alias-label-tertiary);padding:6px 8px 3px;font-size:11px;line-height:15px;display:block}.qpu5lG_row{box-sizing:border-box;border-radius:var(--dsw-radius-md);width:100%;min-height:30px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:none;align-items:center;gap:6px;padding:4px 8px;font-size:13px;line-height:20px;display:flex;overflow:hidden}.qpu5lG_row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.qpu5lG_row:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}.qpu5lG_row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.qpu5lG_row:disabled{cursor:not-allowed;opacity:.4}.qpu5lG_row[data-active=\"1\"]{color:var(--dsw-alias-label-primary)}.qpu5lG_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.qpu5lG_rowMark{color:var(--dsw-alias-state-success-primary);flex:none;margin-left:auto}.qpu5lG_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:4px 8px;font-size:12px;line-height:18px}.qpu5lG_error{color:var(--dsw-alias-state-error-primary);padding:4px 8px;font-size:12px;line-height:18px}";
-		const tagId$2 = "@icomposer/workbench/ProfilePicker.module.css";
-		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
+		const css$5 = ".qpu5lG_trigger{width:100%;min-width:0;overflow:hidden}.qpu5lG_trigger[data-wide=false]{border-radius:var(--dsw-radius-md);width:36px;height:36px;padding:0}.qpu5lG_triggerContent{flex:auto;align-items:center;gap:7px;min-width:0;display:inline-flex;overflow:hidden}.qpu5lG_trigger[data-wide=false] .qpu5lG_triggerContent{flex:none;justify-content:center}.qpu5lG_dot{background:var(--dsw-alias-state-warn-primary);border-radius:50%;flex:none;width:7px;height:7px}.qpu5lG_label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.qpu5lG_picker{flex-direction:column;flex:auto;gap:1px;min-width:0;padding:2px 0;display:flex}.qpu5lG_overlayFrame{pointer-events:none;position:absolute;inset:0}.qpu5lG_railPanel{pointer-events:auto;z-index:100;box-sizing:border-box;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:260px;max-width:calc(100% - 24px);max-height:min(420px,100% - 24px);box-shadow:var(--dsw-elevation-prominent);flex-direction:column;gap:1px;padding:4px;display:flex;position:absolute;overflow:auto}.qpu5lG_railPanel:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.qpu5lG_expandSidebarNotice{overflow-wrap:anywhere;width:36px;color:var(--dsw-alias-label-secondary);font-size:10px;line-height:12px;display:block}.qpu5lG_pickerHeader{width:100%;min-width:0;overflow:hidden}.qpu5lG_closeMark{color:var(--dsw-alias-label-tertiary);flex:none;margin-left:auto;padding-left:6px}.qpu5lG_list{flex-direction:column;gap:1px;margin:0;padding:0;list-style:none;display:flex}.qpu5lG_groupLabel{color:var(--dsw-alias-label-tertiary);padding:6px 8px 3px;font-size:11px;line-height:15px;display:block}.qpu5lG_row{box-sizing:border-box;border-radius:var(--dsw-radius-md);width:100%;min-height:30px;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;background:0 0;border:none;align-items:center;gap:6px;padding:4px 8px;font-size:13px;line-height:20px;display:flex;overflow:hidden}.qpu5lG_row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.qpu5lG_row:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}.qpu5lG_row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.qpu5lG_row:disabled{cursor:not-allowed;opacity:.4}.qpu5lG_row[data-active=\"1\"]{color:var(--dsw-alias-label-primary)}.qpu5lG_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.qpu5lG_rowMark{color:var(--dsw-alias-state-success-primary);flex:none;margin-left:auto}.qpu5lG_hint{color:var(--dsw-alias-label-tertiary);margin:0;padding:4px 8px;font-size:12px;line-height:18px}.qpu5lG_error{color:var(--dsw-alias-state-error-primary);padding:4px 8px;font-size:12px;line-height:18px}";
+		const tagId$5 = "@icomposer/workbench/ProfilePicker.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$5) + "]") === null) {
 			const tag = document.createElement("style");
 			tag.dataset.plugin = "@icomposer/workbench";
-			tag.dataset.pluginCss = tagId$2;
-			tag.textContent = css$2;
+			tag.dataset.pluginCss = tagId$5;
+			tag.textContent = css$5;
 			document.head.appendChild(tag);
 		}
 		var ProfilePicker_module_css_default = {
 			"closeMark": "qpu5lG_closeMark",
 			"dot": "qpu5lG_dot",
 			"error": "qpu5lG_error",
+			"expandSidebarNotice": "qpu5lG_expandSidebarNotice",
 			"groupLabel": "qpu5lG_groupLabel",
 			"hint": "qpu5lG_hint",
 			"label": "qpu5lG_label",
 			"list": "qpu5lG_list",
+			"overlayFrame": "qpu5lG_overlayFrame",
 			"picker": "qpu5lG_picker",
 			"pickerHeader": "qpu5lG_pickerHeader",
 			"railPanel": "qpu5lG_railPanel",
@@ -2744,18 +2737,6 @@ window.__ModuleLoader__.load({
 		};
 		//#endregion
 		//#region ../ui-insuremo-status/src/client/ProfilePicker.tsx
-		/** Width of the floating rail panel; wide enough for a profile name and its check. */
-		const RAIL_PANEL_WIDTH = 260;
-		/** Gap between the rail trigger and its floating panel. */
-		const RAIL_PANEL_GAP = 8;
-		/** Margin the floating panel keeps from every viewport edge. */
-		const RAIL_VIEWPORT_MARGIN = 12;
-		/** Unplaced panel: hidden but laid out so the first placement measures real dimensions. */
-		const MEASURE_STYLE = {
-			visibility: "hidden",
-			left: 0,
-			top: 0
-		};
 		function tooltipOf(profile, fallback) {
 			const parts = [
 				profile.env,
@@ -2816,76 +2797,22 @@ window.__ModuleLoader__.load({
 			}
 			return [...byName.values()].sort((left, right) => sourceRank(left.sourceScope) - sourceRank(right.sourceScope) || left.name.localeCompare(right.name));
 		}
+		const noOverlaySubscription = (_listener) => () => {};
+		const noOverlaySnapshot = () => false;
 		/**
 		* Global slot wrapper: hooks are consumed here, while the stateful panel below
 		* remains a class so the existing picker interaction and DOM stay stable.
+		* Legacy direct callers without the injected face get the same safe fallback.
 		*/
 		function WorkspaceAwareProfilePicker(props) {
 			const sessions = props.useSessions((state) => state);
 			const workspaces = props.useWorkspaces((state) => state);
+			const overlayAvailable = (0, react.useSyncExternalStore)(props.pickerOverlay?.subscribeAvailability ?? noOverlaySubscription, props.pickerOverlay?.getAvailable ?? noOverlaySnapshot, props.pickerOverlay?.getAvailable ?? noOverlaySnapshot);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProfilePicker, {
 				...props,
+				overlayAvailable,
 				target: resolveProfileTarget(sessions, workspaces)
 			});
-		}
-		/**
-		* Floating form of the picker for the collapsed rail (TASK-144 FIX). The rail
-		* is a 56px column with `overflow: hidden`, so an in-place panel is clipped to
-		* it (measured: 151px panel, 48px of it outside). The same list therefore
-		* renders through a body portal at a fixed width, anchored to the trigger that
-		* stays mounted underneath. Official primitives own the two behaviours:
-		* placement (viewport clamp on scroll, resize, and the panel's own resize) and
-		* outside-pointer dismissal. No popover framework is introduced here.
-		*/
-		function RailPickerPanel({ anchorRef, onClose, label, children }) {
-			const panelRef = (0, react.useRef)(null);
-			const position = (0, _deepseek_ai_dsh_client_ui_primitives.useAnchoredPosition)({
-				open: true,
-				anchorRef,
-				panelRef,
-				side: "top",
-				align: "start",
-				gap: RAIL_PANEL_GAP,
-				margin: RAIL_VIEWPORT_MARGIN
-			});
-			const dismiss = (0, react.useCallback)(() => {
-				onClose();
-			}, [onClose]);
-			(0, _deepseek_ai_dsh_client_ui_primitives.useDismissOnOutsidePointer)(anchorRef, true, dismiss, panelRef);
-			const focusedRef = (0, react.useRef)(false);
-			(0, react.useLayoutEffect)(() => {
-				if (focusedRef.current || position === null) return;
-				const panel = panelRef.current;
-				if (panel === null) return;
-				focusedRef.current = true;
-				panel.focus();
-			}, [position]);
-			(0, react.useEffect)(() => {
-				const onKeyDown = (event) => {
-					if (event.key !== "Escape") return;
-					event.preventDefault();
-					onClose();
-					anchorRef.current?.focus();
-				};
-				document.addEventListener("keydown", onKeyDown);
-				return () => {
-					document.removeEventListener("keydown", onKeyDown);
-				};
-			}, [anchorRef, onClose]);
-			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.MenuSurface, {
-				ref: panelRef,
-				compact: true,
-				tabIndex: -1,
-				role: "group",
-				"aria-label": label,
-				"data-icomposer-picker-panel": "rail",
-				className: ProfilePicker_module_css_default.railPanel,
-				style: position === null ? MEASURE_STYLE : {
-					...position,
-					width: RAIL_PANEL_WIDTH
-				},
-				children
-			}), document.body);
 		}
 		/** Sidebar Active Profile selector with workspace-scoped reads and selection. */
 		var ProfilePicker = class extends react.Component {
@@ -2899,6 +2826,7 @@ window.__ModuleLoader__.load({
 			triggerRef = (0, react.createRef)();
 			/** Collapse the panel; also the single close path for the header, Esc, and outside clicks. */
 			close = () => {
+				this.props.pickerOverlay?.clear(this);
 				this.cancelRequest();
 				this.setState({
 					phase: "collapsed",
@@ -2907,6 +2835,26 @@ window.__ModuleLoader__.load({
 					activeName: this.state.activeName
 				});
 			};
+			dismissRail = (restoreFocus) => {
+				this.close();
+				if (restoreFocus && this.triggerRef.current?.isConnected) this.triggerRef.current.focus();
+			};
+			syncOverlay() {
+				const controller = this.props.pickerOverlay;
+				if (controller === void 0) return;
+				if (this.props.wide || this.state.phase !== "open") {
+					controller.clear(this);
+					return;
+				}
+				if (!this.props.overlayAvailable) return;
+				controller.show({
+					owner: this,
+					anchorRef: this.triggerRef,
+					label: this.props.t("picker.label"),
+					content: this.renderPanel(false),
+					onDismiss: this.dismissRail
+				});
+			}
 			currentTarget() {
 				return this.props.target ?? { kind: "global" };
 			}
@@ -2916,15 +2864,25 @@ window.__ModuleLoader__.load({
 			componentDidUpdate(previousProps) {
 				const previousKey = targetKey(previousProps.target ?? { kind: "global" });
 				const nextKey = targetKey(this.currentTarget());
-				if (previousKey === nextKey) return;
-				this.cancelRequest();
-				this.setState({
-					phase: "collapsed",
-					targetKey: nextKey
-				});
-				this.warmActive(this.currentTarget());
+				if (previousProps.pickerOverlay !== this.props.pickerOverlay) previousProps.pickerOverlay?.clear(this);
+				if (previousKey !== nextKey) {
+					this.props.pickerOverlay?.clear(this);
+					this.cancelRequest();
+					this.setState({
+						phase: "collapsed",
+						targetKey: nextKey
+					});
+					this.warmActive(this.currentTarget());
+					return;
+				}
+				if (!this.props.wide && this.state.phase === "open" && !this.props.overlayAvailable) {
+					this.close();
+					return;
+				}
+				this.syncOverlay();
 			}
 			componentWillUnmount() {
+				this.props.pickerOverlay?.clear(this);
 				this.cancelRequest();
 			}
 			cancelRequest() {
@@ -3102,7 +3060,9 @@ window.__ModuleLoader__.load({
 							targetKey: request.targetKey,
 							profiles: nextProfiles ?? prev.profiles,
 							activeName: nextActive
-						} : prev);
+						} : prev, () => {
+							if (!this.props.wide && this.triggerRef.current?.isConnected) this.triggerRef.current.focus();
+						});
 					} else {
 						const error = outcome.error.code === "network" ? "network" : outcome.error.code;
 						this.setState((prev) => prev.phase === "open" ? {
@@ -3129,8 +3089,10 @@ window.__ModuleLoader__.load({
 				const { t, wide } = this.props;
 				const current = this.state.activeName ?? "";
 				const currentRow = this.state.profiles?.find((profile) => profile.name === current);
-				const title = currentRow !== void 0 ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
-				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+				const baseTitle = currentRow !== void 0 ? tooltipOf(currentRow, current) : current.length > 0 ? current : t("label");
+				const needsSidebar = !wide && !this.props.overlayAvailable;
+				const title = needsSidebar ? `${baseTitle} · ${t("picker.expandSidebar")}` : baseTitle;
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
 					ref: this.triggerRef,
 					variant: "ghost",
 					size: "sm",
@@ -3139,9 +3101,13 @@ window.__ModuleLoader__.load({
 					"aria-haspopup": "listbox",
 					"aria-expanded": open,
 					title,
-					"aria-label": current.length > 0 ? `${t("label")} · ${current}` : t("label"),
+					"aria-label": `${current.length > 0 ? `${t("label")} · ${current}` : t("label")}${needsSidebar ? ` · ${t("picker.expandSidebar")}` : ""}`,
 					onClick: () => {
 						if (open) this.close();
+						else if (needsSidebar) this.setState((prev) => prev.phase === "collapsed" ? {
+							...prev,
+							expandSidebarNotice: true
+						} : prev);
 						else this.open();
 					},
 					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
@@ -3169,7 +3135,7 @@ window.__ModuleLoader__.load({
 				if (state.phase !== "open") return null;
 				let lastScope;
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					withHeader ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+					withHeader ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Button, {
 						variant: "ghost",
 						size: "sm",
 						className: ProfilePicker_module_css_default.pickerHeader,
@@ -3244,11 +3210,10 @@ window.__ModuleLoader__.load({
 			}
 			render() {
 				const open = this.state.phase === "open";
-				if (!this.props.wide) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [this.renderTrigger(open), open ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailPickerPanel, {
-					anchorRef: this.triggerRef,
-					onClose: this.close,
-					label: this.props.t("picker.label"),
-					children: this.renderPanel(false)
+				if (!this.props.wide) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [this.renderTrigger(open), !this.props.overlayAvailable && this.state.phase === "collapsed" && this.state.expandSidebarNotice ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: ProfilePicker_module_css_default.expandSidebarNotice,
+					role: "status",
+					children: this.props.t("picker.expandSidebar")
 				}) : null] });
 				if (!open) return this.renderTrigger(false);
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -3260,9 +3225,403 @@ window.__ModuleLoader__.load({
 			}
 		};
 		//#endregion
+		//#region ../ui-insuremo-status/src/client/PickerOverlayController.ts
+		/**
+		* Per-client-apply bridge. Registration alone is not availability: the actual
+		* overlay component must commit for the current declaration generation.
+		* Snapshots have stable identity between changes for useSyncExternalStore.
+		*/
+		var PickerOverlayController = class {
+			panelListeners = /* @__PURE__ */ new Set();
+			availabilityListeners = /* @__PURE__ */ new Set();
+			panel = null;
+			generation = 0;
+			declared = false;
+			mounted = /* @__PURE__ */ new Map();
+			disposed = false;
+			getPanel = () => this.panel;
+			getAvailable = () => !this.disposed && this.declared && [...this.mounted.values()].some((generation) => generation === this.generation);
+			subscribePanel = (listener) => {
+				this.panelListeners.add(listener);
+				return () => {
+					this.panelListeners.delete(listener);
+				};
+			};
+			subscribeAvailability = (listener) => {
+				this.availabilityListeners.add(listener);
+				return () => {
+					this.availabilityListeners.delete(listener);
+				};
+			};
+			notify(listeners) {
+				for (const listener of [...listeners]) listener();
+			}
+			/** Called only during the real slot's declaration lifetime. */
+			declare() {
+				if (this.disposed) return () => {};
+				this.generation += 1;
+				const generation = this.generation;
+				this.declared = true;
+				this.notify(this.availabilityListeners);
+				let released = false;
+				return () => {
+					if (released || this.generation !== generation) return;
+					released = true;
+					this.declared = false;
+					this.invalidatePanel();
+					this.notify(this.availabilityListeners);
+				};
+			}
+			/** Commit acknowledgement from the actual rendered overlay component. */
+			mount() {
+				if (this.disposed || !this.declared) return () => {};
+				const token = {};
+				const generation = this.generation;
+				this.mounted.set(token, generation);
+				this.notify(this.availabilityListeners);
+				return () => {
+					if (!this.mounted.delete(token)) return;
+					if (this.generation === generation && !this.getAvailable()) this.invalidatePanel();
+					this.notify(this.availabilityListeners);
+				};
+			}
+			/** Replace only this apply's surface; a different owner is first dismissed. */
+			show(panel) {
+				if (!this.getAvailable()) return false;
+				if (this.panel !== null && this.panel.owner !== panel.owner) this.invalidatePanel();
+				this.panel = panel;
+				this.notify(this.panelListeners);
+				return true;
+			}
+			clear(owner) {
+				if (this.panel?.owner !== owner) return;
+				this.panel = null;
+				this.notify(this.panelListeners);
+			}
+			invalidatePanel() {
+				const panel = this.panel;
+				if (panel === null) return;
+				this.panel = null;
+				this.notify(this.panelListeners);
+				panel.onDismiss(false);
+			}
+			/** Plugin-fiber teardown cannot leave an active Picker or subscription. */
+			dispose() {
+				if (this.disposed) return;
+				this.disposed = true;
+				this.declared = false;
+				this.invalidatePanel();
+				this.notify(this.availabilityListeners);
+				this.mounted.clear();
+				this.panelListeners.clear();
+				this.availabilityListeners.clear();
+			}
+		};
+		//#endregion
+		//#region \0dsh-css:asset
+		const css$4 = "._1SvMjq_surface{border:1px solid var(--dsw-alias-border-secondary,#7f7f7f47);background:var(--dsw-alias-bg-elevated,#fff);max-height:min(420px,100vh - 48px);color:var(--dsw-alias-label-primary,inherit);border-radius:10px;flex-direction:column;display:flex;overflow:auto;box-shadow:0 10px 30px #0003}._1SvMjq_compact{border-radius:8px}";
+		const tagId$4 = "@icomposer/workbench/MenuSurface.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$4) + "]") === null) {
+			const tag = document.createElement("style");
+			tag.dataset.plugin = "@icomposer/workbench";
+			tag.dataset.pluginCss = tagId$4;
+			tag.textContent = css$4;
+			document.head.appendChild(tag);
+		}
+		var MenuSurface_module_css_default = {
+			"compact": "_1SvMjq_compact",
+			"surface": "_1SvMjq_surface"
+		};
+		//#endregion
+		//#region ../ui-insuremo-status/src/client/primitives/MenuSurface.tsx
+		/** Plugin-owned menu surface (TASK-168a). No portal/backing: the caller owns placement. */
+		/** Rounded menu material with optional compact geometry. */
+		const MenuSurface = (0, react.forwardRef)(function MenuSurface({ compact = false, className, children, ...props }, ref) {
+			const classes = [
+				MenuSurface_module_css_default.surface,
+				compact ? MenuSurface_module_css_default.compact : void 0,
+				className
+			].filter((part) => typeof part === "string" && part.length > 0).join(" ");
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				...props,
+				ref,
+				className: classes,
+				children
+			});
+		});
+		//#endregion
+		//#region ../ui-insuremo-status/src/client/primitives/anchored-position.ts
+		/**
+		* Plugin-owned anchored placement: only the caller's anchor, panel and optional
+		* overlay wrapper are measured. With a wrapper, client coordinates are
+		* clamped to the visible frame and converted to wrapper-local CSS coordinates.
+		*/
+		/** Coordinates relative to the wrapper, or viewport coordinates without one. */
+		function useAnchoredPosition(options) {
+			const { open, anchorRef, panelRef, wrapperRef, onAnchorLost, side = "bottom", align = "start", gap, margin } = options;
+			const [position, setPosition] = (0, react.useState)(null);
+			(0, react.useLayoutEffect)(() => {
+				if (!open) {
+					setPosition(null);
+					return;
+				}
+				let active = true;
+				let lost = false;
+				let frame = 0;
+				const place = () => {
+					if (!active) return;
+					const anchor = anchorRef.current;
+					if (anchor === null || onAnchorLost !== void 0 && !anchor.isConnected) {
+						if (!lost && onAnchorLost !== void 0) {
+							lost = true;
+							onAnchorLost();
+						}
+						return;
+					}
+					const panel = panelRef.current;
+					const wrapper = wrapperRef?.current;
+					if (panel === null || wrapperRef !== void 0 && wrapper == null) return;
+					const bounds = wrapper?.getBoundingClientRect();
+					if (bounds !== void 0 && (bounds.width <= 0 || bounds.height <= 0)) return;
+					const scaleX = bounds !== void 0 && wrapper && wrapper.offsetWidth > 0 ? bounds.width / wrapper.offsetWidth : 1;
+					const scaleY = bounds !== void 0 && wrapper && wrapper.offsetHeight > 0 ? bounds.height / wrapper.offsetHeight : 1;
+					const frameLeft = Math.max(0, bounds?.left ?? 0);
+					const frameTop = Math.max(0, bounds?.top ?? 0);
+					const frameRight = Math.min(window.innerWidth, bounds?.right ?? window.innerWidth);
+					const frameBottom = Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight);
+					if (frameRight <= frameLeft || frameBottom <= frameTop) return;
+					const rect = anchor.getBoundingClientRect();
+					const measuredPanel = panel.getBoundingClientRect();
+					const maxWidth = Math.max(0, (frameRight - frameLeft - 2 * margin) / scaleX);
+					const maxHeight = Math.max(0, Math.min(420, (frameBottom - frameTop - 2 * margin) / scaleY));
+					const width = Math.min(measuredPanel.width || panel.offsetWidth * scaleX, maxWidth * scaleX);
+					const height = Math.min(measuredPanel.height || panel.offsetHeight * scaleY, maxHeight * scaleY);
+					let left = align === "end" ? rect.right - width : rect.left;
+					let top = side === "top" ? rect.top - gap - height : rect.bottom + gap;
+					if (width > 0) left = Math.min(Math.max(left, frameLeft + margin), Math.max(frameLeft + margin, frameRight - width - margin));
+					if (height > 0) top = Math.min(Math.max(top, frameTop + margin), Math.max(frameTop + margin, frameBottom - height - margin));
+					left = (left - (bounds?.left ?? 0)) / scaleX;
+					top = (top - (bounds?.top ?? 0)) / scaleY;
+					const next = wrapperRef === void 0 ? {
+						left,
+						top
+					} : {
+						left,
+						top,
+						maxWidth,
+						maxHeight
+					};
+					setPosition((previous) => previous?.left === next.left && previous.top === next.top && previous.maxWidth === next.maxWidth && previous.maxHeight === next.maxHeight ? previous : next);
+				};
+				place();
+				window.addEventListener("scroll", place, true);
+				window.addEventListener("resize", place);
+				let observer = null;
+				if (typeof ResizeObserver !== "undefined") {
+					observer = new ResizeObserver(place);
+					if (panelRef.current !== null) observer.observe(panelRef.current);
+					if (anchorRef.current !== null) observer.observe(anchorRef.current);
+					if (wrapperRef?.current != null) observer.observe(wrapperRef.current);
+				}
+				const checkAnchor = () => {
+					if (!active) return;
+					if (anchorRef.current === null || !anchorRef.current.isConnected) {
+						place();
+						return;
+					}
+					frame = requestAnimationFrame(checkAnchor);
+				};
+				if (onAnchorLost !== void 0) frame = requestAnimationFrame(checkAnchor);
+				return () => {
+					active = false;
+					if (frame !== 0) cancelAnimationFrame(frame);
+					observer?.disconnect();
+					window.removeEventListener("scroll", place, true);
+					window.removeEventListener("resize", place);
+				};
+			}, [
+				open,
+				anchorRef,
+				panelRef,
+				wrapperRef,
+				onAnchorLost,
+				side,
+				align,
+				gap,
+				margin
+			]);
+			return position;
+		}
+		//#endregion
+		//#region ../ui-insuremo-status/src/client/primitives/dismiss.ts
+		/** Plugin-owned dismissal (TASK-168a): outside pointer + Escape, with cleanup. */
+		/**
+		* Close an open surface when a pointerdown lands outside the root/portal, or
+		* when Escape is pressed. Listeners detach with the effect.
+		*/
+		function useDismissOnOutsidePointer(root, open, onDismiss, portal) {
+			(0, react.useEffect)(() => {
+				if (!open) return;
+				const onPointerDown = (event) => {
+					if (event.target instanceof Node && root.current?.contains(event.target) !== true && portal?.current?.contains(event.target) !== true) onDismiss();
+				};
+				const onKeyDown = (event) => {
+					if (event.key !== "Escape") return;
+					event.preventDefault();
+					onDismiss();
+				};
+				document.addEventListener("pointerdown", onPointerDown);
+				document.addEventListener("keydown", onKeyDown);
+				return () => {
+					document.removeEventListener("pointerdown", onPointerDown);
+					document.removeEventListener("keydown", onKeyDown);
+				};
+			}, [
+				root,
+				open,
+				onDismiss,
+				portal
+			]);
+		}
+		//#endregion
+		//#region ../ui-insuremo-status/src/client/PickerOverlay.tsx
+		const GAP = 8;
+		const MARGIN = 12;
+		const MEASURE_STYLE = {
+			visibility: "hidden",
+			left: 0,
+			top: 0
+		};
+		function RailPanel({ panel, wrapperRef }) {
+			const panelRef = (0, react.useRef)(null);
+			const anchorLost = (0, react.useCallback)(() => {
+				panel.onDismiss(false);
+			}, [panel.onDismiss]);
+			const dismiss = (0, react.useCallback)(() => {
+				panel.onDismiss(true);
+			}, [panel.onDismiss]);
+			const position = useAnchoredPosition({
+				open: true,
+				anchorRef: panel.anchorRef,
+				panelRef,
+				wrapperRef,
+				onAnchorLost: anchorLost,
+				side: "top",
+				align: "start",
+				gap: GAP,
+				margin: MARGIN
+			});
+			useDismissOnOutsidePointer(panel.anchorRef, true, dismiss, panelRef);
+			const focused = (0, react.useRef)(false);
+			(0, react.useLayoutEffect)(() => {
+				if (focused.current || position === null || panelRef.current === null) return;
+				focused.current = true;
+				panelRef.current.focus();
+			}, [position]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MenuSurface, {
+				ref: panelRef,
+				compact: true,
+				tabIndex: -1,
+				role: "group",
+				"aria-label": panel.label,
+				"data-icomposer-picker-panel": "rail",
+				className: ProfilePicker_module_css_default.railPanel,
+				style: position === null ? MEASURE_STYLE : position,
+				children: panel.content
+			});
+		}
+		/** Stable slot component: acknowledgement occurs only after its wrapper commits. */
+		function PickerOverlay({ pickerOverlay }) {
+			const wrapperRef = (0, react.useRef)(null);
+			const panel = (0, react.useSyncExternalStore)(pickerOverlay.subscribePanel, pickerOverlay.getPanel, pickerOverlay.getPanel);
+			(0, react.useLayoutEffect)(() => {
+				if (!wrapperRef.current?.isConnected) return;
+				return pickerOverlay.mount();
+			}, [pickerOverlay]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				ref: wrapperRef,
+				className: ProfilePicker_module_css_default.overlayFrame,
+				style: { pointerEvents: "none" },
+				"data-icomposer-picker-overlay": "",
+				children: panel === null ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailPanel, {
+					panel,
+					wrapperRef
+				})
+			});
+		}
+		//#endregion
+		//#region ../ui-insuremo-status/assets/insuremo-globe.png
+		var insuremo_globe_default = "./assets/insuremo-globe.png";
+		//#endregion
+		//#region ../ui-insuremo-status/assets/insuremo-wordmark-dark.png
+		var insuremo_wordmark_dark_default = "./assets/insuremo-wordmark-dark.png";
+		//#endregion
+		//#region ../ui-insuremo-status/assets/insuremo-wordmark-light.png
+		var insuremo_wordmark_light_default = "./assets/insuremo-wordmark-light.png";
+		//#endregion
+		//#region \0dsh-css:asset
+		const css$3 = ".jSBUeq_wordmark{flex:none;width:99px;height:24px;display:block}.jSBUeq_wordmark img{object-fit:contain;image-rendering:auto;width:99px;height:24px;display:block}.jSBUeq_wordmarkDark{display:none!important}body[data-ds-dark-theme] .jSBUeq_wordmarkLight{display:none!important}body[data-ds-dark-theme] .jSBUeq_wordmarkDark{display:block!important}";
+		const tagId$3 = "@icomposer/workbench/InsuremoBrand.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$3) + "]") === null) {
+			const tag = document.createElement("style");
+			tag.dataset.plugin = "@icomposer/workbench";
+			tag.dataset.pluginCss = tagId$3;
+			tag.textContent = css$3;
+			document.head.appendChild(tag);
+		}
+		var InsuremoBrand_module_css_default = {
+			"wordmark": "jSBUeq_wordmark",
+			"wordmarkDark": "jSBUeq_wordmarkDark",
+			"wordmarkLight": "jSBUeq_wordmarkLight"
+		};
+		//#endregion
 		//#region ../ui-insuremo-status/src/client/InsuremoBrand.tsx
 		/** Same-origin brand assets served by the host-side brand-assets-server. */
 		const BRAND_ASSET_URL = "/api/icomposer-workbench/ui/assets";
+		const noopSubscribe = () => () => {};
+		const alwaysFalse = () => false;
+		/**
+		* Per-apply brand signal shared by the mark and name slots through their real
+		* inject faces. The name occupant (wide sidebar) marks itself mounted, so the
+		* mark occupant stays empty and the wide row shows only the complete logo.
+		* Without a mounted name (collapsed rail) the mark draws the standalone globe.
+		*
+		* Limitation: with more than one SidebarRoot at once, any mounted name hides
+		* every mark from the same apply. The real App has one sidebar; this is
+		* documented rather than solved with host DOM or outlet identity assumptions.
+		*/
+		var BrandSignal = class {
+			#names = 0;
+			#listeners = /* @__PURE__ */ new Set();
+			getSnapshot = () => this.#names > 0;
+			subscribe = (listener) => {
+				this.#listeners.add(listener);
+				return () => {
+					this.#listeners.delete(listener);
+				};
+			};
+			/** Called by the name occupant from a layout effect; returns its disposer. */
+			mountName() {
+				this.#names += 1;
+				this.#emit();
+				let live = true;
+				return () => {
+					if (!live) return;
+					live = false;
+					this.#names -= 1;
+					this.#emit();
+				};
+			}
+			/** Plugin-fiber teardown: no mounted name may outlive the apply. */
+			dispose() {
+				this.#names = 0;
+				this.#emit();
+				this.#listeners.clear();
+			}
+			#emit() {
+				for (const listener of [...this.#listeners]) listener();
+			}
+		};
 		/** The globe raster, scaled to the caller's square edge (65:62 source). */
 		function Globe({ size }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
@@ -3275,65 +3634,60 @@ window.__ModuleLoader__.load({
 			});
 		}
 		/**
-		* Whether the host row already renders our wordmark. The wordmark PNG carries
-		* the globe itself, so a mark beside it draws a second globe. The official
-		* shell nests the mark and the name three levels deep in one identity row
-		* (`brandIdentity > brandMark | brandName`), and renders that row as a plain
-		* window-drag span on macOS but a button elsewhere; keying off the wordmark
-		* covers both and never has to read a generated class name.
+		* `sidebar.brand.mark` occupant. It draws the standalone globe only while the
+		* name occupant is not mounted (collapsed rail); in the wide row the complete
+		* wordmark owns the identity and this slot stays empty. Legacy direct callers
+		* without the shared signal keep the globe.
 		*/
-		function sharesRowWithWordmark(host) {
-			let node = host.parentElement;
-			for (let depth = 0; node !== null && depth < 4; depth += 1) {
-				if (node.querySelector("[data-icomposer-brand-asset=\"wordmark\"]") !== null) return true;
-				node = node.parentElement;
-			}
-			return false;
-		}
-		/**
-		* `sidebar.brand.mark` occupant. The slot feeds two surfaces: the wide
-		* identity row (where the wordmark already carries the globe, so the mark must
-		* stay empty) and the collapsed rail toggle (mark only, so the standalone
-		* globe belongs there). The hero has its own surface — see
-		* {@link InsuremoHeroBrandMark} — because it is never part of an identity row.
-		*/
-		function InsuremoBrandMark({ size = 24 }) {
-			const hostRef = (0, react.useRef)(null);
-			const [standalone, setStandalone] = (0, react.useState)(false);
+		function InsuremoBrandMark({ size = 24, brandSignal }) {
+			const nameMounted = (0, react.useSyncExternalStore)(brandSignal?.subscribe ?? noopSubscribe, brandSignal?.getSnapshot ?? alwaysFalse, brandSignal?.getSnapshot ?? alwaysFalse);
+			const [settled, setSettled] = (0, react.useState)(false);
 			(0, react.useLayoutEffect)(() => {
-				const host = hostRef.current;
-				if (host === null) return;
-				setStandalone(!sharesRowWithWordmark(host));
-			}, []);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				ref: hostRef,
-				children: standalone ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Globe, { size }) : null
+				if (brandSignal === void 0 || nameMounted) {
+					setSettled(false);
+					return;
+				}
+				const timer = setTimeout(() => {
+					setSettled(true);
+				}, 0);
+				return () => {
+					clearTimeout(timer);
+				};
+			}, [brandSignal, nameMounted]);
+			if (brandSignal === void 0 || settled && !nameMounted) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				"data-icomposer-brand-mark": "",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Globe, { size })
 			});
+			return null;
 		}
 		/**
 		* `conversation.hero.brand.mark` occupant: the blank-session hero fish slot is
-		* a non-interactive span that never holds the wordmark, so it always keeps the
+		* a non-interactive span that never holds the wordmark, so it keeps the
 		* standalone globe.
 		*/
 		function InsuremoHeroBrandMark({ size = 34 }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Globe, { size }) });
 		}
-		/** The wordmark rendered into `sidebar.brand.name` (99×24, theme-switched
-		* through the same CSS the overlay used). */
-		function InsuremoBrandName() {
+		/**
+		* `sidebar.brand.name` occupant: the complete combined wordmark. It marks the
+		* shared signal as mounted while it is rendered, which suppresses the mark
+		* slot in the same wide row. Light/dark assets switch through local CSS.
+		*/
+		function InsuremoBrandName({ brandSignal }) {
+			(0, react.useLayoutEffect)(() => brandSignal?.mountName(), [brandSignal]);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: BrandChrome_module_css_default.wordmark,
+				className: InsuremoBrand_module_css_default.wordmark,
 				"data-icomposer-brand-asset": "wordmark",
 				"data-emitted-brand-assets": `${insuremo_wordmark_light_default}|${insuremo_wordmark_dark_default}`,
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-					className: BrandChrome_module_css_default.wordmarkLight,
+					className: InsuremoBrand_module_css_default.wordmarkLight,
 					src: `${BRAND_ASSET_URL}/insuremo-wordmark-light.png`,
 					alt: "",
 					width: 312,
 					height: 76,
 					decoding: "async"
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-					className: BrandChrome_module_css_default.wordmarkDark,
+					className: InsuremoBrand_module_css_default.wordmarkDark,
 					src: `${BRAND_ASSET_URL}/insuremo-wordmark-dark.png`,
 					alt: "",
 					width: 312,
@@ -3362,6 +3716,7 @@ window.__ModuleLoader__.load({
 			"picker.empty": "无可用 Profile",
 			"picker.error": "无法连接",
 			"picker.workspaceUnavailable": "当前工作区不可用",
+			"picker.expandSidebar": "请手动展开侧栏后选择 Profile",
 			"picker.project": "项目 Profile",
 			"picker.global": "全局 Profile"
 		};
@@ -3382,6 +3737,7 @@ window.__ModuleLoader__.load({
 			"picker.empty": "No profiles available",
 			"picker.error": "Cannot connect",
 			"picker.workspaceUnavailable": "Workspace unavailable",
+			"picker.expandSidebar": "Expand the sidebar manually to select a Profile",
 			"picker.project": "Project Profiles",
 			"picker.global": "Global Profiles"
 		};
@@ -3393,6 +3749,16 @@ window.__ModuleLoader__.load({
 		const inject$2 = ["slots", "locale"];
 		/** Register the static localized status badge in the sidebar footer. */
 		function apply$2(ctx) {
+			const pickerOverlay = new PickerOverlayController();
+			const pickerFace = () => ({ pickerOverlay });
+			ctx.effect(() => () => {
+				pickerOverlay.dispose();
+			}, "ui-insuremo-status: picker controller");
+			const brandSignal = new BrandSignal();
+			const brandFace = () => ({ brandSignal });
+			ctx.effect(() => () => {
+				brandSignal.dispose();
+			}, "ui-insuremo-status: brand signal");
 			ctx.effect(() => ctx.locale.register(NS$1, {
 				zh: zh$1,
 				en: en$1
@@ -3400,11 +3766,13 @@ window.__ModuleLoader__.load({
 			ctx.slots.inject("sidebar.brand.name", () => ctx.slots.inject("conversation.hero.brand.mark", function* () {
 				yield ctx.slots.register({
 					name: "sidebar.brand.mark",
-					priority: -1
+					priority: -1,
+					inject: brandFace
 				}, InsuremoBrandMark);
 				yield ctx.slots.register({
 					name: "sidebar.brand.name",
-					priority: -1
+					priority: -1,
+					inject: brandFace
 				}, InsuremoBrandName);
 				yield ctx.slots.register({
 					name: "conversation.hero.brand.mark",
@@ -3417,8 +3785,26 @@ window.__ModuleLoader__.load({
 				id: "insuremo-status",
 				order: 10,
 				locale: NS$1,
-				label: () => t("label")
+				label: () => t("label"),
+				inject: pickerFace
 			}, WorkspaceAwareProfilePicker));
+			ctx.slots.inject("shell.overlay", () => {
+				const releaseDeclaration = pickerOverlay.declare();
+				try {
+					const unregister = ctx.slots.register({
+						name: "shell.overlay",
+						id: "insuremo-profile-picker",
+						inject: pickerFace
+					}, PickerOverlay);
+					return () => {
+						releaseDeclaration();
+						unregister();
+					};
+				} catch (error) {
+					releaseDeclaration();
+					throw error;
+				}
+			});
 			ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
 				name: "sidebar.footer.action",
 				id: "insuremo-workspace-health",
@@ -3426,6 +3812,87 @@ window.__ModuleLoader__.load({
 				locale: NS$1,
 				label: () => t("health.strip")
 			}, WorkspaceHealth));
+		}
+		//#endregion
+		//#region ../ui-workbench-jobs/src/client/primitives/icons.tsx
+		/** Outline API glyph; decorative, sized by the caller. */
+		function IconApiOutlineRegular({ size = 16, ...props }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+				...props,
+				width: size,
+				height: size,
+				viewBox: "0 0 24 24",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: "1.8",
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": props["aria-hidden"] ?? true,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+					x: "4",
+					y: "4",
+					width: "16",
+					height: "16",
+					rx: "3"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M9 9h6v6H9z" })]
+			});
+		}
+		//#endregion
+		//#region \0dsh-css:asset
+		const css$2 = ".lrNoAW_dot{background:var(--dsw-alias-label-tertiary,#8a8f98);border-radius:50%;flex:none;display:inline-block}.lrNoAW_dot[data-state=done]{background:var(--dsw-alias-state-success-primary,#2f9e44)}.lrNoAW_dot[data-state=warning]{background:var(--dsw-alias-state-warning-primary,#e8a33d)}.lrNoAW_dot[data-state=error]{background:var(--dsw-alias-state-error-primary,#d64545)}.lrNoAW_dot[data-state=idle]{background:var(--dsw-alias-label-tertiary,#8a8f98)}.lrNoAW_spinner{flex:none;display:inline-block}.lrNoAW_spinnerTrack{fill:none;stroke:var(--dsw-alias-border-secondary,#7f7f7f59);stroke-width:2.5px}.lrNoAW_spinnerArc{fill:none;stroke:var(--dsw-alias-label-secondary,#6b7280);stroke-width:2.5px;stroke-linecap:round;stroke-dasharray:16 44;transform-origin:12px 12px;animation:1s linear infinite lrNoAW_spin}@keyframes lrNoAW_spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.lrNoAW_spinnerArc{animation:none}}";
+		const tagId$2 = "@icomposer/workbench/StateDot.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
+			const tag = document.createElement("style");
+			tag.dataset.plugin = "@icomposer/workbench";
+			tag.dataset.pluginCss = tagId$2;
+			tag.textContent = css$2;
+			document.head.appendChild(tag);
+		}
+		var StateDot_module_css_default = {
+			"dot": "lrNoAW_dot",
+			"spin": "lrNoAW_spin",
+			"spinner": "lrNoAW_spinner",
+			"spinnerArc": "lrNoAW_spinnerArc",
+			"spinnerTrack": "lrNoAW_spinnerTrack"
+		};
+		//#endregion
+		//#region ../ui-workbench-jobs/src/client/primitives/StateDot.tsx
+		/** Plugin-owned state dot (TASK-168a): token colours plus a text/aria signal. */
+		/**
+		* Decorative dot; callers pair it with text (never colour alone). The
+		* `data-state` attribute carries the semantic for styling and tests.
+		*/
+		function StateDot({ state, size, className }) {
+			const edge = size ?? (state === "ongoing" ? 14 : 10);
+			const classes = [StateDot_module_css_default.dot, className].filter((part) => typeof part === "string" && part.length > 0).join(" ");
+			if (state === "ongoing") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+				className: [StateDot_module_css_default.spinner, className].filter(Boolean).join(" "),
+				"data-state": "ongoing",
+				width: edge,
+				height: edge,
+				viewBox: "0 0 24 24",
+				"aria-hidden": "true",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+					className: StateDot_module_css_default.spinnerTrack,
+					cx: "12",
+					cy: "12",
+					r: "9.5"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+					className: StateDot_module_css_default.spinnerArc,
+					cx: "12",
+					cy: "12",
+					r: "9.5"
+				})]
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: classes,
+				"data-state": state,
+				style: {
+					width: edge,
+					height: edge
+				},
+				"aria-hidden": "true"
+			});
 		}
 		//#endregion
 		//#region \0dsh-css:asset
@@ -3464,7 +3931,7 @@ window.__ModuleLoader__.load({
 				"data-job-id": data.jobId,
 				"data-job-status": data.status,
 				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconApiOutlineRegular, {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconApiOutlineRegular, {
 						className: JobNode_module_css_default.icon,
 						size: 14,
 						"aria-hidden": "true"
@@ -3477,7 +3944,7 @@ window.__ModuleLoader__.load({
 						className: JobNode_module_css_default.status,
 						role: "status",
 						"aria-label": status,
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.StateDot, { state: dotState(data.status) }), status]
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StateDot, { state: dotState(data.status) }), status]
 					}),
 					data.progressDigest !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: JobNode_module_css_default.digest,

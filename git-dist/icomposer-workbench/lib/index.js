@@ -180,7 +180,7 @@ const allowsEval = /* @__PURE__*/ cached(() => {
 		return false;
 	}
 });
-function isPlainObject(o) {
+function isPlainObject$1(o) {
 	if (isObject(o) === false) return false;
 	const ctor = o.constructor;
 	if (ctor === void 0) return true;
@@ -191,7 +191,7 @@ function isPlainObject(o) {
 	return true;
 }
 function shallowClone(o) {
-	if (isPlainObject(o)) return { ...o };
+	if (isPlainObject$1(o)) return { ...o };
 	if (Array.isArray(o)) return [...o];
 	if (o instanceof Map) return new Map(o);
 	if (o instanceof Set) return new Set(o);
@@ -274,7 +274,7 @@ function omit(schema, mask) {
 	}));
 }
 function extend(schema, shape) {
-	if (!isPlainObject(shape)) throw new Error("Invalid input to extend: expected a plain object");
+	if (!isPlainObject$1(shape)) throw new Error("Invalid input to extend: expected a plain object");
 	const checks = schema._zod.def.checks;
 	if (checks && checks.length > 0) {
 		const existingShape = schema._zod.def.shape;
@@ -290,7 +290,7 @@ function extend(schema, shape) {
 	} }));
 }
 function safeExtend(schema, shape) {
-	if (!isPlainObject(shape)) throw new Error("Invalid input to safeExtend: expected a plain object");
+	if (!isPlainObject$1(shape)) throw new Error("Invalid input to safeExtend: expected a plain object");
 	return clone(schema, mergeDefs(schema._zod.def, { get shape() {
 		const _shape = {
 			...schema._zod.def.shape,
@@ -1827,7 +1827,7 @@ function mergeValues(a, b) {
 		valid: true,
 		data: a
 	};
-	if (isPlainObject(a) && isPlainObject(b)) {
+	if (isPlainObject$1(a) && isPlainObject$1(b)) {
 		const bKeys = Object.keys(b);
 		const sharedKeys = Object.keys(a).filter((key) => bKeys.indexOf(key) !== -1);
 		const newObj = {
@@ -4264,7 +4264,7 @@ async function applyOperationLog(ctx) {
 }
 //#endregion
 //#region ../workbench-operation-log/src/index.ts
-var src_exports$6 = /* @__PURE__ */ __exportAll({
+var src_exports$5 = /* @__PURE__ */ __exportAll({
 	OPERATION_DECIDED_EVENT: () => OPERATION_DECIDED_EVENT,
 	OPERATION_LOG_SERVICE: () => OPERATION_LOG_SERVICE,
 	OPERATION_RECORDED_EVENT: () => OPERATION_RECORDED_EVENT,
@@ -4272,10 +4272,10 @@ var src_exports$6 = /* @__PURE__ */ __exportAll({
 	OPERATION_SCHEMA_VERSION: () => "0",
 	OperationLogError: () => OperationLogError,
 	OperationLogProvider: () => OperationLogProvider,
-	apply: () => apply$6,
+	apply: () => apply$5,
 	applyOperationLog: () => applyOperationLog,
-	inject: () => inject$7,
-	name: () => name$7,
+	inject: () => inject$5,
+	name: () => name$6,
 	operationDecisionSchema: () => operationDecisionSchema,
 	operationId: () => operationId,
 	operationKindSchema: () => operationKindSchema,
@@ -4284,11 +4284,11 @@ var src_exports$6 = /* @__PURE__ */ __exportAll({
 	operationRecordSchema: () => operationRecordSchema
 });
 /** Loader-facing plugin name. */
-const name$7 = "@icomposer/workbench-operation-log";
+const name$6 = "@icomposer/workbench-operation-log";
 /** The storage-domain form must be available before opening our domain. */
-const inject$7 = ["storageDomain"];
+const inject$5 = ["storageDomain"];
 /** Loader entry point. */
-function apply$6(ctx) {
+function apply$5(ctx) {
 	return applyOperationLog(ctx);
 }
 //#endregion
@@ -4866,22 +4866,22 @@ function toView(record) {
 }
 //#endregion
 //#region ../workspace-binding/src/index.ts
-var src_exports$5 = /* @__PURE__ */ __exportAll({
+var src_exports$4 = /* @__PURE__ */ __exportAll({
 	WORKSPACE_BINDING_ERRORS: () => WORKSPACE_BINDING_ERRORS,
 	WORKSPACE_ICOMPOSER_AUTO_BOUND_EVENT: () => WORKSPACE_ICOMPOSER_AUTO_BOUND_EVENT,
-	apply: () => apply$5,
+	apply: () => apply$4,
 	deriveBindIdentity: () => deriveBindIdentity,
 	detectIcomposerProject: () => detectIcomposerProject,
-	inject: () => inject$6,
+	inject: () => inject$4,
 	mountAutoBind: () => mountAutoBind,
-	name: () => name$6
+	name: () => name$5
 });
 /** Loader-facing plugin name. */
-const name$6 = "@icomposer/workspace-binding";
+const name$5 = "@icomposer/workspace-binding";
 /** Hard inject: storageDomain and workspaceRegistry must be present. */
-const inject$6 = ["storageDomain", "workspaceRegistry"];
+const inject$4 = ["storageDomain", "workspaceRegistry"];
 /** Loader entry point. */
-function apply$5(ctx) {
+function apply$4(ctx) {
 	ctx.plugin(WorkspaceBindingService);
 }
 //#endregion
@@ -5493,14 +5493,14 @@ var IcomposerCatalogService = class extends Service {
 };
 //#endregion
 //#region ../icomposer-catalog/src/index.ts
-var src_exports$4 = /* @__PURE__ */ __exportAll({
-	apply: () => apply$4,
-	inject: () => inject$5,
-	name: () => name$5
+var src_exports$3 = /* @__PURE__ */ __exportAll({
+	apply: () => apply$3,
+	inject: () => inject$3,
+	name: () => name$4
 });
-const name$5 = "@icomposer/icomposer-catalog";
-const inject$5 = ["workspaceBinding"];
-function apply$4(ctx) {
+const name$4 = "@icomposer/icomposer-catalog";
+const inject$3 = ["workspaceBinding"];
+function apply$3(ctx) {
 	ctx.plugin(IcomposerCatalogService);
 }
 //#endregion
@@ -5879,14 +5879,14 @@ function matchAny(kw, ...parts) {
 }
 //#endregion
 //#region ../icomposer-reference/src/index.ts
-var src_exports$3 = /* @__PURE__ */ __exportAll({
-	apply: () => apply$3,
-	inject: () => inject$4,
-	name: () => name$4
+var src_exports$2 = /* @__PURE__ */ __exportAll({
+	apply: () => apply$2,
+	inject: () => inject$2,
+	name: () => name$3
 });
-const name$4 = "@icomposer/icomposer-reference";
-const inject$4 = ["workspaceBinding"];
-function apply$3(ctx) {
+const name$3 = "@icomposer/icomposer-reference";
+const inject$2 = ["workspaceBinding"];
+function apply$2(ctx) {
 	ctx.plugin(IcomposerReferenceService);
 }
 //#endregion
@@ -6614,18 +6614,18 @@ var IcomposerLifecycleService = class extends Service {
 };
 //#endregion
 //#region ../icomposer-lifecycle/src/index.ts
-var src_exports$2 = /* @__PURE__ */ __exportAll({
-	apply: () => apply$2,
-	inject: () => inject$3,
-	name: () => name$3
+var src_exports$1 = /* @__PURE__ */ __exportAll({
+	apply: () => apply$1,
+	inject: () => inject$1,
+	name: () => name$2
 });
-const name$3 = "@icomposer/icomposer-lifecycle";
-const inject$3 = [
+const name$2 = "@icomposer/icomposer-lifecycle";
+const inject$1 = [
 	"subprocess",
 	"workspaceBinding",
 	"imoAuth"
 ];
-function apply$2(ctx, config = {}) {
+function apply$1(ctx, config = {}) {
 	ctx.plugin(IcomposerLifecycleService, config);
 }
 //#endregion
@@ -7325,14 +7325,18 @@ function objectSchema2$2(properties, required) {
 * defineTool factory.
 * @returns one disposer for the registered tool.
 */
-function registerIciTools(ctx, defineTool) {
+function registerIciTools(ctx, defineTool, onRegister) {
 	const disposers = [];
-	disposers.push(ctx.systemPrompt.section({
+	const track = (dispose) => {
+		disposers.push(dispose);
+		onRegister?.(dispose);
+	};
+	track(ctx.systemPrompt.section({
 		name: "tool:ici_query",
 		order: 150,
 		text: "ici_query runs local iComposer Code Intelligence graph queries over a registered workspace canonical path: api-chain walks an API's downstream call tree; impact traces upstream function/method callers to APIs. Use it after a capability hit to inspect one API. To DISCOVER which APIs can do something (by capability, in natural language) use ici_search first; this tool walks a graph, it does not search explanations. No InsureMO binding is required and the operation is read-only."
 	}));
-	disposers.push(ctx.tools.register(defineTool({
+	track(ctx.tools.register(defineTool({
 		name: "icomposer_catalog_list",
 		description: "List the read-only local iComposer asset catalog (api/function/batch/model) of a registered workspace with join status. No InsureMO binding is required.",
 		parameters: {
@@ -7395,7 +7399,7 @@ function registerIciTools(ctx, defineTool) {
 			};
 		}
 	})));
-	disposers.push(ctx.tools.register(defineTool({
+	track(ctx.tools.register(defineTool({
 		name: "icomposer_sdk_query",
 		description: "Query local SDK client operations of a registered workspace by client name and/or keyword. No InsureMO binding is required.",
 		parameters: {
@@ -7463,7 +7467,7 @@ function registerIciTools(ctx, defineTool) {
 			};
 		}
 	})));
-	disposers.push(ctx.tools.register(defineTool({
+	track(ctx.tools.register(defineTool({
 		name: "icomposer_verify_utils",
 		description: "List known iComposer utility classes or search their methods in a registered workspace using the Workbench Active Profile for CLI authentication. Fails closed when that profile is unavailable.",
 		parameters: {
@@ -7541,7 +7545,7 @@ function registerIciTools(ctx, defineTool) {
 			};
 		}
 	})));
-	disposers.push(ctx.tools.register(defineTool({
+	track(ctx.tools.register(defineTool({
 		name: "ici_query",
 		description: "Run local iComposer Code Intelligence graph queries on a registered workspace: mode api-chain walks an API's downstream call tree; mode impact traces upstream callers of a function/method to APIs. No InsureMO binding is required.",
 		parameters: {
@@ -7736,9 +7740,13 @@ function objectSchema2$1(properties, required) {
 * tool using the host defineTool factory.
 * @returns one disposer for the registered tool.
 */
-function registerIciSearchTool(ctx, defineTool) {
+function registerIciSearchTool(ctx, defineTool, onRegister) {
 	const disposers = [];
-	disposers.push(ctx.tools.register(defineTool({
+	const track = (dispose) => {
+		disposers.push(dispose);
+		onRegister?.(dispose);
+	};
+	track(ctx.tools.register(defineTool({
 		name: "ici_search",
 		description: "Find APIs by what they DO, in natural language -- capability discovery over the workspace API explanations (iComposer Code Intelligence). Use this FIRST for questions like 'which APIs can modify the group policy member', 'is there an API that cancels a rider', or 'what handles claim rejection', instead of grepping the source tree. Returns ranked APIs (apiId/apiName/score/evidence); follow up with ici_query (query=api-chain) for the call chain of a hit. Local term-frequency ranking is used and the result is marked degraded when the embedding index or the Workbench Active Profile is unavailable.",
 		parameters: {
@@ -7882,19 +7890,23 @@ function objectSchema2(properties, required) {
 * ones synchronously; `ici_status` is a read-only diagnostics projection.
 * @returns one disposer per registered tool.
 */
-function registerIciJobTools(ctx, defineTool) {
+function registerIciJobTools(ctx, defineTool, onRegister) {
 	const disposers = [];
-	disposers.push(ctx.systemPrompt.section({
+	const track = (dispose) => {
+		disposers.push(dispose);
+		onRegister?.(dispose);
+	};
+	track(ctx.systemPrompt.section({
 		name: "tool:ici_build",
 		order: 150,
 		text: "ici_build builds the local iComposer Code Intelligence graph from a registered workspace canonical path. Small workspaces complete inline; larger ones run as cancellable background jobs."
 	}));
-	disposers.push(ctx.systemPrompt.section({
+	track(ctx.systemPrompt.section({
 		name: "tool:ici_status",
 		order: 150,
 		text: "ici_status reports local iComposer Code Intelligence diagnostics for a registered workspace: snapshot counts, index vectors, staleness, and required-file presence. No InsureMO binding is required."
 	}));
-	disposers.push(ctx.tools.register(defineTool({
+	track(ctx.tools.register(defineTool({
 		name: "ici_build",
 		description: "Build the local iComposer Code Intelligence graph for a registered workspace. No InsureMO binding is required.",
 		parameters: {
@@ -7966,7 +7978,7 @@ function registerIciJobTools(ctx, defineTool) {
 			}, exec);
 		}
 	})));
-	disposers.push(ctx.tools.register(defineTool({
+	track(ctx.tools.register(defineTool({
 		name: "ici_status",
 		description: "Read-only local iComposer Code Intelligence diagnostics for a registered workspace: snapshot counts, staleness, index vectors, and required files. No InsureMO binding is required.",
 		parameters: { workspace_id: {
@@ -8398,14 +8410,18 @@ const TASK_CARD_RULE = "One conversation task is ONE ici_explain call and theref
 * the idle phase after user confirmation via Workbench routes; the Agent never
 * reads sources or finalizes.
 */
-function registerIciExplainTools(ctx, defineTool) {
+function registerIciExplainTools(ctx, defineTool, onRegister) {
 	const ds = [];
-	ds.push(ctx.systemPrompt.section({
+	const track = (dispose) => {
+		ds.push(dispose);
+		onRegister?.(dispose);
+	};
+	track(ctx.systemPrompt.section({
 		name: "tool:ici_explain",
 		order: 150,
 		text: `${TASK_CARD_RULE} ici_explain prepares bounded source-backed explanation plans: it validates the local graph is fresh, then persists schema-3 prepare metadata (complete bounded call chains, exact source ranges with hashes, reference candidates) and awaiting-input job records under .metadata/icomposer/ici/explain/. It does not call any model, read source contents into the transcript, or mark readiness. For one API pass 'query'; for a named set pass 'queries'; for a code group pass 'group'; for the whole workspace pass 'all' — the Host resolves the complete target set for group/all, so never enumerate, shorten, or filter the targets yourself. Make exactly ONE call per task: never call ici_explain repeatedly once per API and never split a task across calls. A refusal (empty result, ambiguous group, same-named APIs at several paths, or an API that already has an active job) is reported explicitly; pass it on to the user instead of working around it. When the refusal is job-active, the result lists the blocking cards (blocked= lines with apiName/jobId/status/createdAt): tell the user those earlier cards are still waiting and that the card offers one cancel per blocker, then the task can be run again. Never repeat the same call hoping it succeeds, and never cancel or adopt anything yourself. After success, the confirmation card is inline at this ici_explain tool call in the current DSH Web conversation on the active 3080 server; ask the user to configure it there, not in a separate Workbench app, CLI, or desktop. Do not use bash or cat to inspect job files to find or advance the card. The user confirms one workspace-relative reference file or directory target, model, and earliest not-before time in the Workbench batch card; the Host queues fresh restricted background Explain Agents during idle maintenance.`
 	}));
-	ds.push(ctx.tools.register(defineTool({
+	track(ctx.tools.register(defineTool({
 		name: "ici_explain",
 		description: "Prepare (only) ONE source-backed explanation task in a registered workspace. Target the task with exactly one of: `query` (one API), `queries` (an explicit list), `group` (one code group — the host resolves every API of that group), or `all` (every API of the workspace). The host resolves the complete target set; never enumerate targets yourself, never split a task into several calls, and never narrow the user's selection. Optional `concurrency` sets how many targets of this task may run at once (default 4, Host ceiling still applies). No model call and no readiness change.",
 		parameters: {
@@ -8536,26 +8552,40 @@ function registerIciExplainTools(ctx, defineTool) {
 */
 function registerIcomposerToolsWith(ctx, defineTool) {
 	const disposers = [];
-	disposers.push(ctx.systemPrompt.section({
-		name: "tool:icomposer_catalog_list",
-		order: 150,
-		text: "icomposer_catalog_list lists the local iComposer asset catalog of a registered workspace (api/function/batch/model, join status vs server metadata). No InsureMO binding is required."
-	}));
-	disposers.push(ctx.systemPrompt.section({
-		name: "tool:icomposer_sdk_query",
-		order: 150,
-		text: "icomposer_sdk_query searches local SDK client operations of a registered workspace by client name or keyword. No InsureMO binding is required."
-	}));
-	disposers.push(ctx.systemPrompt.section({
-		name: "tool:icomposer_verify_utils",
-		order: 150,
-		text: "icomposer_verify_utils lists utility classes or searches utility methods of a registered workspace using the Workbench Active Profile for CLI authentication. It fails closed when that profile is unavailable."
-	}));
-	disposers.push(...registerIciTools(ctx, defineTool));
-	disposers.push(...registerIciSearchTool(ctx, defineTool));
-	disposers.push(...registerIciJobTools(ctx, defineTool));
-	disposers.push(...registerIciExplainTools(ctx, defineTool));
-	return disposers;
+	const track = (dispose) => {
+		disposers.push(dispose);
+	};
+	try {
+		track(ctx.systemPrompt.section({
+			name: "tool:icomposer_catalog_list",
+			order: 150,
+			text: "icomposer_catalog_list lists the local iComposer asset catalog of a registered workspace (api/function/batch/model, join status vs server metadata). No InsureMO binding is required."
+		}));
+		track(ctx.systemPrompt.section({
+			name: "tool:icomposer_sdk_query",
+			order: 150,
+			text: "icomposer_sdk_query searches local SDK client operations of a registered workspace by client name or keyword. No InsureMO binding is required."
+		}));
+		track(ctx.systemPrompt.section({
+			name: "tool:icomposer_verify_utils",
+			order: 150,
+			text: "icomposer_verify_utils lists utility classes or searches utility methods of a registered workspace using the Workbench Active Profile for CLI authentication. It fails closed when that profile is unavailable."
+		}));
+		registerIciTools(ctx, defineTool, track);
+		registerIciSearchTool(ctx, defineTool, track);
+		registerIciJobTools(ctx, defineTool, track);
+		registerIciExplainTools(ctx, defineTool, track);
+		return disposers;
+	} catch (error) {
+		const failures = [];
+		for (const dispose of disposers.splice(0).reverse()) try {
+			dispose();
+		} catch (failure) {
+			failures.push(failure);
+		}
+		if (failures.length > 0) throw new AggregateError([error, ...failures], "iComposer tool registration and rollback failed", { cause: error });
+		throw error;
+	}
 }
 //#endregion
 //#region ../icomposer-verify/src/tools.ts
@@ -8568,24 +8598,57 @@ function registerIcomposerTools(ctx) {
 }
 //#endregion
 //#region ../icomposer-verify/src/tool-service.ts
-/** Persistent root-owned registration for all iComposer/ICI tools. */
+/**
+* Persistent root-owned registration for all iComposer/ICI tools.
+*
+* Ownership uses the public `ctx.effect` lifecycle: the registrar hands back
+* one disposer per tool/prompt, this service keeps them individually and
+* releases them newest-first when the effect tears down. `registerIcomposerTools`
+* is transactional, so a registration that throws midway releases everything
+* it already acquired and rethrows the original error — no leaked tool, no
+* swallowed duplicate-name conflict, and never another owner's registration.
+*
+* Public lifecycle only (TASK-169): the effect teardown runs after the
+* owner's `dispose()` promise is awaited. Earlier code also listened to the
+* internal `internal/plugin` event to release synchronously on the dispose
+* turn; that private dependency and its stronger same-turn invariant were
+* removed. A caller that registers a duplicate before awaiting disposal can
+* therefore observe the registry's duplicate error; callers that await the
+* disposal get a fully released owner.
+*/
 var IcomposerVerifyToolService = class extends Service {
 	static inject = ["tools", "systemPrompt"];
-	#disposers = [];
+	#releases = [];
 	constructor(ctx) {
 		super(ctx, "icomposerVerifyTools");
 		this.disposeTools = this.disposeTools.bind(this);
 	}
 	[Service.init]() {
-		this.#disposers = registerIcomposerTools(this.ctx);
-		this.ctx.effect(() => () => this.disposeTools(), "icomposerVerifyTools.dispose");
-		const ownerFiber = this.ctx.fiber;
-		this.ctx.on("internal/plugin", (fiber) => {
-			if (fiber === ownerFiber) this.disposeTools();
-		});
+		const ctx = this.ctx;
+		ctx.effect(() => {
+			this.#releases = [];
+			const disposers = registerIcomposerTools(ctx);
+			for (const dispose of disposers) {
+				let live = true;
+				this.#releases.push(() => {
+					if (!live) return;
+					live = false;
+					dispose();
+				});
+			}
+			return () => this.disposeTools();
+		}, "icomposerVerifyTools.registration");
 	}
+	/** Release this service's own handles now; safe to call more than once. */
 	disposeTools() {
-		for (const dispose of this.#disposers.splice(0).reverse()) dispose();
+		const releases = this.#releases.splice(0).reverse();
+		const failures = [];
+		for (const release of releases) try {
+			release();
+		} catch (error) {
+			failures.push(error);
+		}
+		if (failures.length > 0) throw new AggregateError(failures, "failed to release iComposer tool registrations");
 	}
 };
 //#endregion
@@ -14040,7 +14103,7 @@ function effectivePromptBudget(ctx) {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : EXPLAIN_DEFAULT_PROMPT_BYTES;
 }
 const MAX_FLOW_ITEMS = 64;
-const MAX_TIMER_MS = 2147e6;
+const MAX_TIMER_MS$1 = 2147e6;
 const MAX_READ_FILES = 20;
 const MAX_LIST_ENTRIES = 200;
 const MAX_SUBMIT_ATTEMPTS = 3;
@@ -14908,7 +14971,7 @@ var ExplainScheduler = class extends Service {
 	armTimer(job) {
 		const target = Date.parse(job.notBefore ?? "");
 		if (!Number.isFinite(target)) return;
-		const delay = Math.min(MAX_TIMER_MS, Math.max(0, target - Date.now()));
+		const delay = Math.min(MAX_TIMER_MS$1, Math.max(0, target - Date.now()));
 		const existing = this.timers.get(job.jobId);
 		if (existing && this.timerTargets.get(job.jobId) === target) return;
 		if (existing) clearTimeout(existing);
@@ -20080,25 +20143,25 @@ var IcomposerWriteService = class extends Service {
 };
 //#endregion
 //#region ../icomposer-write/src/index.ts
-var src_exports$1 = /* @__PURE__ */ __exportAll({
-	apply: () => apply$1,
+var src_exports = /* @__PURE__ */ __exportAll({
+	apply: () => apply,
 	assetJoinState: () => assetJoinState,
-	inject: () => inject$2,
-	name: () => name$2,
+	inject: () => inject,
+	name: () => name$1,
 	readTestArtifact: () => readTestArtifact,
 	writeBaseDir: () => writeBaseDir
 });
 /** Loader-facing plugin name. */
-const name$2 = "@icomposer/icomposer-write";
+const name$1 = "@icomposer/icomposer-write";
 /** Host-only; the operation log must be present for receipted writes. */
-const inject$2 = [
+const inject = [
 	"subprocess",
 	"workspaceBinding",
 	"imoAuth",
 	"operationLog"
 ];
 /** Loader entry point. */
-function apply$1(ctx, config = {}) {
+function apply(ctx, config = {}) {
 	ctx.plugin(IcomposerWriteService, config);
 }
 //#endregion
@@ -30357,16 +30420,6 @@ const SKILL_SCENARIOS = [
 //#region ../insuremo-service/src/skill-actions/catalog.ts
 /** The source alias is fixed by the product; it is never accepted from a request. */
 const SKILLS_TOOL_SOURCE = "insuremo-skills";
-/** Human-readable `add -l` output is bounded before it reaches this parser. */
-const SKILL_CATALOG_OUTPUT_LIMIT_BYTES = 65536;
-/**
-* Description bound. The real 1.1.2 macOS capture (`add -l`, 36 skills) measures
-* a maximum joined description of 1618 characters; the Windows capture wraps the
-* same descriptions as single long lines (14 rows above 500). 4096 keeps roughly
-* 2.5x headroom for longer future descriptions while staying bounded — an
-* over-limit description is still rejected (fail closed).
-*/
-const SKILL_CATALOG_DESCRIPTION_MAX = 4096;
 const SKILL_CATALOG_TTL_MS = 6e4;
 const ANSI_ESCAPE$1 = /\u001B(?:\](?:[^\u0007\u001B]|\u001B(?=\\))*\u0007|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
@@ -30601,8 +30654,6 @@ function isEmptySkillCatalogOutput(output) {
 	}
 	return foundStatus === 1 && foundDetail === 1;
 }
-/** Alias kept short for callers that do not need the implementation detail. */
-const parseCatalogOutput = parseSkillCatalogOutput;
 /** Add the fixed, server-owned scenario choices to a successfully parsed source catalog. */
 function buildSkillCatalog(parsed, now = Date.now(), ttlMs = SKILL_CATALOG_TTL_MS) {
 	const safeTtl = Number.isFinite(ttlMs) ? Math.max(1, Math.min(ttlMs, 3e5)) : SKILL_CATALOG_TTL_MS;
@@ -31112,12 +31163,30 @@ function faceError(error, fallback) {
 */
 function mountWriteRoutes(ctx) {
 	const disposers = [];
+	const dispose = () => {
+		const errors = [];
+		for (const release of disposers.splice(0).reverse()) try {
+			release();
+		} catch (error) {
+			errors.push(error);
+		}
+		if (errors.length > 0) throw new AggregateError(errors, "failed to release InsureMO write routes");
+	};
 	const register = (route) => {
-		disposers.push(ctx.webServer.register({
-			kind: "exact",
-			path: route.path,
-			handler: (req, res) => route.handle(req, res)
-		}));
+		try {
+			disposers.push(ctx.webServer.register({
+				kind: "exact",
+				path: route.path,
+				handler: (req, res) => route.handle(req, res)
+			}));
+		} catch (error) {
+			try {
+				dispose();
+			} catch (rollbackError) {
+				throw new AggregateError([error, rollbackError], "write route registration and rollback failed", { cause: error });
+			}
+			throw error;
+		}
 	};
 	register(actionRoute(`${ACTIONS_PREFIX}/imo-upgrade`, async (body, signal) => {
 		const upgrade = ctx.get("imoUpgrade");
@@ -31358,9 +31427,7 @@ function mountWriteRoutes(ctx) {
 			return faceError(void 0, "action-failed");
 		}
 	}));
-	return () => {
-		for (const dispose of disposers) dispose();
-	};
+	return dispose;
 }
 function directSkillOutcome(outcome) {
 	if (!outcome.ok) return faceError(outcome.error, "action-failed");
@@ -31389,40 +31456,42 @@ function optionsActivationController(ctx) {
 function setActivationControllerOnContext(ctx, controller) {
 	ctx.__insuremoActivationController = controller;
 }
-/**
-* Route/section host for the InsureMO UI bridges.
-*
-* Registration happens DIRECTLY in `[Service.init]` — not via `ctx.effect`.
-* Effects registered by plugins mounted inside a loader entry were observed
-* to be swept ~25ms after mount (the entry fiber's pre-activation epoch
-* unloads effect runners that never reached ACTIVE), which silently removed
-* every route while the process kept serving (`overview 404` with a clean
-* boot). Direct registration with an idempotence guard keeps the routes for
-* the process lifetime; disposers are only invoked on fiber unload via the
-* service registry teardown (and double-registration is tolerated).
-*/
+/** Route/section host for the InsureMO UI bridges. */
 var InsuremoRoutesService = class extends Service {
 	static inject = ["webServer"];
 	#activationController;
-	#disposers = [];
-	#registered = false;
 	/** Capture point for the activation controller (composition wiring). */
 	setActivationController(controller) {
 		this.#activationController = controller;
 	}
-	async [Service.init]() {
-		if (this.#registered) return;
-		this.#registered = true;
+	[Service.init]() {
 		const ctx = this.ctx;
-		const safe = (register) => {
+		ctx.effect(() => {
+			const disposers = [];
+			const dispose = () => {
+				const errors = [];
+				for (const release of disposers.splice(0).reverse()) try {
+					release();
+				} catch (error) {
+					errors.push(error);
+				}
+				if (errors.length > 0) throw new AggregateError(errors, "failed to release InsureMO routes");
+			};
 			try {
-				this.#disposers.push(register());
-			} catch {}
-		};
-		safe(() => mountOverviewRoute(ctx));
-		safe(() => mountSkillCatalogRoute(ctx));
-		safe(() => mountWriteRoutes(ctx));
-		safe(() => mountWorkspacesStatusRoute(ctx));
+				disposers.push(mountOverviewRoute(ctx));
+				disposers.push(mountSkillCatalogRoute(ctx));
+				disposers.push(mountWriteRoutes(ctx));
+				disposers.push(mountWorkspacesStatusRoute(ctx));
+			} catch (error) {
+				try {
+					dispose();
+				} catch (rollbackError) {
+					throw new AggregateError([error, rollbackError], "route registration and rollback failed", { cause: error });
+				}
+				throw error;
+			}
+			return dispose;
+		}, "insuremo routes");
 	}
 };
 //#endregion
@@ -35380,83 +35449,8 @@ function executionFailure(code, message, operationId) {
 }
 //#endregion
 //#region ../insuremo-service/src/index.ts
-var src_exports = /* @__PURE__ */ __exportAll({
-	ACTIVE_PROFILE_CHANGED_EVENT: () => ACTIVE_PROFILE_CHANGED_EVENT,
-	AUTH_ACTION_COMPLETED_EVENT: () => AUTH_ACTION_COMPLETED_EVENT,
-	AUTH_ACTION_FAILED_EVENT: () => AUTH_ACTION_FAILED_EVENT,
-	AUTH_CACHE_INVALIDATED_EVENT: () => AUTH_CACHE_INVALIDATED_EVENT,
-	AUTH_LEASE_REVOKED_CODE: () => AUTH_LEASE_REVOKED_CODE,
-	AUTH_PREPARE_INVALIDATED_CODE: () => AUTH_PREPARE_INVALIDATED_CODE,
-	AUTH_SERVICE_DISPOSED_CODE: () => AUTH_SERVICE_DISPOSED_CODE,
-	Config: () => Config,
-	DEFAULT_SMOKE_COMMANDS: () => DEFAULT_SMOKE_COMMANDS,
-	IMO_AUTH_DEFAULT_KIND: () => IMO_AUTH_DEFAULT_KIND,
-	IMO_AUTH_LOGIN_KIND: () => IMO_AUTH_LOGIN_KIND,
-	IMO_AUTH_REMOTE_KIND: () => IMO_AUTH_REMOTE_KIND,
-	IMO_INSTALL_COMPLETED_EVENT: () => IMO_INSTALL_COMPLETED_EVENT,
-	IMO_INSTALL_FAILED_EVENT: () => IMO_INSTALL_FAILED_EVENT,
-	IMO_PACKAGE: () => IMO_PACKAGE,
-	IMO_REGISTRY: () => IMO_REGISTRY,
-	IMO_REGISTRY_SCOPE: () => IMO_REGISTRY_SCOPE,
-	IMO_UPGRADE_COMPLETED_EVENT: () => IMO_UPGRADE_COMPLETED_EVENT,
-	IMO_UPGRADE_FAILED_EVENT: () => IMO_UPGRADE_FAILED_EVENT,
-	INSUREMO_SKILL_CATALOG_INVALIDATE_EVENT: () => INSUREMO_SKILL_CATALOG_INVALIDATE_EVENT,
-	INSUREMO_SKILL_PROVIDER: () => INSUREMO_SKILL_PROVIDER,
-	INSUREMO_SKILL_RANK: () => 450,
-	INSUREMO_SKILL_SOURCE: () => INSUREMO_SKILL_SOURCE,
-	ImoActiveProfileService: () => ImoActiveProfileService,
-	ImoAuthActionsService: () => ImoAuthActionsService,
-	ImoAuthLeaseRevokedError: () => ImoAuthLeaseRevokedError,
-	ImoAuthService: () => ImoAuthService,
-	ImoCliService: () => ImoCliService,
-	ImoInstallService: () => ImoInstallService,
-	ImoOverviewService: () => ImoOverviewService,
-	ImoProfileContextService: () => ImoProfileContextService,
-	ImoSkillsService: () => ImoSkillsService,
-	ImoUpgradeService: () => ImoUpgradeService,
-	InsuremoAgentSkillMaskService: () => InsuremoAgentSkillMaskService,
-	InsuremoSkillProviderService: () => InsuremoSkillProviderService,
-	OVERVIEW_PATH: () => OVERVIEW_PATH,
-	SETTINGS_NAMESPACE: () => SETTINGS_NAMESPACE,
-	SKILLS_INVENTORY_UPDATED_EVENT: () => SKILLS_INVENTORY_UPDATED_EVENT,
-	SKILLS_TOOL_COMMAND: () => "npx",
-	SKILLS_TOOL_PACKAGE: () => SKILLS_TOOL_PACKAGE,
-	SKILLS_TOOL_REGISTRY: () => SKILLS_TOOL_REGISTRY,
-	SKILLS_TOOL_SOURCE: () => SKILLS_TOOL_SOURCE,
-	SKILL_ACTION_COMPLETED_EVENT: () => SKILL_ACTION_COMPLETED_EVENT,
-	SKILL_ACTION_FAILED_EVENT: () => SKILL_ACTION_FAILED_EVENT,
-	SKILL_ACTIVATION_CHANGED_EVENT: () => SKILL_ACTIVATION_CHANGED_EVENT,
-	SKILL_ACTIVATION_DOMAIN_NAME: () => SKILL_ACTIVATION_DOMAIN_NAME,
-	SKILL_ACTIVATION_KIND: () => SKILL_ACTIVATION_KIND,
-	SKILL_CATALOG_DESCRIPTION_MAX: () => SKILL_CATALOG_DESCRIPTION_MAX,
-	SKILL_CATALOG_MAX_ENTRIES: () => 128,
-	SKILL_CATALOG_OUTPUT_LIMIT_BYTES: () => SKILL_CATALOG_OUTPUT_LIMIT_BYTES,
-	SKILL_CATALOG_PATH: () => SKILL_CATALOG_PATH,
-	SKILL_CATALOG_SCHEMA_VERSION: () => "1",
-	SKILL_CATALOG_TTL_MS: () => SKILL_CATALOG_TTL_MS,
-	SKILL_INSTALL_KIND: () => SKILL_INSTALL_KIND,
-	SKILL_REMOVE_KIND: () => SKILL_REMOVE_KIND,
-	SKILL_UPDATE_KIND: () => SKILL_UPDATE_KIND,
-	WORKSPACE_ID_PATTERN: () => WORKSPACE_ID_PATTERN,
-	activeProfileDomain: () => activeProfileDomain,
-	apply: () => apply,
-	buildSkillCatalog: () => buildSkillCatalog,
-	catalogSkillNames: () => catalogSkillNames,
-	default: () => src_default,
-	inject: () => inject$1,
-	invalidateInsuremoSkillCatalog: () => invalidateInsuremoSkillCatalog,
-	isEmptySkillCatalogOutput: () => isEmptySkillCatalogOutput,
-	name: () => name$1,
-	parseCatalogOutput: () => parseCatalogOutput,
-	parseSkillCatalogOutput: () => parseSkillCatalogOutput,
-	parseWorkspaceId: () => parseWorkspaceId,
-	resolveConfig: () => resolveConfig,
-	resolveWorkspace: () => resolveWorkspace,
-	skillCatalogArgs: () => skillCatalogArgs,
-	workspaceScopeKey: () => workspaceScopeKey
-});
-/** Services required by this Host-only package. */
-const inject$1 = [
+/** Services required by the full multi-service mount (see `insuremoServiceMount`). */
+const MOUNT_INJECT = [
 	"subprocess",
 	"operationLog",
 	"skills",
@@ -35465,8 +35459,8 @@ const inject$1 = [
 	"webServer",
 	"agents"
 ];
-/** Loader-facing plugin name. */
-const name$1 = "@icomposer/insuremo-service";
+/** Loader-facing plugin name of the full multi-service mount. */
+const MOUNT_NAME = "@icomposer/insuremo-service";
 /**
 * Settings namespace served on the Host so the Plugins settings tab
 * dispatches our card (TASK-039). The card is display + one-shot actions —
@@ -35475,7 +35469,7 @@ const name$1 = "@icomposer/insuremo-service";
 */
 const SETTINGS_NAMESPACE = "insuremo";
 /** Mount all Host service fibers; the package-level config is loader-optional. */
-function apply(ctx, config = {}) {
+function mountAll(ctx, config = {}) {
 	ctx.inject(["settings"], (injected) => {
 		try {
 			injected.settings.register(SETTINGS_NAMESPACE, z.object({ placeholder: z.string().default("insuremo") }), { base: {} });
@@ -35484,33 +35478,202 @@ function apply(ctx, config = {}) {
 		}
 	});
 	const merged = resolveConfig(config);
-	ctx.plugin(ImoCliService, merged);
-	ctx.plugin(ImoUpgradeService, merged);
-	ctx.plugin(ImoInstallService);
-	ctx.plugin(ImoSkillsService, merged);
+	mountChild(ctx, "imoCli", ImoCliService, merged);
+	mountChild(ctx, "imoUpgrade", ImoUpgradeService, merged);
+	mountChild(ctx, "imoInstall", ImoInstallService);
+	mountChild(ctx, "imoSkills", ImoSkillsService, merged);
 	let actionsMounted = false;
-	ctx.plugin(InsuremoRoutesService);
-	ctx.plugin(ImoSkillActivationService, { onController: (controller) => {
+	mountChild(ctx, "routes", InsuremoRoutesService);
+	mountChild(ctx, "skillActivation", ImoSkillActivationService, { onController: (controller) => {
 		setActivationControllerOnContext(ctx, controller);
 		if (actionsMounted) return;
 		actionsMounted = true;
-		ctx.plugin(ImoSkillActionsService, merged);
+		mountChild(ctx, "skillActions", ImoSkillActionsService, merged);
 	} });
-	ctx.plugin(ImoAuthService, merged);
-	ctx.plugin(ImoActiveProfileService, {});
-	ctx.plugin(ImoAuthActionsService, merged);
-	ctx.plugin(ImoOverviewService, merged);
-	ctx.plugin(InsuremoSkillProviderService, {
+	mountChild(ctx, "imoAuth", ImoAuthService, merged);
+	mountChild(ctx, "activeProfile", ImoActiveProfileService, {});
+	mountChild(ctx, "authActions", ImoAuthActionsService, merged);
+	mountChild(ctx, "overview", ImoOverviewService, merged);
+	mountChild(ctx, "skillProvider", InsuremoSkillProviderService, {
 		skillOverlayEnabled: merged.skillOverlayEnabled,
 		skillOverlayNames: merged.skillOverlayNames
 	});
-	ctx.plugin(InsuremoAgentSkillMaskService, {
+	mountChild(ctx, "agentSkillMask", InsuremoAgentSkillMaskService, {
 		skillOverlayEnabled: merged.skillOverlayEnabled,
 		skillOverlayNames: merged.skillOverlayNames
 	});
-	ctx.plugin(ImoProfileContextService, {});
+	mountChild(ctx, "profileContext", ImoProfileContextService, {});
 }
-var src_default = ImoCliService;
+/**
+* Mount one child and make an activation-time failure observable without
+* stopping the other children. These mounts are deliberately not awaited, so
+* `apply()` never stays open on a child whose `inject` is not satisfied yet.
+* That is a bounded observation window, not a blocking composition design: Cordis
+* `Fiber.await()` resolves immediately for a PENDING fiber (there is no
+* in-flight transition to wait on), so a later activation failure is reported
+* by the host's own fiber error log instead of this helper. See
+* `reportChildFailure` for exactly what this package adds.
+*/
+function mountChild(ctx, label, plugin, config) {
+	let fiber;
+	try {
+		fiber = ctx.plugin(plugin, config);
+	} catch (error) {
+		reportChildFailure(ctx, label, error);
+		return;
+	}
+	fiber.await().catch((error) => reportChildFailure(ctx, label, error));
+}
+/**
+* Fixed, bounded record for a failure observed while this mount turn settles
+* (a child that fails on the spot or during its first activation). It never
+* includes raw output or credentials. A child that activates only after a
+* later dependency arrives is outside this window: Cordis reports that failure
+* through its own fiber error log, without this label and without this
+* truncation.
+*/
+function reportChildFailure(ctx, label, error) {
+	const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+	ctx.logger?.error("insuremo-service: child %s failed: %s", label, message);
+}
+/**
+* Full multi-service mount as an explicit object plugin.
+*
+* The package root keeps a single default export (`ImoCliService`) so the
+* standalone loader entry still selects the CLI-only class. The aggregate
+* imports this object and passes it to `ctx.plugin`, so the root no longer
+* exposes two competing plugin shapes (default class + top-level `apply`).
+*/
+const insuremoServiceMount = Object.freeze({
+	name: MOUNT_NAME,
+	inject: MOUNT_INJECT,
+	apply: mountAll
+});
+//#endregion
+//#region src/config.ts
+/**
+* Real nested loader schema for the aggregate (`WorkbenchDistService.Config`).
+*
+* Every field is an optional object. Object-level and leaf validators are
+* transform-based because schemastery's built-in messages echo the offending
+* value (`expected object but got …`, `expected number but got …`); with a real
+* config value that text would land in the fiber error log. The messages here
+* carry the field path and the rule only. `insuremoService` reuses the existing
+* Insuremo `Config` schema and rewrites the host's `but got …` tail, so its
+* defaults and clamps stay exactly as before (`resolveConfig` still normalizes
+* 300_000/5_000; it does not reject).
+*
+* `lifecycle`/`verify`/`write` come from one definition whose defaults match
+* their service constructors (`imo`, 30_000 ms); only the diagnostic prefix
+* differs so a rejection names the right field.
+*/
+const MAX_TIMER_MS = 2147483647;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+function reject(label, rule) {
+	throw new TypeError(`${label} ${rule}`);
+}
+function isPlainObject(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+/** Strip the host's `but got <value>` tail while keeping its path/rule prefix. */
+function withoutValueEcho(error, fallback) {
+	const message = error instanceof Error ? error.message : fallback;
+	return new TypeError(message.replace(/ but got[\s\S]*$/, ""));
+}
+/**
+* Object-level field: reject a non-object before schemastery's native object
+* resolver can echo it, then validate the real nested shape (unknown keys are
+* still merged by the non-strict resolver).
+*/
+function objectField(prefix, shape) {
+	const schema = z.object(shape);
+	return z.transform(z.any(), (value) => {
+		if (!isPlainObject(value)) reject(prefix, "must be an object");
+		try {
+			return schema(value);
+		} catch (error) {
+			throw withoutValueEcho(error, `${prefix} is invalid`);
+		}
+	});
+}
+const commandField = (label) => z.transform(z.any(), (value) => {
+	if (typeof value !== "string" || value.length === 0) reject(label, "must be a non-empty string");
+	if (CONTROL_CHARACTERS.test(value)) reject(label, "must not contain control characters");
+	return value;
+}).default("imo");
+const timeoutField = (label) => z.transform(z.any(), (value) => {
+	if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) reject(label, "must be an integer");
+	if (value < 1 || value > MAX_TIMER_MS) reject(label, `must be between 1 and ${MAX_TIMER_MS}`);
+	return value;
+}).default(3e4);
+/** Shared CLI sub-config definition; defaults match the service constructors. */
+const createCliServiceConfig = (prefix) => objectField(prefix, {
+	command: commandField(`${prefix}.command`),
+	timeoutMs: timeoutField(`${prefix}.timeoutMs`)
+});
+createCliServiceConfig("$.cli");
+/**
+* Insuremo's existing schema, reused unchanged, with the host's value echo
+* removed from validation messages. No field is re-declared here.
+*/
+const insuremoServiceField = z.transform(z.any(), (value) => {
+	if (!isPlainObject(value)) reject("$.insuremoService", "must be an object");
+	try {
+		return Config(value, { path: ["insuremoService"] });
+	} catch (error) {
+		throw withoutValueEcho(error, "$.insuremoService is invalid");
+	}
+}).default({});
+/** Loader-validated aggregate config; each field may be omitted. */
+const workbenchConfigSchema = objectField("$", {
+	lifecycle: createCliServiceConfig("$.lifecycle").default({}),
+	verify: createCliServiceConfig("$.verify").default({}),
+	write: createCliServiceConfig("$.write").default({}),
+	insuremoService: insuremoServiceField
+});
+/** Known keys per top-level field (unknown keys stay merged, D4 compatibility). */
+const KNOWN_KEYS = {
+	lifecycle: ["command", "timeoutMs"],
+	verify: ["command", "timeoutMs"],
+	write: ["command", "timeoutMs"],
+	insuremoService: [
+		"command",
+		"timeoutMs",
+		"skillActionTimeoutMs",
+		"upgradeTimeoutMs",
+		"smokeCommands",
+		"allowedGitHosts",
+		"overviewTtlMs",
+		"skillOverlayEnabled",
+		"skillOverlayNames"
+	]
+};
+const SAFE_KEY = /^[A-Za-z0-9_-]{1,64}$/;
+function keyText(key) {
+	return SAFE_KEY.test(key) ? key : "<unprintable-key>";
+}
+/**
+* Unknown key paths retained by the non-strict object resolver. Returns key
+* names only — never values — so a secret accidentally written as a key name
+* cannot reach the log verbatim; unsafe characters are redacted. Detection is
+* one level deep inside the four known top-level fields: a deeper unknown
+* object (e.g. `lifecycle.surprise.deeper`) is reported as its first unknown
+* segment only. That bound keeps the warning short and value-free.
+*/
+function unknownConfigKeys(config) {
+	if (typeof config !== "object" || config === null || Array.isArray(config)) return [];
+	const found = [];
+	for (const [key, value] of Object.entries(config)) {
+		const known = KNOWN_KEYS[key];
+		if (known === void 0) {
+			found.push(keyText(key));
+			continue;
+		}
+		if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+		for (const nested of Object.keys(value)) if (!known.includes(nested)) found.push(`${keyText(key)}.${keyText(nested)}`);
+	}
+	return found.slice(0, 20);
+}
 //#endregion
 //#region ../ui-insuremo-status/src/brand-assets-server.ts
 /** Stable public namespace shared by standalone and aggregate Workbench bundles. */
@@ -35576,8 +35739,13 @@ async function serveBrandAsset(req, res, assetRoot) {
 */
 /** Loader-facing plugin name (the distributable package identity). */
 const name = "@icomposer/workbench";
-/** Union of every sub-plugin's inject — the loader provides them all up front. */
-const inject = [
+/**
+* Root services the aggregate needs from the loader patch. Single source for
+* both `WorkbenchDistService.static inject` and the dist patch entry; the test
+* suite asserts the YAML list equals this constant. `systemPrompt` stays a
+* child-level dependency (`IcomposerVerifyToolService`), not a root hard one.
+*/
+const WORKBENCH_ROOT_INJECT = [
 	"subprocess",
 	"storageDomain",
 	"workspaceRegistry",
@@ -35587,17 +35755,24 @@ const inject = [
 	"jobs",
 	"llm",
 	"agents",
-	"directoryPicker",
-	"systemPrompt"
+	"directoryPicker"
 ];
 /**
 * Aggregate mount service: the service shell first (imoAuth + faces + routes),
 * then registries, then the imoAuth-injecting readers/writers.
 */
 var WorkbenchDistService = class extends Service {
+	static inject = WORKBENCH_ROOT_INJECT;
+	/**
+	* Loader-facing nested config. Validation happens before `[Service.init]`,
+	* so a rejected value leaves no service or route partially mounted.
+	*/
+	static Config = workbenchConfigSchema;
 	constructor(ctx, config = {}) {
 		super(ctx, "@icomposer/workbench");
 		this.#config = config;
+		const unknown = unknownConfigKeys(config);
+		if (unknown.length > 0) ctx.logger?.warn("workbench config keeps unknown keys (ignored by the Workbench): %s", unknown.join(", "));
 	}
 	#config;
 	async [Service.init]() {
@@ -35608,12 +35783,12 @@ var WorkbenchDistService = class extends Service {
 			path: BRAND_ASSET_ROUTE,
 			handler: (req, res) => serveBrandAsset(req, res, assetRoot)
 		}), "@icomposer/workbench: emitted brand assets");
-		await ctx.plugin(src_exports, this.#config.insuremoService);
-		await ctx.plugin(src_exports$6);
+		await ctx.plugin(insuremoServiceMount, this.#config.insuremoService);
 		await ctx.plugin(src_exports$5);
 		await ctx.plugin(src_exports$4);
 		await ctx.plugin(src_exports$3);
-		await ctx.plugin(src_exports$2, this.#config.lifecycle);
+		await ctx.plugin(src_exports$2);
+		await ctx.plugin(src_exports$1, this.#config.lifecycle);
 		await ctx.plugin(IcomposerVerifyService, this.#config.verify);
 		await ctx.plugin(IciContextService);
 		await ctx.plugin(IciEngineService);
@@ -35621,8 +35796,8 @@ var WorkbenchDistService = class extends Service {
 		await ctx.plugin(ExplainScheduler);
 		await ctx.plugin(ExplainRoutesService);
 		await ctx.plugin(IcomposerVerifyToolService);
-		await ctx.plugin(src_exports$1, this.#config.write);
+		await ctx.plugin(src_exports, this.#config.write);
 	}
 };
 //#endregion
-export { WorkbenchDistService, WorkbenchDistService as default, inject, name };
+export { WORKBENCH_ROOT_INJECT, WorkbenchDistService, WorkbenchDistService as default, name };

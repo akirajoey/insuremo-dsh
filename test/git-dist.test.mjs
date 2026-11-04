@@ -27,7 +27,7 @@ const walk = dir => readdirSync(dir).flatMap(name => {
 });
 
 test("git-dist exists with the required tracked file manifest", () => {
-  for (const required of ["package.json", "cordis.patch.yml", "README.md", "lib/index.js", "lib/client.js", "lib/assets/insuremo-globe.png"]) {
+  for (const required of ["package.json", "cordis.patch.yml", "README.md", "icon.svg", "locale/zh.json", "locale/en.json", "lib/index.js", "lib/client.js", "lib/assets/insuremo-globe.png"]) {
     assert.equal(existsSync(join(gitDist, required)), true, `missing ${required}`);
   }
   const libIgnored = (() => {
@@ -65,6 +65,11 @@ test("built JS never imports TypeScript sources", () => {
 test("bundle payload is self-contained: patch, README, and entry exports resolve", () => {
   const manifest = JSON.parse(readFileSync(join(gitDist, "package.json"), "utf8"));
   for (const target of Object.values(manifest.exports)) {
+    if (target.includes("*")) {
+      const dir = join(gitDist, target.slice(0, target.lastIndexOf("/")));
+      assert.equal(existsSync(dir) && readdirSync(dir).length > 0, true, `export glob has no files: ${target}`);
+      continue;
+    }
     const resolved = join(gitDist, target);
     assert.equal(existsSync(resolved), true, `export target missing: ${target}`);
   }
