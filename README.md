@@ -28,8 +28,16 @@ Workbench 的包修改。
 > 保留 `main`（源码）与本分发分支；`plugin-dist`、`plugin-dist-0.2`、`release/*`、
 > `desktop`、`upgrade/*` 已退役。安装以本分发分支或候选 tgz 为准。
 
+### 0.1.3 Windows containment 热修
+
+版本仍为 **0.1.3**（不升 0.1.4、不移动既有 tag）。本次热修对应源码 commit
+`2cd60d9c02cf41bcef8aa197d572e6fc7c2212db`：修复五处 workspace containment 在
+Windows 反斜杠路径下的误拒绝，已做 Win32 语义与 macOS 本机 fixture 回归；
+**Windows 现场 E2E 仍待用户测试**。此前 Windows Skills 安装复测不代表本次 ICI/Catalog
+修复已通过；dsh 仍为 `0.2.1-rc.2`，未声称 rc.5。
+
 主 spec：`github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`
-可复现 pin：`github:akirajoey/insuremo-dsh#f5c8eeab3c46e5cdba72f5027a0e6b833de024df`（该 SHA 是 0.1.3 payload 的固定版本，等价于当前分发分支尖端）
+可复现 pin：`github:akirajoey/insuremo-dsh#f5c8eeab3c46e5cdba72f5027a0e6b833de024df`（原 0.1.3 历史回退，不含本次 Windows containment 修复；测试热修请用分发分支新 SHA）
 
 > spec 建议整体加引号：`#`/`&` 在 shell 里都有特殊含义（Windows 上引号内即安全；
 > 含 `&path:` 的旧形式尤其必须加引号）。
@@ -59,7 +67,7 @@ DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/b
 # 跟随发布分支（/usr/bin/env 用绝对路径，绕开 shell 别名与 grc 等包装）
 /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
-# 可复现：pin 到 0.1.3 payload（等价当前分发分支尖端）
+# 可复现：pin 到原 0.1.3（不含本次 Windows 修复；热修请用分发分支新 SHA）
 /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#f5c8eeab3c46e5cdba72f5027a0e6b833de024df"
 ```
 
@@ -81,7 +89,7 @@ PowerShell：
 ```powershell
 Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
 dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
-# pin（0.1.3 payload 固定版本，等价当前分发分支尖端）
+# pin（原 0.1.3，不含本次 Windows 修复；热修请用分发分支新 SHA）
 dsh plugin --profile desktop add "github:akirajoey/insuremo-dsh#f5c8eeab3c46e5cdba72f5027a0e6b833de024df"
 ```
 
@@ -112,7 +120,7 @@ Web 宿主由本机安装的 `dsh` 启动，要求 **dsh >= 0.2.1-rc.2**；**0.1
 # 安装到 web profile
 dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
-# 或 pin（0.1.3 payload 固定版本，等价当前分发分支尖端）
+# 或 pin（原 0.1.3，不含本次 Windows 修复；热修请用分发分支新 SHA）
 dsh plugin --profile web add "github:akirajoey/insuremo-dsh#f5c8eeab3c46e5cdba72f5027a0e6b833de024df"
 
 # 启动
@@ -315,7 +323,7 @@ Windows 在 `%USERPROFILE%\.dsh\profiles\<profile>\pnpm-workspace.yaml`）。
 # 主路径：分发分支根 spec（一条命令）
 dsh plugin --profile web add "github:akirajoey/insuremo-dsh#plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37"
 
-# 可复现：pin 到 0.1.3 payload（等价当前分发分支尖端）
+# 可复现：pin 到原 0.1.3（不含本次 Windows 修复；热修请用分发分支新 SHA）
 DESKTOP_DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 /usr/bin/env -u DSH_HOME "$DESKTOP_DSH" plugin --profile desktop add "github:akirajoey/insuremo-dsh#f5c8eeab3c46e5cdba72f5027a0e6b833de024df"
 

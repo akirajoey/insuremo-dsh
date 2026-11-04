@@ -31,6 +31,14 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 > `desktop`、`upgrade/*` 已退役。安装以本分发分支或候选 tgz 为准。
 > 本版的 Skills 安装/更新走 `npx @insuremo/skills-tool`，**需要网络**（registry 可达）。
 
+### 0.1.3 Windows containment 热修
+
+版本仍为 **0.1.3**（不升 0.1.4、不移动既有 tag）。本次热修对应源码 commit
+`2cd60d9c02cf41bcef8aa197d572e6fc7c2212db`：修复五处 workspace containment 在
+Windows 反斜杠路径下的误拒绝，已做 Win32 语义与 macOS 本机 fixture 回归；
+**Windows 现场 E2E 仍待用户测试**。此前 Windows Skills 安装复测不代表本次 ICI/Catalog
+修复已通过；dsh 仍为 `0.2.1-rc.2`，未声称 rc.5。
+
 ---
 
 ## 1. 前置条件
