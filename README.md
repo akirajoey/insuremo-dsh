@@ -6,21 +6,29 @@ iComposer Workbench —— 以标准 dsh 插件形态分发的 InsureMO 开发�
 
 本包是**预构建产物**：`lib/` 已经是纯 JS，安装时不编译、不装 npm 依赖、不需要编译器。
 
-发布形态是仓库中的 **payload 根分支**：`plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` 分支的**根目录就是本包**
-(`lib/`、`cordis.patch.yml`、`package.json`)，因此一条 `add` 即可安装，不需要子目录参数。
+官方展示元数据随包发布：`locale/zh.json` 与 `locale/en.json` 提供 `meta.title` /
+`meta.description`，`icon.svg` 是自有品牌图形的最小矢量图标；manifest 通过
+`./locale/*.json` 与 `./icon` 导出，`files` 白名单包含这些资源。
 
-### 发布版本（0.1.2）
+发布形态是分发分支 **`plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37`** 的 payload 根目录
+（该分支将快进到 0.1.3），或候选 tgz。该根目录就是本包（`lib/`、`cordis.patch.yml`、
+`package.json`）；`main` 保留源码，`git-dist/` 是其中的预构建副本，不作为安装 spec。
+
+### 发布版本（0.1.3）
 
 | 项 | 值 |
 |---|---|
-| Workbench | **0.1.2** |
+| Workbench | **0.1.3** |
 | 分发分支（安装用） | `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` |
-| 源码分支 | `release/workbench-0.1.2` |
+| 源码分支 | `main` |
 | 已验证组合（`testedWith`） | dsh `0.2.1-rc.2`、IMO `0.2.37`、`@insuremo/skills-tool` `1.1.2` |
 | 平台验证 | macOS Desktop/Web 隔离验证；Windows Skills 刷新、安装由用户复测通过 |
 
 > `testedWith` 是已验证组合，不是硬约束；唯一硬约束是包里的 `engines.dsh`
 > （`>=0.2.1-rc.2 <0.3.0-0`）。
+>
+> 保留 `main`（源码）与本分发分支；`plugin-dist`、`plugin-dist-0.2`、`release/*`、
+> `desktop`、`upgrade/*` 已退役。安装以本分发分支或候选 tgz 为准。
 > 本版的 Skills 安装/更新走 `npx @insuremo/skills-tool`，**需要网络**（registry 可达）。
 
 ---
@@ -256,8 +264,8 @@ Diagnose 可读取真实命令、退出码和拒绝原因。Windows 用户已复
 
 ## 9. 备注：`&path:` 子目录形式才需要授权
 
-如果改用 `github:akirajoey/insuremo-dsh#main&path:git-dist/icomposer-workbench` 这种
-**子目录**形式，pnpm 会对 git 子目录做隐式打包，首次 `add` 会 exit 1 并报
+主路径是分发分支根 spec，不需要这一步。**不要用 `main` 的 `git-dist/` 子目录形式**：
+它可能落后于分发分支（当前是 162–176 修复前的产物）。如确需 git 子目录形式，pnpm 会做隐式打包，首次 `add` 会 exit 1 并报
 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @icomposer/workbench@https://codeload.github.com/...`，
 同时 dsh 已把占位写进 profile 的 `pnpm-workspace.yaml`：
 
@@ -270,17 +278,18 @@ allowBuilds:
 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`；Windows：
 `%USERPROFILE%\.dsh\profiles\<profile>\pnpm-workspace.yaml`)。这是 pnpm 对 git 子目录
 依赖的一次性授权，不是本包在构建(它的 `package.json` **没有任何 scripts、没有
-devDependencies**)。**主路径(分支根 spec)不需要这一步。**
+devDependencies**)。**分发分支根 spec 与候选 tgz 都不需要这一步。**
 
 ## 10. 版本通道
 
-- `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` —— **本版（0.1.2）主路径**，对应 dsh >= 0.2.1-rc.2
-  (`engines.dsh` `>=0.2.1-rc.2 <0.3.0-0`)。
-- `1369a924…`（commit pin）—— 0.1.1 冻结快照，仍有 15 秒目录刷新上限；兼容通道现已推进至 0.1.2。
+- `plugin-dist-dsh-0.2.1-rc.2-imo-0.2.37` —— **本版（0.1.3）主路径**，对应 dsh >= 0.2.1-rc.2
+  (`engines.dsh` `>=0.2.1-rc.2 <0.3.0-0`)；该分支将快进到 0.1.3。
+- `main` —— 源码分支，不直接安装。
+- `1369a924…`（commit pin）—— 0.1.1 冻结快照，仍有 15 秒目录刷新上限；当前分发分支为 0.1.3。
 - `plugin-dist-0.2` —— 更早版本（0.1.0），**保留原 SHA 不覆盖**，需要回滚时 pin 它的原始 commit。
 - `plugin-dist` —— 0.1 宿主专用，**保留原 SHA**，新宿主上不要用。
-- 上述分支或 commit 都对应 **payload 根目录**；本次仅快进兼容通道并清理已合并临时分支，
-  不重写历史；更早的 `plugin-dist-0.2`、`plugin-dist` 分支不动。
+- 分发分支与历史分支/commit 都对应 payload 根目录；`main` 是源码。
+  保留 main 与本分发分支，其他分发分支已退役；更早的 `plugin-dist-0.2`、`plugin-dist` 分支不动。
 
 ## 11. 备选：离线 / 无网(clone + pack)
 
