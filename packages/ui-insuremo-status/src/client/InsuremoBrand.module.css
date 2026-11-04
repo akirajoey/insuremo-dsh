@@ -1,11 +1,12 @@
-/* TASK-169 minimal public-slot composition: the mark slot owns the globe and
-   the name slot owns only the lettering. The owned 312×76 PNG is displayed at
-   99×24; its globe occupies the left 112 source pixels, so the name crops that
-   fixed region instead of reading any host DOM. */
+/* TASK-175 hotfix: the mark slot owns the globe and the name slot owns only
+   the lettering. The 312×76 PNGs were replaced with text-only versions whose
+   first non-transparent column is 37 (globe region cleared to alpha 0). At the
+   99×24 render scale (99/312), the text starts 11.74px in and spans 87.26px,
+   so the container crops exactly that and shifts the image left. */
 .wordmark {
   display: block;
   flex: 0 0 auto;
-  width: 63.5px;
+  width: 87.26px;
   height: 24px;
   overflow: hidden;
 }
@@ -15,7 +16,7 @@
   width: 99px;
   height: 24px;
   max-width: none;
-  margin-left: -35.54px;
+  margin-left: -11.74px;
   object-fit: contain;
   image-rendering: auto;
 }

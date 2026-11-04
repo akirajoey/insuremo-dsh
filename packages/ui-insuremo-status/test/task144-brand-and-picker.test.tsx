@@ -82,8 +82,8 @@ describe("TASK-144 brand surfaces", () => {
     const source = readFileSync(resolve(process.cwd(), "src/client/InsuremoBrand.tsx"), "utf8");
     expect(source).not.toMatch(/parentElement|querySelector|closest|MutationObserver|document\./);
     const css = readFileSync(resolve(process.cwd(), "src/client/InsuremoBrand.module.css"), "utf8");
-    expect(css).toMatch(/\.wordmark \{[^}]*overflow: hidden/s);
-    expect(css).toMatch(/\.wordmark img \{[^}]*margin-left: -35\.54px/s);
+    expect(css).toMatch(/\.wordmark \{[^}]*width: 87\.26px;[^}]*overflow: hidden/s);
+    expect(css).toMatch(/\.wordmark img \{[^}]*margin-left: -11\.74px/s);
   });
 
   it("collapsed rail keeps the standalone globe at the slot's 24px size", () => {

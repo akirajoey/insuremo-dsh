@@ -112,6 +112,27 @@ describe("TASK-064 raster brand assets", () => {
     expect(light.pixel(201, 30)[3]).toBeLessThan(255);
   });
 
+  it("TASK-175 text-only wordmarks clear the globe region and start at column 37", async () => {
+    const files = await packageFiles();
+    for (const name of ["light", "dark"]) {
+      const image = png(await files.readFile(`assets/insuremo-wordmark-${name}.png`));
+      expect([image.width, image.height]).toEqual([312, 76]);
+      let first = -1;
+      let last = -1;
+      for (let x = 0; x < image.width; x += 1) {
+        for (let y = 0; y < image.height; y += 1) {
+          if (image.pixel(x, y)[3] === 0) continue;
+          if (first === -1) first = x;
+          last = x;
+        }
+      }
+      expect([first, last]).toEqual([37, 311]);
+      for (let x = 0; x < 37; x += 1) {
+        for (let y = 0; y < image.height; y += 1) expect(image.pixel(x, y)[3]).toBe(0);
+      }
+    }
+  });
+
   it("uses independent emitted PNG URLs, not inline data, and has no old traced assets", async () => {
     const files = await packageFiles();
     expect(files.packageJson.files).toEqual(expect.arrayContaining([
