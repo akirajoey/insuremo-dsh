@@ -4,12 +4,18 @@ Host/client Workbench plugin for the InsureMO sidebar status and brand
 identity. The footer driver stays hidden; brand identity is contributed only
 through the official `sidebar.brand.mark`, `sidebar.brand.name` and
 `conversation.hero.brand.mark` slots (no host DOM overlay or modification).
-The mark slot always draws the standalone globe; the name slot draws only the
-lettering by cropping the fixed globe region from the owned combined PNG; the
-hero keeps its own globe. These are independent public slots, so normal host
-spacing applies and the result is intentionally not a pixel-identical copy of
-the previous combined artwork. Black ink follows `body[data-ds-dark-theme]`
-immediately while the purple mark is retained.
+The wide row shows the complete owned logo through `sidebar.brand.name` at its
+historical 99×24 size. A per-apply signal shared by the two real slot inject
+faces lets the name occupant suppress `sidebar.brand.mark` while it is mounted;
+the collapsed rail (no name occupant) keeps the standalone globe in the mark
+slot, and the hero keeps its own globe. The light/dark PNGs switch through
+local CSS with no host DOM access or cropping.
+
+Known limits, documented rather than solved: with more than one `SidebarRoot`
+at once, any mounted name hides every mark from the same apply; the real App
+has one sidebar. On first paint the rail may show one frame without the globe
+before the name-mount signal settles (the default is empty mark, avoiding a
+wide-row double-globe flash).
 
 The workspace health decorator is also fail-closed: undetected workspaces get
 no host or glyphs; detected workspaces get the 16px iComposer, ICI Graph, and

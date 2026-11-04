@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { act } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
-import { fireEvent, within } from "@testing-library/react";
+import { fireEvent, render, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +10,7 @@ import { Button } from "../src/client/primitives/Button.tsx";
 import { LocaleRuntime } from "@deepseek-ai/dsh-client-locale/client";
 import { SlotTestRuntime, usePinnedBrowserLanguages } from "@deepseek-ai/dsh-client-test-runtime";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
-import { InsuremoBrandMark, InsuremoBrandName, InsuremoHeroBrandMark } from "../src/client/InsuremoBrand.tsx";
+import { BrandSignal, InsuremoBrandMark, InsuremoBrandName, InsuremoHeroBrandMark } from "../src/client/InsuremoBrand.tsx";
 import { apply, inject } from "../src/client/index.ts";
 import { zh } from "../src/client/locales.ts";
 
@@ -41,10 +41,11 @@ function mount(node: ReactNode): { container: HTMLDivElement; unmount: () => voi
 
 /** The official wide identity row, in both host shapes. */
 function wideRow(as: "span" | "button"): ReactNode {
+  const signal = new BrandSignal();
   const identity = (
     <span className="brandIdentity">
-      <span className="brandMark"><InsuremoBrandMark size={24} /></span>
-      <span className="brandName"><InsuremoBrandName /></span>
+      <span className="brandMark"><InsuremoBrandMark size={24} brandSignal={signal} /></span>
+      <span className="brandName"><InsuremoBrandName brandSignal={signal} /></span>
     </span>
   );
   return as === "span"
@@ -53,9 +54,10 @@ function wideRow(as: "span" | "button"): ReactNode {
 }
 
 /** The official collapsed-rail toggle: one member of a button, panel icon included. */
+const railSignal = new BrandSignal();
 const railRow = (
   <button type="button" className="iconButton toggle" aria-label="Expand sidebar">
-    <span className="railMark"><InsuremoBrandMark size={24} /></span>
+    <span className="railMark"><InsuremoBrandMark size={24} brandSignal={railSignal} /></span>
     <svg viewBox="0 0 16 16" aria-hidden="true" />
   </button>
 );
@@ -64,16 +66,16 @@ describe("TASK-144 brand surfaces", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
   afterEach(() => { document.body.innerHTML = ""; });
 
-  it("expanded identity row on macOS (window-drag span) renders one mark globe and text-only lettering", () => {
+  it("expanded identity row on macOS (window-drag span) renders the complete logo without a separate mark", () => {
     const view = mount(wideRow("span"));
-    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(1);
+    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(0);
     expect(view.container.querySelectorAll('img[src*="insuremo-wordmark"]')).toHaveLength(2);
     view.unmount();
   });
 
-  it("expanded identity row elsewhere (New Session button) renders the same independent slots", () => {
+  it("expanded identity row elsewhere (New Session button) renders the same complete logo", () => {
     const view = mount(wideRow("button"));
-    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(1);
+    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(0);
     expect(view.container.querySelectorAll('img[src*="insuremo-wordmark"]')).toHaveLength(2);
     view.unmount();
   });
@@ -82,14 +84,31 @@ describe("TASK-144 brand surfaces", () => {
     const source = readFileSync(resolve(process.cwd(), "src/client/InsuremoBrand.tsx"), "utf8");
     expect(source).not.toMatch(/parentElement|querySelector|closest|MutationObserver|document\./);
     const css = readFileSync(resolve(process.cwd(), "src/client/InsuremoBrand.module.css"), "utf8");
-    expect(css).toMatch(/\.wordmark \{[^}]*width: 87\.26px;[^}]*overflow: hidden/s);
-    expect(css).toMatch(/\.wordmark img \{[^}]*margin-left: -11\.74px/s);
+    expect(css).toMatch(/\.wordmark \{[^}]*width: 99px;/s);
+    expect(css).not.toContain("margin-left");
+    expect(css).not.toMatch(/\.wordmark \{[^}]*overflow: hidden/s);
   });
 
-  it("collapsed rail keeps the standalone globe at the slot's 24px size", () => {
+  it("the name mount signal suppresses the mark globe and restores it on unmount", async () => {
+    const signal = new BrandSignal();
+    const view = render(<><InsuremoBrandMark brandSignal={signal} /><InsuremoBrandName brandSignal={signal} /></>);
+    expect(view.container.querySelector("[data-icomposer-brand-mark]")).toBeNull();
+    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(0);
+    view.rerender(<InsuremoBrandMark brandSignal={signal} />);
+    await vi.waitFor(() => {
+      expect(view.container.querySelector("[data-icomposer-brand-mark]")).not.toBeNull();
+    });
+    expect(view.container.querySelectorAll(GLOBE)).toHaveLength(1);
+    view.unmount();
+  });
+
+  it("collapsed rail keeps the standalone globe at the slot's 24px size", async () => {
     const view = mount(railRow);
-    const globes = view.container.querySelectorAll<HTMLImageElement>(GLOBE);
-    expect(globes).toHaveLength(1);
+    const globes = await vi.waitFor(() => {
+      const found = view.container.querySelectorAll<HTMLImageElement>(GLOBE);
+      expect(found).toHaveLength(1);
+      return found;
+    });
     expect(globes[0]?.getAttribute("width")).toBe("24");
     view.unmount();
   });

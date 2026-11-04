@@ -112,7 +112,7 @@ describe("TASK-064 raster brand assets", () => {
     expect(light.pixel(201, 30)[3]).toBeLessThan(255);
   });
 
-  it("TASK-175 text-only wordmarks clear the globe region and start at column 37", async () => {
+  it("TASK-176 combined wordmarks keep the globe at the left edge", async () => {
     const files = await packageFiles();
     for (const name of ["light", "dark"]) {
       const image = png(await files.readFile(`assets/insuremo-wordmark-${name}.png`));
@@ -126,10 +126,8 @@ describe("TASK-064 raster brand assets", () => {
           last = x;
         }
       }
-      expect([first, last]).toEqual([37, 311]);
-      for (let x = 0; x < 37; x += 1) {
-        for (let y = 0; y < image.height; y += 1) expect(image.pixel(x, y)[3]).toBe(0);
-      }
+      expect([first, last]).toEqual([0, 311]);
+      expect(image.pixel(30, 1)).toEqual([119, 122, 242, 255]);
     }
   });
 

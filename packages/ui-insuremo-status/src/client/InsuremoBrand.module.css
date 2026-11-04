@@ -1,22 +1,18 @@
-/* TASK-175 hotfix: the mark slot owns the globe and the name slot owns only
-   the lettering. The 312×76 PNGs were replaced with text-only versions whose
-   first non-transparent column is 37 (globe region cleared to alpha 0). At the
-   99×24 render scale (99/312), the text starts 11.74px in and spans 87.26px,
-   so the container crops exactly that and shifts the image left. */
+/* TASK-176: the name slot renders the complete combined wordmark (globe +
+   lettering) at its historical 99×24 size. The mark slot is suppressed while
+   this occupant is mounted, so the wide row shows one logo and the collapsed
+   rail uses the standalone globe. No host DOM or cropping is involved. */
 .wordmark {
   display: block;
   flex: 0 0 auto;
-  width: 87.26px;
+  width: 99px;
   height: 24px;
-  overflow: hidden;
 }
 
 .wordmark img {
   display: block;
   width: 99px;
   height: 24px;
-  max-width: none;
-  margin-left: -11.74px;
   object-fit: contain;
   image-rendering: auto;
 }

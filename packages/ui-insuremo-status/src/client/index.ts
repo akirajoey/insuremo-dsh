@@ -7,7 +7,7 @@ import { WorkspaceHealth } from "./WorkspaceHealth.tsx";
 import { WorkspaceAwareProfilePicker } from "./ProfilePicker.tsx";
 import { PickerOverlayController } from "./PickerOverlayController.ts";
 import { PickerOverlay } from "./PickerOverlay.tsx";
-import { InsuremoBrandMark, InsuremoBrandName, InsuremoHeroBrandMark } from "./InsuremoBrand.tsx";
+import { BrandSignal, InsuremoBrandMark, InsuremoBrandName, InsuremoHeroBrandMark } from "./InsuremoBrand.tsx";
 import { en, zh, type InsuremoStatusLocaleKey } from "./locales.ts";
 
 export type { StatusBadgeProps } from "./StatusBadge.tsx";
@@ -43,6 +43,11 @@ export function apply(ctx: Context): void {
 	const pickerOverlay = new PickerOverlayController();
 	const pickerFace = () => ({ pickerOverlay });
 	ctx.effect(() => () => { pickerOverlay.dispose(); }, "ui-insuremo-status: picker controller");
+	// One brand signal per apply, shared by the two real brand-slot inject
+	// faces. The name occupant suppresses the mark only within this apply.
+	const brandSignal = new BrandSignal();
+	const brandFace = () => ({ brandSignal });
+	ctx.effect(() => () => { brandSignal.dispose(); }, "ui-insuremo-status: brand signal");
 	ctx.effect(
 		() => ctx.locale.register(NS, { zh, en }),
 		"ui-insuremo-status: dictionaries",
@@ -57,11 +62,11 @@ export function apply(ctx: Context): void {
 	ctx.slots.inject("sidebar.brand.name", () =>
 		ctx.slots.inject("conversation.hero.brand.mark", function* () {
 			yield ctx.slots.register(
-				{ name: "sidebar.brand.mark", priority: -1 },
+				{ name: "sidebar.brand.mark", priority: -1, inject: brandFace },
 				InsuremoBrandMark,
 			);
 			yield ctx.slots.register(
-				{ name: "sidebar.brand.name", priority: -1 },
+				{ name: "sidebar.brand.name", priority: -1, inject: brandFace },
 				InsuremoBrandName,
 			);
 			// The hero is a different surface: it never shares a row with the
